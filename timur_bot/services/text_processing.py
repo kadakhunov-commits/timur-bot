@@ -62,6 +62,12 @@ def sanitize_reply_text(raw: str) -> str:
         text,
         flags=re.IGNORECASE,
     )
+    text = re.sub(
+        r"\s*лимит\s+free-тарифа\s+на\s+сегодня,\s*апгрейднись\s*$",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
     text = text.lower()
     text = re.sub("[\U00010000-\U0010ffff]", "", text)
     if len(text) > 400:

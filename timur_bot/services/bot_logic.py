@@ -1140,6 +1140,12 @@ async def send_reply_with_style(
     except Exception as e:
         logger.error("Ошибка проверки водяного знака биллинга: %s", e)
 
+    # Вторая очистка после возможной инъекции watermark-текста.
+    reply_text = sanitize_reply_text(reply_text)
+    if not reply_text:
+        logger.info("Ответ после post-watermark очистки пустой, пропускаю отправку")
+        return
+
     use_meme = random.random() < MEM_REPLY_CHANCE and (MEMES or YOUTUBE_LINKS)
 
     if use_meme:
