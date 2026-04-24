@@ -39,6 +39,15 @@ BLOCKED_CALLBACK_PATTERNS = (
     re.compile(r"сообщени[яй].*(сн[её]с|удал[ие]).*кадыр", re.I),
     re.compile(r"(сн[её]с|удал[ие]).*сообщени[яй].*кадыр", re.I),
 )
+ROAST_TRIGGER_PATTERNS = (
+    re.compile(r"поджар", re.I),
+    re.compile(r"прожар", re.I),
+    re.compile(r"обосри", re.I),
+    re.compile(r"разьеб", re.I),
+    re.compile(r"разъеб", re.I),
+    re.compile(r"уничтож", re.I),
+    re.compile(r"жестк.*подкол", re.I),
+)
 
 
 def _is_blocked_callback_text(text: str) -> bool:
@@ -46,6 +55,13 @@ def _is_blocked_callback_text(text: str) -> bool:
     if not clean:
         return False
     return any(p.search(clean) for p in BLOCKED_CALLBACK_PATTERNS)
+
+
+def _wants_roast(text: str) -> bool:
+    clean = re.sub(r"\s+", " ", (text or "").strip().lower())
+    if not clean:
+        return False
+    return any(p.search(clean) for p in ROAST_TRIGGER_PATTERNS)
 
 
 def ensure_humor_schema(chat_mem: Dict[str, Any]) -> Dict[str, Any]:
@@ -263,10 +279,11 @@ def choose_humor_plan(
         mode = "serious"
     else:
         bit = select_joke_bit(chat_mem, text)
+        roast_requested = _wants_roast(text)
         candidates = {
             "deadpan": 1.2 + _mode_score(stats, "deadpan"),
             "absurd_literal": 0.9 + _mode_score(stats, "absurd_literal"),
-            "roast_user": 0.35 + _mode_score(stats, "roast_user"),
+            "roast_user": (0.5 if roast_requested else -0.3) + _mode_score(stats, "roast_user"),
             "parody": 0.4 + _mode_score(stats, "parody"),
             "callback": (0.75 if bit else 0.1) + _mode_score(stats, "callback"),
         }
@@ -277,13 +294,15 @@ def choose_humor_plan(
         if bit and _tokens(text).intersection(_tokens(str(bit.get("text", "")))):
             candidates["callback"] += 0.6
         mode = max(candidates.items(), key=lambda x: (x[1], x[0]))[0]
+        if mode == "roast_user" and not roast_requested:
+            mode = "deadpan"
 
     bit = None if mode == "serious" else select_joke_bit(chat_mem, text)
     examples = [] if mode == "serious" else select_funny_examples(chat_mem, text, limit=2)
     instruction_by_mode = {
         "deadpan": "сухая короткая добивка, будто это очевидный провал собеседника",
         "callback": "локальная отсылка к выбранному bit/fact, без объяснения шутки",
-        "roast_user": "дружеская прожарка автора через ситуацию, а не прямое оскорбление",
+        "roast_user": "легкий дружеский подкол без унижений, только по запросу на прожарку",
         "absurd_literal": "абсурдно-буквальная трактовка сообщения",
         "parody": "легко передразни вайб автора, не копируя длинно",
         "serious": "без прожарки, ответь по-человечески коротко",
@@ -320,6 +339,7 @@ def format_humor_prompt(plan: Dict[str, Any]) -> str:
             lines.append(f"  удачный ответ: {example.get('good_reply')}")
     lines.append("- не объясняй шутку и не делай стендап-монолог")
     lines.append("- не называй человека тупым/дебилом/ничтожным, смеши через ситуацию")
+    lines.append("- не переходи на личные наезды, психоанализ и унижение интеллекта")
     return "\n".join(lines)
 
 

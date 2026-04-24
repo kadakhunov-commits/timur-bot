@@ -148,6 +148,6 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
         default_system_prompt=str(persona.get("default_system_prompt", "")).strip(),
         default_style_settings=str(defaults.get("style_settings", "")),
         default_bio=str(defaults.get("bio", "")),
-        default_toxicity_level=int(defaults.get("toxicity_level", 82)),
+        default_toxicity_level=int(defaults.get("toxicity_level", 45)),
         default_active_mode=active_mode,
     )

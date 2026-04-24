@@ -251,7 +251,7 @@ def _default_memory(system_prompt: str = "") -> Dict[str, Any]:
             "system_prompt": system_prompt,
             "style_settings": "",
             "bio": "",
-            "toxicity_level": 82,
+            "toxicity_level": 45,
             "active_mode": "default",
             "mode_overrides": {},
             "last_random_story_ts": None,
