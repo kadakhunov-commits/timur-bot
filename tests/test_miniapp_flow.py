@@ -37,3 +37,12 @@ def test_apply_miniapp_admin_config_rejects_unknown_mode(monkeypatch: pytest.Mon
         assert "unknown mode" in str(e)
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_build_tts_input_keeps_only_bracket_directives() -> None:
+    text = runtime.build_tts_input(
+        "брат ща скину голосовое",
+        "[slightly raspy] [casual, confident] говори как живой собеседник",
+    )
+
+    assert text == "[slightly raspy] [casual, confident]\nбрат ща скину голосовое"

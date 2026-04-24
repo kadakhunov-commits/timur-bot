@@ -400,7 +400,10 @@
       try {
         const normalized = encoded.replace(/-/g, "+").replace(/_/g, "/");
         const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
-        return JSON.parse(atob(padded));
+        const binary = atob(padded);
+        const bytes = Uint8Array.from(binary, ch => ch.charCodeAt(0));
+        const decoded = new TextDecoder("utf-8").decode(bytes);
+        return JSON.parse(decoded);
       } catch (_) {
         return null;
       }

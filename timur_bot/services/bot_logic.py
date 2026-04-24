@@ -905,6 +905,14 @@ def split_into_chain(text: str) -> List[str]:
     return split_into_chain_service(text)
 
 
+def build_tts_input(reply_text: str, style_prompt: str) -> str:
+    directives = re.findall(r"\[[^\]]+\]", style_prompt or "")
+    prefix = " ".join(part.strip() for part in directives if part.strip()).strip()
+    if prefix:
+        return f"{prefix}\n{reply_text}"
+    return reply_text
+
+
 # =========================
 # ОТПРАВКА
 # =========================
@@ -959,9 +967,7 @@ async def send_reply_with_style(
         if len(voice_text) > MAX_VOICE_CHARS:
             voice_text = voice_text[:MAX_VOICE_CHARS].rsplit(" ", 1)[0].strip()
         if voice_text:
-            tts_text = voice_text
-            if VOICE_STYLE_PROMPT:
-                tts_text = f"{VOICE_STYLE_PROMPT}\n{voice_text}"
+            tts_text = build_tts_input(voice_text, VOICE_STYLE_PROMPT)
             try:
                 voice_ogg = await asyncio.to_thread(
                     synthesize_ogg_opus_from_text,
