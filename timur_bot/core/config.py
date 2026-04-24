@@ -84,6 +84,8 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
     telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
     openai_base_url = os.getenv("OPENAI_BASE_URL", "").strip()
+    openai_text_model = os.getenv("OPENAI_TEXT_MODEL", "").strip()
+    openai_vision_model = os.getenv("OPENAI_VISION_MODEL", "").strip()
     if not telegram_bot_token:
         raise ConfigError("TELEGRAM_BOT_TOKEN not set in .env")
     if not openai_api_key:
@@ -111,6 +113,9 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
     memory_path_env = os.getenv("MEMORY_PATH", "").strip()
     billing_path_env = os.getenv("BILLING_PATH", "").strip()
 
+    memory_path_env = os.getenv("MEMORY_PATH", "").strip()
+    billing_path_env = os.getenv("BILLING_PATH", "").strip()
+
     return AppConfig(
         base_dir=root,
         memory_path=Path(memory_path_env) if memory_path_env else root / "memory.json",
@@ -119,8 +124,8 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
         openai_api_key=openai_api_key,
         openai_base_url=openai_base_url,
         owner_id=int(runtime.get("owner_id", 428469927)),
-        text_model=str(models.get("text", "gpt-4o-mini")),
-        vision_model=str(models.get("vision", "gpt-4o-mini")),
+        text_model=openai_text_model or str(models.get("text", "gpt-4o-mini")),
+        vision_model=openai_vision_model or str(models.get("vision", "gpt-4o-mini")),
         max_history_per_chat=int(limits.get("max_history_per_chat", 100)),
         max_log_per_chat=int(limits.get("max_log_per_chat", 1000)),
         max_user_samples=int(limits.get("max_user_samples", 20)),
