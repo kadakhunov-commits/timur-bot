@@ -26,6 +26,17 @@ from timur_bot.services.text_processing import (
     split_into_chain as split_into_chain_service,
     top_items as top_items_service,
 )
+from timur_bot.services.humor import (
+    add_joke_bit,
+    apply_feedback,
+    choose_humor_plan,
+    classify_reactions,
+    classify_text_feedback,
+    ensure_humor_schema,
+    format_bits,
+    format_humor_prompt,
+    record_bot_output,
+)
 
 # =========================
 # БАЗОВАЯ НАСТРОЙКА
@@ -73,6 +84,10 @@ EN_STOPWORDS = APP_CONFIG.en_stopwords
 PROFANITY_MARKERS = APP_CONFIG.profanity_markers
 ARCHETYPE_LEXICON = APP_CONFIG.archetype_lexicon
 PERSONA_MODES = APP_CONFIG.persona_modes
+RECENT_FACT_WINDOW_DAYS = 14
+MAX_RECENT_MESSAGES = 24
+MAX_RECENT_FACTS = 120
+MAX_LONG_FACTS = 400
 
 # =========================
 # ЛОГИ
@@ -121,7 +136,116 @@ def _ensure_chat_schema(chat: Dict[str, Any]) -> Dict[str, Any]:
     chat.setdefault("participants", {})
     chat.setdefault("user_relations", {})
     chat.setdefault("topic_edges", {})
+    layers = chat.setdefault("memory_layers", {})
+    layers.setdefault("recent_messages", [])
+    layers.setdefault("recent_facts", [])
+    layers.setdefault("long_facts", [])
+    layers.setdefault("summary", {"chat": "", "updated_at": None})
+    layers.setdefault("imported_message_keys", [])
+    ensure_humor_schema(chat)
     return chat
+
+
+def _parse_iso_ts(ts: str) -> datetime | None:
+    raw = (ts or "").strip()
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+
+
+def _norm_fact_key(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "").strip().lower())
+
+
+def _upsert_long_fact(chat_mem: Dict[str, Any], fact_text: str, ts: str, boost: float = 1.0) -> None:
+    layers = chat_mem.setdefault("memory_layers", {})
+    long_facts = layers.setdefault("long_facts", [])
+    key = _norm_fact_key(fact_text)
+    if not key:
+        return
+
+    for fact in long_facts:
+        if _norm_fact_key(str(fact.get("text", ""))) == key:
+            fact["strength"] = float(fact.get("strength", 0.0)) + float(boost)
+            fact["last_seen_ts"] = ts
+            break
+    else:
+        long_facts.append(
+            {
+                "text": fact_text,
+                "last_seen_ts": ts,
+                "strength": float(boost),
+            }
+        )
+
+    long_facts.sort(key=lambda x: (-float(x.get("strength", 0.0)), str(x.get("text", ""))))
+    if len(long_facts) > MAX_LONG_FACTS:
+        del long_facts[MAX_LONG_FACTS:]
+
+
+def _compact_memory_layers(chat_mem: Dict[str, Any], now_dt: datetime | None = None) -> None:
+    layers = chat_mem.setdefault("memory_layers", {})
+    recent_messages = layers.setdefault("recent_messages", [])
+    recent_facts = layers.setdefault("recent_facts", [])
+    now = now_dt or datetime.utcnow()
+
+    if len(recent_messages) > MAX_RECENT_MESSAGES:
+        del recent_messages[:-MAX_RECENT_MESSAGES]
+
+    kept_facts = []
+    for fact in recent_facts:
+        ts = _parse_iso_ts(str(fact.get("ts", "")))
+        if not ts:
+            continue
+        age_days = (now - ts).days
+        if age_days > RECENT_FACT_WINDOW_DAYS:
+            _upsert_long_fact(
+                chat_mem,
+                fact_text=str(fact.get("text", "")),
+                ts=str(fact.get("ts", "")),
+                boost=float(fact.get("weight", 1.0)),
+            )
+            continue
+        kept_facts.append(fact)
+
+    kept_facts.sort(key=lambda x: str(x.get("ts", "")))
+    if len(kept_facts) > MAX_RECENT_FACTS:
+        kept_facts = kept_facts[-MAX_RECENT_FACTS:]
+    layers["recent_facts"] = kept_facts
+
+
+def _update_memory_layers_with_message(chat_mem: Dict[str, Any], rec: Dict[str, Any]) -> None:
+    layers = chat_mem.setdefault("memory_layers", {})
+    recent_messages = layers.setdefault("recent_messages", [])
+    recent_facts = layers.setdefault("recent_facts", [])
+
+    recent_messages.append(
+        {
+            "user_id": rec.get("user_id"),
+            "name": rec.get("name", ""),
+            "username": rec.get("username", ""),
+            "text": rec.get("text", ""),
+            "ts": rec.get("ts", ""),
+            "message_id": rec.get("message_id"),
+        }
+    )
+    if len(recent_messages) > MAX_RECENT_MESSAGES:
+        del recent_messages[:-MAX_RECENT_MESSAGES]
+
+    text = str(rec.get("text", "")).strip()
+    if text:
+        recent_facts.append(
+            {
+                "text": f"{rec.get('name') or rec.get('username') or rec.get('user_id')}: {text}",
+                "ts": rec.get("ts", ""),
+                "weight": 1.0,
+            }
+        )
+
+    _compact_memory_layers(chat_mem)
 
 
 def load_memory() -> Dict[str, Any]:
@@ -388,6 +512,8 @@ def update_memory_with_message(memory: Dict[str, Any], message: Message) -> None
     if len(log) > MAX_LOG_PER_CHAT:
         log.pop(0)
 
+    _update_memory_layers_with_message(chat_mem, rec)
+
     if text:
         keywords = extract_keywords(text)
         _update_participant_portrait(chat_mem, message, text, keywords)
@@ -595,27 +721,43 @@ def select_user_profile(memory: Dict[str, Any], user_id: int) -> str:
 
 def select_chat_history_for_context(memory: Dict[str, Any], chat_id: int) -> List[Dict[str, Any]]:
     chat_mem = get_chat_mem(memory, chat_id)
+    layers = chat_mem.get("memory_layers", {})
+    recent = layers.get("recent_messages", [])
+    if isinstance(recent, list) and recent:
+        return recent[-12:]
     history = chat_mem.get("history", [])
     return history[-12:]
 
 
-def select_old_random_memories(memory: Dict[str, Any], chat_id: int) -> List[str]:
+def select_recent_facts_for_context(memory: Dict[str, Any], chat_id: int) -> List[str]:
     chat_mem = get_chat_mem(memory, chat_id)
-    log = chat_mem.get("log", [])
-
-    if len(log) < 20:
+    layers = chat_mem.get("memory_layers", {})
+    recent_facts = layers.get("recent_facts", [])
+    if not isinstance(recent_facts, list) or not recent_facts:
         return []
 
-    sample = random.sample(log, k=min(3, len(log)))
-    lines = []
+    def _score(fact: Dict[str, Any]) -> Tuple[float, str]:
+        ts = _parse_iso_ts(str(fact.get("ts", "")))
+        age_days = (datetime.utcnow() - ts).days if ts else RECENT_FACT_WINDOW_DAYS
+        recency_bonus = max(0.0, (RECENT_FACT_WINDOW_DAYS - age_days) / RECENT_FACT_WINDOW_DAYS)
+        return (float(fact.get("weight", 1.0)) + recency_bonus, str(fact.get("text", "")))
 
-    for rec in sample:
-        text = rec.get("text", "")
-        if text:
-            name = rec.get("name") or rec.get("username") or str(rec.get("user_id"))
-            lines.append(f"{name}: {text}")
+    ranked = sorted(recent_facts, key=_score, reverse=True)
+    return [str(x.get("text", "")) for x in ranked[:4] if str(x.get("text", "")).strip()]
 
-    return lines
+
+def select_old_random_memories(memory: Dict[str, Any], chat_id: int) -> List[str]:
+    chat_mem = get_chat_mem(memory, chat_id)
+    layers = chat_mem.get("memory_layers", {})
+    long_facts = layers.get("long_facts", [])
+    if not isinstance(long_facts, list) or not long_facts:
+        return []
+
+    top = sorted(
+        long_facts,
+        key=lambda x: (-float(x.get("strength", 0.0)), str(x.get("text", ""))),
+    )[:3]
+    return [str(f.get("text", "")).strip() for f in top if str(f.get("text", "")).strip()]
 
 
 def _top_items(counter: Dict[str, Any], n: int = 3) -> List[Tuple[str, float]]:
@@ -698,15 +840,33 @@ def build_association_context(memory: Dict[str, Any], chat_id: int, focus_user_i
     return "\n".join(lines)
 
 
-def build_chat_messages(memory: Dict[str, Any], message: Message) -> List[Dict[str, Any]]:
+def build_humor_plan(memory: Dict[str, Any], message: Message) -> Dict[str, Any]:
+    tg_user = message.from_user
+    assert tg_user is not None
+    chat_mem = get_chat_mem(memory, message.chat_id)
+    return choose_humor_plan(
+        chat_mem,
+        text=_extract_message_text(message),
+        user_id=tg_user.id,
+        user_name=tg_user.first_name or tg_user.username or str(tg_user.id),
+    )
+
+
+def build_chat_messages(
+    memory: Dict[str, Any],
+    message: Message,
+    humor_plan: Dict[str, Any] | None = None,
+) -> List[Dict[str, Any]]:
     tg_user = message.from_user
     assert tg_user is not None
 
     system_prompt = get_system_prompt(memory)
     user_profile = select_user_profile(memory, tg_user.id)
     chat_history = select_chat_history_for_context(memory, message.chat_id)
+    recent_facts = select_recent_facts_for_context(memory, message.chat_id)
     random_memories = select_old_random_memories(memory, message.chat_id)
     association_context = build_association_context(memory, message.chat_id, tg_user.id)
+    humor_plan = humor_plan or build_humor_plan(memory, message)
 
     hist_lines = []
     for rec in chat_history:
@@ -746,11 +906,18 @@ def build_chat_messages(memory: Dict[str, Any], message: Message) -> List[Dict[s
     if association_context:
         full_system += "\n\nкарта персонажей и ассоциаций:\n" + association_context
 
+    full_system += "\n\n" + format_humor_prompt(humor_plan) + "\n"
+
     if hist_lines:
         full_system += "\n\nпоследние сообщения в чате:\n" + "\n".join(hist_lines)
 
+    if recent_facts:
+        full_system += "\n\nнедавние факты беседы (приоритет):\n"
+        for line in recent_facts:
+            full_system += f"- {line}\n"
+
     if random_memories:
-        full_system += "\n\nстарые моменты чата, к которым можно сделать отсылку:\n"
+        full_system += "\n\nдалекие факты беседы (редкие точечные отсылки):\n"
         for line in random_memories:
             full_system += f"- {line}\n"
 
@@ -782,7 +949,13 @@ async def call_openai_text(messages: List[Dict[str, Any]]) -> str:
         return ""
 
 
-async def call_openai_vision(memory: Dict[str, Any], message: Message, image_b64: str) -> str:
+async def call_openai_vision(
+    memory: Dict[str, Any],
+    message: Message,
+    image_b64: str,
+    humor_plan: Dict[str, Any] | None = None,
+) -> str:
+    humor_plan = humor_plan or build_humor_plan(memory, message)
     text_context = (
         "тебе прислали фотку в чате. "
         "сделай короткую смешную токсичную реакцию в стиле дружеской прожарки, "
@@ -801,6 +974,7 @@ async def call_openai_vision(memory: Dict[str, Any], message: Message, image_b64
 
     if hist_lines:
         text_context += "\n\nпоследние сообщения в чате:\n" + "\n".join(hist_lines)
+    text_context += "\n\n" + format_humor_prompt(humor_plan)
 
     msg_content = [
         {"type": "text", "text": text_context},
@@ -842,6 +1016,56 @@ def split_into_chain(text: str) -> List[str]:
     return split_into_chain_service(text)
 
 
+def _apply_feedback_to_reply(memory: Dict[str, Any], message: Message, rating: str, source: str) -> bool:
+    if not message.reply_to_message:
+        return False
+    chat_mem = get_chat_mem(memory, message.chat_id)
+    user_id = message.from_user.id if message.from_user else None
+    ok = apply_feedback(
+        chat_mem,
+        message_id=message.reply_to_message.message_id,
+        rating=rating,
+        source=source,
+        user_id=user_id,
+    )
+    if ok:
+        save_memory(memory)
+    return ok
+
+
+async def _handle_text_feedback(update: Update, memory: Dict[str, Any]) -> bool:
+    message = update.effective_message
+    if not message or not message.reply_to_message:
+        return False
+    rating = classify_text_feedback(_extract_message_text(message))
+    if not rating:
+        return False
+    _apply_feedback_to_reply(memory, message, rating, source="reply_text")
+    return True
+
+
+async def reaction_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    del context
+    reaction = update.message_reaction
+    if not reaction:
+        return
+    rating = classify_reactions(reaction.new_reaction)
+    if not rating:
+        return
+    memory = load_memory()
+    chat_mem = get_chat_mem(memory, reaction.chat.id)
+    user_id = reaction.user.id if reaction.user else None
+    ok = apply_feedback(
+        chat_mem,
+        message_id=reaction.message_id,
+        rating=rating,
+        source="reaction",
+        user_id=user_id,
+    )
+    if ok:
+        save_memory(memory)
+
+
 # =========================
 # ОТПРАВКА
 # =========================
@@ -851,8 +1075,9 @@ async def send_reply_with_style(
     context: ContextTypes.DEFAULT_TYPE,
     memory: Dict[str, Any],
     reply_text: str,
+    humor_plan: Dict[str, Any] | None = None,
 ) -> None:
-    del context, memory
+    del context
     message = update.effective_message
 
     if not message:
@@ -878,11 +1103,14 @@ async def send_reply_with_style(
 
         if MEMES and (not YOUTUBE_LINKS or random.random() < 0.5):
             meme_url = random.choice(MEMES)
-            await message.reply_text(meme_url)
+            sent = await message.reply_text(meme_url)
         else:
             yt = random.choice(YOUTUBE_LINKS)
-            await message.reply_text(yt)
+            sent = await message.reply_text(yt)
 
+        chat_mem = get_chat_mem(memory, message.chat_id)
+        record_bot_output(chat_mem, message_id=sent.message_id, text=sent.text or "", plan=humor_plan)
+        save_memory(memory)
         return
 
     if random.random() < CHAIN_REPLY_CHANCE:
@@ -892,10 +1120,16 @@ async def send_reply_with_style(
             parts = [reply_text]
 
         for part in parts:
-            await message.reply_text(part)
+            sent = await message.reply_text(part)
+            chat_mem = get_chat_mem(memory, message.chat_id)
+            record_bot_output(chat_mem, message_id=sent.message_id, text=part, plan=humor_plan)
             await asyncio.sleep(random.uniform(0.2, 0.6))
     else:
-        await message.reply_text(reply_text)
+        sent = await message.reply_text(reply_text)
+        chat_mem = get_chat_mem(memory, message.chat_id)
+        record_bot_output(chat_mem, message_id=sent.message_id, text=reply_text, plan=humor_plan)
+
+    save_memory(memory)
 
 
 # =========================
@@ -1379,6 +1613,9 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if await _handle_admin_pending_text(update, context, memory):
         return
 
+    if await _handle_text_feedback(update, memory):
+        return
+
     logger.info(
         "Text from %s (%s) in chat %s: %s",
         message.from_user.id,
@@ -1395,10 +1632,11 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         logger.info("Decided not to reply")
         return
 
-    messages = build_chat_messages(memory, message)
+    humor_plan = build_humor_plan(memory, message)
+    messages = build_chat_messages(memory, message, humor_plan=humor_plan)
     reply_text = await call_openai_text(messages)
 
-    await send_reply_with_style(update, context, memory, reply_text)
+    await send_reply_with_style(update, context, memory, reply_text, humor_plan=humor_plan)
 
 
 async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1449,14 +1687,15 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     increase_vision_counters(memory, chat_id, user.id)
 
-    reply_text = await call_openai_vision(memory, message, image_b64)
+    humor_plan = build_humor_plan(memory, message)
+    reply_text = await call_openai_vision(memory, message, image_b64, humor_plan=humor_plan)
     reply_text = sanitize_reply_text(reply_text)
 
     if not reply_text:
         logger.info("Empty vision reply")
         return
 
-    await message.reply_text(reply_text)
+    await send_reply_with_style(update, context, memory, reply_text, humor_plan=humor_plan)
 
 
 # =========================
@@ -1954,6 +2193,56 @@ async def whois_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         lines.append("с кем чаще сцепляется: " + ", ".join(name for name, _ in rel[:4]))
 
     await message.reply_text("\n".join(lines))
+
+
+@owner_only
+async def bit_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    del context
+    message = update.message
+    if not message:
+        return
+    parts = (message.text or "").split(" ", 1)
+    if len(parts) < 2 or not parts[1].strip():
+        await message.reply_text("после /bit нужен текст прикола")
+        return
+    memory = load_memory()
+    chat_mem = get_chat_mem(memory, message.chat_id)
+    bit = add_joke_bit(chat_mem, parts[1].strip(), source="manual", weight=3.0)
+    save_memory(memory)
+    await message.reply_text(f"bit добавлен: {bit['text']}")
+
+
+@owner_only
+async def bits_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    del context
+    message = update.message
+    if not message:
+        return
+    memory = load_memory()
+    chat_mem = get_chat_mem(memory, message.chat_id)
+    await message.reply_text(format_bits(chat_mem))
+
+
+@owner_only
+async def funny_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    del context
+    message = update.message
+    if not message:
+        return
+    memory = load_memory()
+    ok = _apply_feedback_to_reply(memory, message, "funny", source="owner_command")
+    await message.reply_text("засчитал funny" if ok else "не нашел этот ответ в bot_outputs")
+
+
+@owner_only
+async def unfunny_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    del context
+    message = update.message
+    if not message:
+        return
+    memory = load_memory()
+    ok = _apply_feedback_to_reply(memory, message, "unfunny", source="owner_command")
+    await message.reply_text("засчитал unfunny" if ok else "не нашел этот ответ в bot_outputs")
 
 
 @owner_only
