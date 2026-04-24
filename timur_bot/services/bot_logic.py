@@ -8,13 +8,15 @@ import random
 import re
 import subprocess
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
+from zoneinfo import ZoneInfo
 
 from billing_system import BillingEngine, BillingError
 from openai import OpenAI
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
+from telegram.constants import ChatAction
 from telegram.ext import (
     ContextTypes,
 )
@@ -30,12 +32,10 @@ from timur_bot.services.text_processing import (
 from timur_bot.services.humor import (
     add_joke_bit,
     apply_feedback,
-    choose_humor_plan,
     classify_reactions,
     classify_text_feedback,
     ensure_humor_schema,
     format_bits,
-    format_humor_prompt,
     record_bot_output,
 )
 
@@ -89,17 +89,17 @@ RECENT_FACT_WINDOW_DAYS = 14
 MAX_RECENT_MESSAGES = 24
 MAX_RECENT_FACTS = 120
 MAX_LONG_FACTS = 400
-BLOCKED_MEMORY_PATTERNS = (
-    re.compile(r"мит[яи].*(сн[её]с|удал[ие]).*сообщ", re.IGNORECASE),
-    re.compile(r"сообщени[яй].*(сн[её]с|удал[ие]).*кадыр", re.IGNORECASE),
-    re.compile(r"(сн[её]с|удал[ие]).*сообщени[яй].*кадыр", re.IGNORECASE),
-)
 TOXIC_REPLY_PATTERNS = (
-    re.compile(r"память как у золотой рыбки", re.IGNORECASE),
-    re.compile(r"опять .*поумнич", re.IGNORECASE),
-    re.compile(r"лучше бы .*чем", re.IGNORECASE),
-    re.compile(r"\b(туп(ой|ая)|дебил|идиот|ничтож)\b", re.IGNORECASE),
+    re.compile(r"\b(дебил|идиот|туп(ой|ая)|ничтож|чмо|мразь)\b", re.IGNORECASE),
+    re.compile(r"\b(stupid|idiot|moron)\b", re.IGNORECASE),
 )
+PROCESSED_EVENT_KEYS_LIMIT = 400
+LIFE_STORY_LOG_LIMIT = 80
+LIFE_LOOP_INTERVAL_SECONDS = 60
+DEFAULT_LIFE_TIMEZONE = "Europe/Moscow"
+LONG_FACT_USAGE_TRACK_LIMIT = 600
+_INFLIGHT_EVENT_KEYS: set[str] = set()
+_LIFE_TASK: asyncio.Task[Any] | None = None
 
 # =========================
 # ЛОГИ
@@ -154,7 +154,49 @@ DEFAULT_SYSTEM_PROMPT = APP_CONFIG.default_system_prompt
 # ПАМЯТЬ
 # =========================
 
+
+def _default_life_config() -> Dict[str, Any]:
+    return {
+        "enabled": True,
+        "timezone": DEFAULT_LIFE_TIMEZONE,
+        "daily_target": 3,
+        "quiet_hours": {"start": "00:00", "end": "10:00"},
+        "cooldown_per_chat_minutes": 360,
+        "slots_date": "",
+        "daily_slots": [],
+        "sent_slots": [],
+        "chat_last_emit": {},
+        "story_log": [],
+        "last_story_id": 0,
+        "last_emit_ts": None,
+        "last_emit_chat_id": None,
+    }
+
+
+def _ensure_life_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    life = cfg.setdefault("life", {})
+    defaults = _default_life_config()
+    for key, value in defaults.items():
+        if key == "quiet_hours":
+            quiet = life.setdefault("quiet_hours", {})
+            quiet.setdefault("start", value["start"])
+            quiet.setdefault("end", value["end"])
+            continue
+        if key in {"daily_slots", "sent_slots", "story_log"}:
+            current = life.get(key)
+            if not isinstance(current, list):
+                life[key] = list(value)
+            continue
+        if key == "chat_last_emit":
+            current = life.get(key)
+            if not isinstance(current, dict):
+                life[key] = dict(value)
+            continue
+        life.setdefault(key, value)
+    return life
+
 def default_memory() -> Dict[str, Any]:
+    default_life = _default_life_config()
     return {
         "chats": {},
         "users": {},
@@ -167,6 +209,7 @@ def default_memory() -> Dict[str, Any]:
             "mode_overrides": {},
             "last_random_story_ts": None,
             "vision_usage": {},
+            "life": default_life,
         },
     }
 
@@ -184,6 +227,7 @@ def _ensure_chat_schema(chat: Dict[str, Any]) -> Dict[str, Any]:
     layers.setdefault("long_facts", [])
     layers.setdefault("summary", {"chat": "", "updated_at": None})
     layers.setdefault("imported_message_keys", [])
+    layers.setdefault("processed_event_keys", [])
     ensure_humor_schema(chat)
     return chat
 
@@ -309,6 +353,7 @@ def load_memory() -> Dict[str, Any]:
         cfg.setdefault("mode_overrides", {})
         cfg.setdefault("last_random_story_ts", None)
         cfg.setdefault("vision_usage", {})
+        _ensure_life_config(cfg)
 
         for _, chat in data["chats"].items():
             _ensure_chat_schema(chat)
@@ -389,6 +434,187 @@ def _prune_counter_dict(counter: Dict[str, Any], limit: int) -> Dict[str, Any]:
 def _extract_message_text(message: Message) -> str:
     return (message.text or message.caption or "").strip()
 
+
+def _make_event_key(kind: str, chat_id: int, message_id: int) -> str:
+    return f"{kind}:{chat_id}:{message_id}"
+
+
+def _try_acquire_inflight_event(event_key: str) -> bool:
+    if event_key in _INFLIGHT_EVENT_KEYS:
+        return False
+    _INFLIGHT_EVENT_KEYS.add(event_key)
+    return True
+
+
+def _release_inflight_event(event_key: str) -> None:
+    _INFLIGHT_EVENT_KEYS.discard(event_key)
+
+
+def _is_processed_event(chat_mem: Dict[str, Any], event_key: str) -> bool:
+    layers = chat_mem.get("memory_layers", {})
+    processed = layers.get("processed_event_keys", [])
+    return isinstance(processed, list) and event_key in processed
+
+
+def _mark_processed_event(chat_mem: Dict[str, Any], event_key: str) -> None:
+    layers = chat_mem.setdefault("memory_layers", {})
+    processed = layers.setdefault("processed_event_keys", [])
+    if not isinstance(processed, list):
+        processed = []
+        layers["processed_event_keys"] = processed
+    if event_key in processed:
+        return
+    processed.append(event_key)
+    if len(processed) > PROCESSED_EVENT_KEYS_LIMIT:
+        del processed[:-PROCESSED_EVENT_KEYS_LIMIT]
+
+
+def _safe_zoneinfo(name: str) -> ZoneInfo:
+    try:
+        return ZoneInfo(name)
+    except Exception:
+        return ZoneInfo(DEFAULT_LIFE_TIMEZONE)
+
+
+def _parse_hhmm_to_minute(raw: str, fallback: int) -> int:
+    try:
+        hh_str, mm_str = str(raw).strip().split(":", 1)
+        hh = int(hh_str)
+        mm = int(mm_str)
+        if 0 <= hh <= 23 and 0 <= mm <= 59:
+            return hh * 60 + mm
+    except Exception:
+        pass
+    return fallback
+
+
+def _minute_to_hhmm(minute: int) -> str:
+    m = max(0, min(24 * 60 - 1, int(minute)))
+    hh, mm = divmod(m, 60)
+    return f"{hh:02d}:{mm:02d}"
+
+
+def _is_quiet_minute(minute: int, start_minute: int, end_minute: int) -> bool:
+    if start_minute == end_minute:
+        return True
+    if start_minute < end_minute:
+        return start_minute <= minute < end_minute
+    return minute >= start_minute or minute < end_minute
+
+
+def _generate_daily_slots(life: Dict[str, Any], day_seed: int) -> List[int]:
+    target = max(1, int(life.get("daily_target", 3)))
+    quiet = life.get("quiet_hours", {}) if isinstance(life.get("quiet_hours"), dict) else {}
+    quiet_start = _parse_hhmm_to_minute(quiet.get("start", "00:00"), 0)
+    quiet_end = _parse_hhmm_to_minute(quiet.get("end", "10:00"), 10 * 60)
+
+    allowed = [m for m in range(24 * 60) if not _is_quiet_minute(m, quiet_start, quiet_end)]
+    if not allowed:
+        return []
+    if target >= len(allowed):
+        return sorted(allowed)
+    rng = random.Random(day_seed)
+    return sorted(rng.sample(allowed, k=target))
+
+
+def _refresh_life_daily_state(life: Dict[str, Any], now_local: datetime) -> None:
+    date_key = now_local.date().isoformat()
+    if str(life.get("slots_date", "")) == date_key:
+        return
+    seed = int(now_local.strftime("%Y%m%d"))
+    life["slots_date"] = date_key
+    life["daily_slots"] = _generate_daily_slots(life, day_seed=seed)
+    life["sent_slots"] = []
+
+
+def _append_story_log(memory: Dict[str, Any], text: str, *, source: str, chat_id: int | None) -> Dict[str, Any]:
+    cfg = memory.setdefault("config", {})
+    life = _ensure_life_config(cfg)
+    story_id = int(life.get("last_story_id", 0)) + 1
+    life["last_story_id"] = story_id
+    entry = {
+        "id": story_id,
+        "text": text,
+        "source": source,
+        "chat_id": chat_id,
+        "ts": datetime.utcnow().isoformat(),
+    }
+    log = life.setdefault("story_log", [])
+    if not isinstance(log, list):
+        log = []
+        life["story_log"] = log
+    log.append(entry)
+    if len(log) > LIFE_STORY_LOG_LIMIT:
+        del log[:-LIFE_STORY_LOG_LIMIT]
+    return entry
+
+
+def _get_last_story(memory: Dict[str, Any], *, chat_id: int | None = None) -> Dict[str, Any] | None:
+    cfg = memory.setdefault("config", {})
+    life = _ensure_life_config(cfg)
+    log = life.get("story_log", [])
+    if not isinstance(log, list) or not log:
+        return None
+    if chat_id is None:
+        return log[-1]
+    for entry in reversed(log):
+        if int(entry.get("chat_id") or 0) == int(chat_id):
+            return entry
+    return log[-1]
+
+
+def _looks_like_story_request(text: str) -> bool:
+    clean = re.sub(r"\s+", " ", str(text or "")).strip().lower()
+    if not clean:
+        return False
+    hints = (
+        "расскажи историю",
+        "расскажи че было",
+        "что у тебя было",
+        "че у тебя было",
+        "историю расскажи",
+        "что было",
+    )
+    return any(h in clean for h in hints)
+
+
+def _select_proactive_chat_id(memory: Dict[str, Any], life: Dict[str, Any]) -> int | None:
+    chats = memory.get("chats", {})
+    if not isinstance(chats, dict) or not chats:
+        return None
+    cooldown_minutes = max(1, int(life.get("cooldown_per_chat_minutes", 360)))
+    cooldown_delta = timedelta(minutes=cooldown_minutes)
+    now_utc = datetime.utcnow()
+    chat_last_emit = life.get("chat_last_emit", {})
+    if not isinstance(chat_last_emit, dict):
+        chat_last_emit = {}
+        life["chat_last_emit"] = chat_last_emit
+
+    eligible: List[Tuple[int, float]] = []
+    for raw_chat_id, chat_mem in chats.items():
+        try:
+            chat_id = int(raw_chat_id)
+        except Exception:
+            continue
+        last_emit_raw = str(chat_last_emit.get(str(chat_id), "")).strip()
+        if last_emit_raw:
+            last_emit_ts = _parse_iso_ts(last_emit_raw)
+            if last_emit_ts and now_utc - last_emit_ts < cooldown_delta:
+                continue
+        history = chat_mem.get("history", []) if isinstance(chat_mem, dict) else []
+        score = float(len(history[-40:])) if isinstance(history, list) else 0.0
+        eligible.append((chat_id, max(1.0, score)))
+
+    if not eligible:
+        return None
+    total = sum(weight for _, weight in eligible)
+    roll = random.random() * total
+    cumulative = 0.0
+    for chat_id, weight in eligible:
+        cumulative += weight
+        if roll <= cumulative:
+            return chat_id
+    return eligible[-1][0]
 
 def _extract_user_mentions_by_text(chat_mem: Dict[str, Any], text: str, author_id: int) -> List[int]:
     mentions: List[int] = []
@@ -736,17 +962,15 @@ def get_effective_toxicity_level(memory: Dict[str, Any]) -> int:
     base = get_toxicity_level(memory)
     mode = get_active_mode(memory)
     if mode == "chill":
-        return min(base, 18)
+        return min(base, 8)
     if mode == "default":
-        return min(base, 28)
+        return min(base, 20)
     return base
 
 
 def is_blocked_memory_text(text: str) -> bool:
-    clean = re.sub(r"\s+", " ", str(text or "")).strip().lower()
-    if not clean:
-        return False
-    return any(pattern.search(clean) for pattern in BLOCKED_MEMORY_PATTERNS)
+    del text
+    return False
 
 
 def looks_like_memory_request(text: str) -> bool:
@@ -769,9 +993,6 @@ def enforce_reply_guardrails(reply_text: str) -> str:
     clean = sanitize_reply_text(reply_text)
     if not clean:
         return ""
-    if is_blocked_memory_text(clean):
-        logger.warning("Блокирую заезженный мем в ответе LLM")
-        return "этот старый мем уже помер давай свежак"
     if any(pattern.search(clean) for pattern in TOXIC_REPLY_PATTERNS):
         logger.warning("Смягчаю токсичный ответ LLM")
         return "ок без наездов давай по сути"
@@ -865,11 +1086,65 @@ def select_old_random_memories(memory: Dict[str, Any], chat_id: int) -> List[str
         for fact in long_facts
         if not is_blocked_memory_text(str(fact.get("text", "")))
     ]
-    top = sorted(
-        filtered_facts,
-        key=lambda x: (-float(x.get("strength", 0.0)), str(x.get("text", ""))),
-    )[:3]
-    return [str(f.get("text", "")).strip() for f in top if str(f.get("text", "")).strip()]
+    if not filtered_facts:
+        return []
+
+    usage = layers.setdefault("long_fact_usage", {})
+    if not isinstance(usage, dict):
+        usage = {}
+        layers["long_fact_usage"] = usage
+
+    now = datetime.utcnow()
+    weighted: List[Tuple[Dict[str, Any], float]] = []
+    for fact in filtered_facts:
+        text = str(fact.get("text", "")).strip()
+        if not text:
+            continue
+        key = normalize_token(text)[:120]
+        meta = usage.get(key, {})
+        last_seen = _parse_iso_ts(str(meta.get("last_used_ts", "")))
+        used_count = int(meta.get("count", 0)) if isinstance(meta, dict) else 0
+
+        base = max(0.05, float(fact.get("strength", 1.0)))
+        penalty = 1.0 / (1.0 + used_count * 0.8)
+        if last_seen:
+            hours = (now - last_seen).total_seconds() / 3600.0
+            if hours < 24:
+                penalty *= 0.08
+            elif hours < 72:
+                penalty *= 0.2
+            elif hours < 24 * 7:
+                penalty *= 0.5
+        weighted.append((fact, base * penalty))
+
+    if not weighted:
+        return []
+
+    candidates = sorted(weighted, key=lambda x: x[1], reverse=True)[:8]
+    facts = [item[0] for item in candidates]
+    weights = [max(0.01, float(item[1])) for item in candidates]
+    chosen = random.choices(facts, weights=weights, k=1)[0]
+    chosen_text = str(chosen.get("text", "")).strip()
+    if not chosen_text:
+        return []
+
+    key = normalize_token(chosen_text)[:120]
+    meta = usage.get(key, {}) if isinstance(usage.get(key), dict) else {}
+    usage[key] = {
+        "last_used_ts": now.isoformat(),
+        "count": int(meta.get("count", 0)) + 1,
+    }
+    if len(usage) > LONG_FACT_USAGE_TRACK_LIMIT:
+        # Keep only the most recently used facts to cap memory growth.
+        items = sorted(
+            usage.items(),
+            key=lambda kv: str((kv[1] or {}).get("last_used_ts", "")),
+        )
+        usage.clear()
+        for k, v in items[-LONG_FACT_USAGE_TRACK_LIMIT:]:
+            usage[k] = v
+
+    return [chosen_text]
 
 
 def _top_items(counter: Dict[str, Any], n: int = 3) -> List[Tuple[str, float]]:
@@ -953,15 +1228,8 @@ def build_association_context(memory: Dict[str, Any], chat_id: int, focus_user_i
 
 
 def build_humor_plan(memory: Dict[str, Any], message: Message) -> Dict[str, Any]:
-    tg_user = message.from_user
-    assert tg_user is not None
-    chat_mem = get_chat_mem(memory, message.chat_id)
-    return choose_humor_plan(
-        chat_mem,
-        text=_extract_message_text(message),
-        user_id=tg_user.id,
-        user_name=tg_user.first_name or tg_user.username or str(tg_user.id),
-    )
+    del memory, message
+    return {"mode": "default", "bit_ids": []}
 
 
 def build_chat_messages(
@@ -980,7 +1248,6 @@ def build_chat_messages(
     recent_facts = select_recent_facts_for_context(memory, message.chat_id)
     random_memories = select_old_random_memories(memory, message.chat_id)
     association_context = build_association_context(memory, message.chat_id, tg_user.id)
-    humor_plan = humor_plan or build_humor_plan(memory, message)
 
     hist_lines = []
     for rec in chat_history:
@@ -995,11 +1262,13 @@ def build_chat_messages(
         "- всегда используй только строчные буквы\n"
         "- без эмодзи\n"
         "- максимум 2 очень коротких предложения в одном сообщении\n"
-        "- делай упор на естественный живой вайб, а не на шаблон\n"
-        "- подкол должен быть дружеским, без личного унижения\n"
-        "- локальные мемы только когда они реально к месту\n"
-        "- не повторяй старый мем про удаленные сообщения кадыра\n"
+        "- говори естественно и живо, как человек в чате\n"
+        "- юмор дружеский и по ситуации, без агрессивных наездов\n"
+        "- не зацикливайся на одном и том же старом факте, чаще меняй тему\n"
+        "- не делай длинные объяснения, лучше коротко и по делу\n"
     )
+    if get_active_mode(memory) == "chill":
+        full_system += "- режим chill: без грубости, без прожарки, только мягкий дружеский тон\n"
 
     toxicity = get_effective_toxicity_level(memory)
     full_system += f"\nуровень прожарки: {toxicity}/100\n"
@@ -1019,8 +1288,6 @@ def build_chat_messages(
 
     if association_context and (memory_requested or random.random() < 0.4):
         full_system += "\n\nкарта персонажей и ассоциаций:\n" + association_context
-
-    full_system += "\n\n" + format_humor_prompt(humor_plan) + "\n"
 
     if hist_lines:
         full_system += "\n\nпоследние сообщения в чате:\n" + "\n".join(hist_lines)
@@ -1065,9 +1332,7 @@ async def call_openai_vision(
     memory: Dict[str, Any],
     message: Message,
     image_b64: str,
-    humor_plan: Dict[str, Any] | None = None,
 ) -> str:
-    humor_plan = humor_plan or build_humor_plan(memory, message)
     text_context = (
         "тебе прислали фотку в чате. "
         "сделай короткую смешную ироничную реакцию в стиле дружеской подколки, "
@@ -1086,7 +1351,6 @@ async def call_openai_vision(
 
     if hist_lines:
         text_context += "\n\nпоследние сообщения в чате:\n" + "\n".join(hist_lines)
-    text_context += "\n\n" + format_humor_prompt(humor_plan)
 
     msg_content = [
         {"type": "text", "text": text_context},
@@ -1114,6 +1378,155 @@ async def call_openai_vision(
     except Exception as e:
         logger.error("Ошибка OpenAI при обработке изображения: %s", e)
         return ""
+
+
+async def _run_with_typing(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    task_coro: Any,
+) -> str:
+    stop_event = asyncio.Event()
+
+    async def _typing_pulse() -> None:
+        while not stop_event.is_set():
+            try:
+                await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+            except Exception as e:
+                logger.debug("Не удалось отправить typing action: %s", e)
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=4.0)
+            except asyncio.TimeoutError:
+                continue
+
+    pulse_task = asyncio.create_task(_typing_pulse())
+    try:
+        result = await task_coro
+        return str(result or "")
+    finally:
+        stop_event.set()
+        try:
+            await pulse_task
+        except Exception:
+            pass
+
+
+async def _call_openai_story_text(memory: Dict[str, Any], *, proactive: bool = False) -> str:
+    prompt = (
+        "придумай короткую бытовую историю из жизни тимура на сегодня. "
+        "формат: 1-2 короткие фразы, разговорно, живо, смешно, без грубых оскорблений, без эмодзи."
+    )
+    if proactive:
+        prompt += " в конце добавь короткий вопрос в чат."
+    try:
+        response = await asyncio.to_thread(
+            client.chat.completions.create,
+            model=TEXT_MODEL,
+            messages=[
+                {"role": "system", "content": get_system_prompt(memory)},
+                {"role": "user", "content": prompt},
+            ],
+            max_tokens=100,
+            temperature=0.95,
+        )
+        return (response.choices[0].message.content or "").strip()
+    except Exception as e:
+        logger.error("Ошибка генерации истории: %s", e)
+        return ""
+
+
+async def _generate_story_text(memory: Dict[str, Any], *, proactive: bool = False) -> str:
+    raw = await _call_openai_story_text(memory, proactive=proactive)
+    clean = enforce_reply_guardrails(raw)
+    if clean:
+        return clean
+    # Fallback only for provider failures/empty output.
+    fallback = [
+        "сегодня чуть не уехал без кроссовка в метро",
+        "пока искал зарядку понял что держал ее в руке",
+        "вышел за хлебом и вернулся с какой-то ерундой вместо него",
+    ]
+    text = random.choice(fallback)
+    if proactive:
+        text += "\nу вас день лучше идет?"
+    return text
+
+
+async def _emit_proactive_story(application: Any) -> None:
+    memory = load_memory()
+    cfg = memory.setdefault("config", {})
+    life = _ensure_life_config(cfg)
+    if not bool(life.get("enabled", True)):
+        return
+
+    tz = _safe_zoneinfo(str(life.get("timezone", DEFAULT_LIFE_TIMEZONE)))
+    now_local = datetime.now(tz)
+    now_utc = datetime.utcnow()
+    _refresh_life_daily_state(life, now_local)
+
+    now_minute = now_local.hour * 60 + now_local.minute
+    daily_slots = [int(x) for x in life.get("daily_slots", []) if isinstance(x, (int, float, str))]
+    sent_slots = [int(x) for x in life.get("sent_slots", []) if isinstance(x, (int, float, str))]
+    due = [slot for slot in sorted(daily_slots) if slot <= now_minute and slot not in sent_slots]
+    if not due:
+        return
+
+    chat_id = _select_proactive_chat_id(memory, life)
+    if chat_id is None:
+        return
+
+    text = await _generate_story_text(memory, proactive=True)
+    text = enforce_reply_guardrails(text)
+    if not text:
+        return
+
+    await application.bot.send_message(chat_id=chat_id, text=text)
+    slot = due[0]
+    sent_slots.append(slot)
+    life["sent_slots"] = sorted(set(sent_slots))
+    chat_last_emit = life.setdefault("chat_last_emit", {})
+    if not isinstance(chat_last_emit, dict):
+        chat_last_emit = {}
+        life["chat_last_emit"] = chat_last_emit
+    chat_last_emit[str(chat_id)] = now_utc.isoformat()
+    life["last_emit_ts"] = now_utc.isoformat()
+    life["last_emit_chat_id"] = chat_id
+    _append_story_log(memory, text, source="proactive", chat_id=chat_id)
+    save_memory(memory)
+    logger.info("Проактивная история отправлена: chat_id=%s slot=%s", chat_id, _minute_to_hhmm(slot))
+
+
+async def _life_loop(application: Any) -> None:
+    logger.info("Запускаю life loop Тимура")
+    try:
+        while True:
+            try:
+                await _emit_proactive_story(application)
+            except Exception as e:
+                logger.error("Ошибка life loop: %s", e)
+            await asyncio.sleep(LIFE_LOOP_INTERVAL_SECONDS)
+    except asyncio.CancelledError:
+        logger.info("Life loop остановлен")
+        raise
+
+
+async def start_life_loop(application: Any) -> None:
+    global _LIFE_TASK
+    if _LIFE_TASK and not _LIFE_TASK.done():
+        return
+    _LIFE_TASK = application.create_task(_life_loop(application))
+
+
+async def stop_life_loop() -> None:
+    global _LIFE_TASK
+    if not _LIFE_TASK:
+        return
+    _LIFE_TASK.cancel()
+    try:
+        await _LIFE_TASK
+    except asyncio.CancelledError:
+        pass
+    finally:
+        _LIFE_TASK = None
 
 
 # =========================
@@ -1719,6 +2132,34 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("я тут давай базарь")
 
 
+async def story_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.message
+    if not message:
+        return
+
+    memory = load_memory()
+    parts = (message.text or "").split(" ", 1)
+    arg = parts[1].strip().lower() if len(parts) > 1 else ""
+    force_new = arg in {"new", "новая", "новую", "fresh"}
+
+    entry = None if force_new else _get_last_story(memory, chat_id=message.chat_id)
+    if entry:
+        story_text = str(entry.get("text", "")).strip()
+    else:
+        story_text = await _run_with_typing(
+            context,
+            message.chat_id,
+            _generate_story_text(memory, proactive=False),
+        )
+        _append_story_log(memory, story_text, source="command", chat_id=message.chat_id)
+        save_memory(memory)
+
+    story_text = enforce_reply_guardrails(story_text)
+    if not story_text:
+        story_text = "сегодня без лора давай позже"
+    await message.reply_text(story_text)
+
+
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     memory = load_memory()
     message = update.effective_message
@@ -1740,25 +2181,52 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         message.text,
     )
 
-    update_memory_with_message(memory, message)
-
-    bot_id = (await context.bot.get_me()).id
-
-    decision = should_reply_decision(memory, message, bot_id)
-    _log_reply_decision("тексту", decision)
-    if not decision.should_reply:
+    event_key = _make_event_key("text", message.chat_id, message.message_id)
+    if not _try_acquire_inflight_event(event_key):
+        logger.info("duplicate skipped: inflight key=%s", event_key)
         return
+    try:
+        chat_mem = get_chat_mem(memory, message.chat_id)
+        if _is_processed_event(chat_mem, event_key):
+            logger.info("duplicate skipped: processed key=%s", event_key)
+            return
+        _mark_processed_event(chat_mem, event_key)
+        update_memory_with_message(memory, message)
 
-    humor_plan = build_humor_plan(memory, message)
-    logger.info(
-        "Готовлю текстовый ответ: режим=%s токсичность=%s источник=LLM",
-        get_active_mode(memory),
-        get_effective_toxicity_level(memory),
-    )
-    messages = build_chat_messages(memory, message, humor_plan=humor_plan)
-    reply_text = await call_openai_text(messages)
+        user_text = _extract_message_text(message)
+        if _looks_like_story_request(user_text):
+            entry = _get_last_story(memory, chat_id=message.chat_id)
+            if entry:
+                story_text = str(entry.get("text", "")).strip()
+            else:
+                story_text = await _run_with_typing(
+                    context,
+                    message.chat_id,
+                    _generate_story_text(memory, proactive=False),
+                )
+                _append_story_log(memory, story_text, source="on_demand", chat_id=message.chat_id)
+                save_memory(memory)
+            await send_reply_with_style(update, context, memory, story_text, humor_plan=None)
+            return
 
-    await send_reply_with_style(update, context, memory, reply_text, humor_plan=humor_plan)
+        bot_id = (await context.bot.get_me()).id
+
+        decision = should_reply_decision(memory, message, bot_id)
+        _log_reply_decision("тексту", decision)
+        if not decision.should_reply:
+            return
+
+        logger.info(
+            "Готовлю текстовый ответ: режим=%s токсичность=%s источник=LLM",
+            get_active_mode(memory),
+            get_effective_toxicity_level(memory),
+        )
+        messages = build_chat_messages(memory, message)
+        reply_text = await _run_with_typing(context, message.chat_id, call_openai_text(messages))
+
+        await send_reply_with_style(update, context, memory, reply_text, humor_plan=None)
+    finally:
+        _release_inflight_event(event_key)
 
 
 async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1778,52 +2246,63 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         chat_id,
     )
 
-    update_memory_with_message(memory, message)
-
-    bot_id = (await context.bot.get_me()).id
-
-    decision = ReplyDecision(False, "нет триггера для ответа на фото")
-
-    if message.reply_to_message and message.reply_to_message.from_user:
-        if message.reply_to_message.from_user.id == bot_id:
-            decision = ReplyDecision(True, "фото отправлено в ответ на сообщение Тимура")
-
-    if not decision.should_reply and (message.caption or "") and is_name_mentioned(message.caption):
-        decision = ReplyDecision(True, "в подписи к фото упомянуто имя Тимура")
-
-    if not decision.should_reply:
-        roll = random.random()
-        decision = ReplyDecision(
-            roll < PHOTO_RANDOM_REPLY_CHANCE,
-            "случайный ответ на фото по вероятности",
-            threshold=PHOTO_RANDOM_REPLY_CHANCE,
-            roll=roll,
-        )
-
-    _log_reply_decision("фото", decision)
-    if not decision.should_reply:
+    event_key = _make_event_key("photo", message.chat_id, message.message_id)
+    if not _try_acquire_inflight_event(event_key):
+        logger.info("duplicate skipped: inflight key=%s", event_key)
         return
+    try:
+        chat_mem = get_chat_mem(memory, message.chat_id)
+        if _is_processed_event(chat_mem, event_key):
+            logger.info("duplicate skipped: processed key=%s", event_key)
+            return
+        _mark_processed_event(chat_mem, event_key)
+        update_memory_with_message(memory, message)
 
-    if not can_use_vision(memory, chat_id, user.id):
-        logger.info("Лимит vision исчерпан, фото пропускаю")
-        return
+        bot_id = (await context.bot.get_me()).id
 
-    photo = message.photo[-1]
-    file = await context.bot.get_file(photo.file_id)
-    file_bytes = await file.download_as_bytearray()
-    image_b64 = base64.b64encode(file_bytes).decode("utf-8")
+        decision = ReplyDecision(False, "нет триггера для ответа на фото")
 
-    increase_vision_counters(memory, chat_id, user.id)
+        if message.reply_to_message and message.reply_to_message.from_user:
+            if message.reply_to_message.from_user.id == bot_id:
+                decision = ReplyDecision(True, "фото отправлено в ответ на сообщение Тимура")
 
-    humor_plan = build_humor_plan(memory, message)
-    reply_text = await call_openai_vision(memory, message, image_b64, humor_plan=humor_plan)
-    reply_text = sanitize_reply_text(reply_text)
+        if not decision.should_reply and (message.caption or "") and is_name_mentioned(message.caption):
+            decision = ReplyDecision(True, "в подписи к фото упомянуто имя Тимура")
 
-    if not reply_text:
-        logger.info("Vision-ответ получился пустым, пропускаю отправку")
-        return
+        if not decision.should_reply:
+            roll = random.random()
+            decision = ReplyDecision(
+                roll < PHOTO_RANDOM_REPLY_CHANCE,
+                "случайный ответ на фото по вероятности",
+                threshold=PHOTO_RANDOM_REPLY_CHANCE,
+                roll=roll,
+            )
 
-    await send_reply_with_style(update, context, memory, reply_text, humor_plan=humor_plan)
+        _log_reply_decision("фото", decision)
+        if not decision.should_reply:
+            return
+
+        if not can_use_vision(memory, chat_id, user.id):
+            logger.info("Лимит vision исчерпан, фото пропускаю")
+            return
+
+        photo = message.photo[-1]
+        file = await context.bot.get_file(photo.file_id)
+        file_bytes = await file.download_as_bytearray()
+        image_b64 = base64.b64encode(file_bytes).decode("utf-8")
+
+        increase_vision_counters(memory, chat_id, user.id)
+
+        reply_text = await _run_with_typing(context, message.chat_id, call_openai_vision(memory, message, image_b64))
+        reply_text = sanitize_reply_text(reply_text)
+
+        if not reply_text:
+            logger.info("Vision-ответ получился пустым, пропускаю отправку")
+            return
+
+        await send_reply_with_style(update, context, memory, reply_text, humor_plan=None)
+    finally:
+        _release_inflight_event(event_key)
 
 
 # =========================

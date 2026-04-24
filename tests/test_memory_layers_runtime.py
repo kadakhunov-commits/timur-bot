@@ -1,4 +1,7 @@
+import asyncio
 import os
+from datetime import datetime
+from unittest.mock import patch
 
 os.environ.setdefault("TELEGRAM_BOT_TOKEN", "test-token")
 os.environ.setdefault("OPENAI_API_KEY", "test-api-key")
@@ -39,21 +42,35 @@ def test_old_memories_use_long_facts_not_log_random() -> None:
 
     lines = runtime.select_old_random_memories(memory, 1)
     assert lines
-    assert lines[0] == "A: важный старый факт"
+    assert lines[0] in {"A: важный старый факт", "B: менее важный"}
 
 
-def test_old_memories_skip_blocked_repeated_meme() -> None:
+def test_old_memories_penalize_recently_overused_fact() -> None:
     memory = runtime.default_memory()
     chat = runtime.get_chat_mem(memory, 1)
     chat["memory_layers"]["long_facts"] = [
-        {"text": "митя снес сообщения кадыра", "strength": 99.0},
-        {"text": "нейтральный старый факт", "strength": 5.0},
+        {"text": "A: заезженный факт", "strength": 5.0},
+        {"text": "B: свежий факт", "strength": 2.0},
     ]
+    chat["memory_layers"]["long_fact_usage"] = {
+        runtime.normalize_token("A: заезженный факт")[:120]: {
+            "last_used_ts": datetime.utcnow().isoformat(),
+            "count": 12,
+        }
+    }
 
-    lines = runtime.select_old_random_memories(memory, 1)
+    with patch.object(runtime.random, "choices", side_effect=lambda population, weights, k: [population[0]]):
+        lines = runtime.select_old_random_memories(memory, 1)
 
-    assert "митя снес сообщения кадыра" not in lines
-    assert lines[0] == "нейтральный старый факт"
+    assert lines == ["B: свежий факт"]
+
+
+def test_default_memory_contains_life_config() -> None:
+    memory = runtime.default_memory()
+    life = memory["config"]["life"]
+    assert life["enabled"] is True
+    assert life["daily_target"] == 3
+    assert life["timezone"] == "Europe/Moscow"
 
 
 def test_toxicity_fallback_uses_persona_default() -> None:
@@ -65,16 +82,8 @@ def test_toxicity_fallback_uses_persona_default() -> None:
     assert heat == runtime.APP_CONFIG.default_toxicity_level
 
 
-def test_reply_guardrail_blocks_repeated_deleted_messages_meme() -> None:
-    blocked = "митя снес сообщения кадыра и опять умничает"
-
-    safe = runtime.enforce_reply_guardrails(blocked)
-
-    assert safe == "этот старый мем уже помер давай свежак"
-
-
 def test_reply_guardrail_softens_toxic_personal_attack() -> None:
-    toxic = "память как у золотой рыбки, рустем"
+    toxic = "ты дебил если честно"
 
     safe = runtime.enforce_reply_guardrails(toxic)
 
@@ -86,13 +95,61 @@ def test_effective_toxicity_caps_default_and_chill_modes() -> None:
     memory["config"]["toxicity_level"] = 90
 
     memory["config"]["active_mode"] = "default"
-    assert runtime.get_effective_toxicity_level(memory) == 28
+    assert runtime.get_effective_toxicity_level(memory) == 20
 
     memory["config"]["active_mode"] = "chill"
-    assert runtime.get_effective_toxicity_level(memory) == 18
+    assert runtime.get_effective_toxicity_level(memory) == 8
 
 
 def test_looks_like_memory_request_detection() -> None:
     assert runtime.looks_like_memory_request("тимур высри чето из памяти")
     assert runtime.looks_like_memory_request("вспомни старый прикол")
     assert not runtime.looks_like_memory_request("просто ответь по теме")
+
+
+def test_story_request_detection() -> None:
+    assert runtime._looks_like_story_request("тимур расскажи историю")
+    assert runtime._looks_like_story_request("расскажи че было")
+    assert not runtime._looks_like_story_request("давай по делу")
+
+
+def test_generate_daily_slots_uses_daily_target_outside_quiet_hours() -> None:
+    life = runtime._default_life_config()
+    life["daily_target"] = 3
+    slots = runtime._generate_daily_slots(life, day_seed=20260424)
+    assert len(slots) == 3
+    quiet_start = runtime._parse_hhmm_to_minute("00:00", 0)
+    quiet_end = runtime._parse_hhmm_to_minute("10:00", 600)
+    assert all(not runtime._is_quiet_minute(s, quiet_start, quiet_end) for s in slots)
+
+
+def test_processed_event_cache_marks_duplicate() -> None:
+    memory = runtime.default_memory()
+    chat = runtime.get_chat_mem(memory, 1)
+    key = runtime._make_event_key("text", 1, 100)
+    assert not runtime._is_processed_event(chat, key)
+    runtime._mark_processed_event(chat, key)
+    assert runtime._is_processed_event(chat, key)
+
+
+def test_run_with_typing_sends_chat_action() -> None:
+    class DummyBot:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def send_chat_action(self, chat_id: int, action: str) -> None:
+            del chat_id, action
+            self.calls += 1
+
+    class DummyContext:
+        def __init__(self) -> None:
+            self.bot = DummyBot()
+
+    async def _task() -> str:
+        await asyncio.sleep(0.01)
+        return "ok"
+
+    context = DummyContext()
+    result = asyncio.run(runtime._run_with_typing(context, 1, _task()))
+    assert result == "ok"
+    assert context.bot.calls >= 1
