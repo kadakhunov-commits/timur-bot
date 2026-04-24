@@ -12,6 +12,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+from billing_system import BillingEngine, BillingError
 from dotenv import load_dotenv
 from openai import OpenAI
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
@@ -30,6 +31,7 @@ from telegram.ext import (
 
 BASE_DIR = Path(__file__).parent
 MEMORY_PATH = BASE_DIR / "memory.json"
+BILLING_PATH = BASE_DIR / "billing_state.json"
 load_dotenv(BASE_DIR / ".env")
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -117,6 +119,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger("timur-bot")
+billing = BillingEngine(BILLING_PATH, logger=logger)
 
 
 # =========================
@@ -446,6 +449,16 @@ def update_memory_with_message(memory: Dict[str, Any], message: Message) -> None
         _update_association_graph(chat_mem, message, text, keywords)
 
     save_memory(memory)
+    try:
+        billing.register_activity(
+            chat_id=chat_id,
+            user_id=tg_user.id,
+            username=tg_user.username or "",
+            name=tg_user.first_name or "",
+            is_bot=bool(tg_user.is_bot),
+        )
+    except Exception as e:
+        logger.error("Billing activity update failed: %s", e)
 
 
 # =========================
@@ -932,6 +945,13 @@ async def send_reply_with_style(
     if not reply_text:
         logger.info("Empty reply after sanitizing, skipping")
         return
+
+    try:
+        use_watermark, watermark_text = billing.should_apply_free_watermark(message.chat_id)
+        if use_watermark and watermark_text:
+            reply_text = f"{reply_text}\n\n{watermark_text}"
+    except Exception as e:
+        logger.error("Billing watermark check failed: %s", e)
 
     use_meme = random.random() < MEM_REPLY_CHANCE and (MEMES or YOUTUBE_LINKS)
 
@@ -1539,6 +1559,264 @@ def owner_only(func):
     return wrapper
 
 
+def _fmt_rub(v: int) -> str:
+    return f"{int(v)}₽"
+
+
+def _parse_int(raw: str, default: int) -> int:
+    try:
+        return int(raw)
+    except Exception:
+        return default
+
+
+def _format_invoice_rows(invoices: List[Dict[str, Any]]) -> str:
+    if not invoices:
+        return "инвойсов нет"
+    lines = []
+    for inv in invoices:
+        lines.append(
+            f"- {inv['invoice_id']} | user={inv['payer_user_id']} | {_fmt_rub(inv['amount_rub'])} | {inv['status']}"
+        )
+    return "\n".join(lines)
+
+
+@owner_only
+async def billhelp_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    del context
+    if not update.message:
+        return
+    text = (
+        "billing команды:\n"
+        "/billquote <owner|split|free> [stars|yookassa] [payer_count]\n"
+        "/billsetup <owner|split|free> [stars|yookassa] [payer_count] [standard|plus|free]\n"
+        "/billstatus — статус биллинга чата\n"
+        "/billinvoices — последние инвойсы\n"
+        "/billpay <invoice_id> — мок оплата (можно не owner)\n"
+        "/billabuse — отчет по антиабузу\n"
+        "/billref create [commission_pct] [months]\n"
+        "/billref apply <CODE>\n"
+        "/billref balance [user_id]"
+    )
+    await update.message.reply_text(text)
+
+
+@owner_only
+async def billquote_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    del context
+    message = update.message
+    if not message:
+        return
+
+    parts = (message.text or "").strip().split()
+    mode = parts[1] if len(parts) > 1 else "split"
+    provider = parts[2] if len(parts) > 2 else "stars"
+    payer_count = _parse_int(parts[3], 0) if len(parts) > 3 else 0
+
+    try:
+        quote = billing.get_quote(
+            chat_id=message.chat_id,
+            mode=mode,
+            provider=provider,
+            payer_count=(payer_count if payer_count > 0 else None),
+        )
+        payers = quote.payer_ids
+        active = quote.active_users
+        lines = [
+            f"quote for chat={quote.chat_id}",
+            f"mode={quote.mode}, provider={quote.provider}",
+            f"active users={len(active)}: {', '.join(str(x) for x in active[:20]) or '-'}",
+            f"total={_fmt_rub(quote.total_rub)} (per_active={_fmt_rub(quote.price_per_active_rub)}, min={_fmt_rub(quote.min_price_rub)}, max={_fmt_rub(quote.max_price_rub)})",
+            f"payers={len(payers)}: {', '.join(str(x) for x in payers[:20]) or '-'}",
+            f"activation ratio={quote.activation_ratio}",
+        ]
+        await message.reply_text("\n".join(lines))
+    except BillingError as e:
+        await message.reply_text(f"billing error: {e}")
+
+
+@owner_only
+async def billsetup_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    del context
+    message = update.message
+    if not message or not message.from_user:
+        return
+
+    parts = (message.text or "").strip().split()
+    mode = parts[1] if len(parts) > 1 else "split"
+    provider = parts[2] if len(parts) > 2 else "stars"
+    payer_count = _parse_int(parts[3], 0) if len(parts) > 3 else 0
+    tier_key = (parts[4] if len(parts) > 4 else "standard").lower()
+    tier = "group_plus" if tier_key == "plus" else "free_promo" if tier_key == "free" else "group_standard"
+
+    try:
+        result = billing.create_subscription_cycle(
+            chat_id=message.chat_id,
+            initiated_by_user_id=message.from_user.id,
+            mode=mode,
+            provider=provider,
+            payer_count=(payer_count if payer_count > 0 else None),
+            tier=tier,
+        )
+    except BillingError as e:
+        await message.reply_text(f"billing error: {e}")
+        return
+
+    sub = result["subscription"]
+    invoices = result["invoices"]
+    lines = [
+        f"subscription created: {sub['subscription_id']}",
+        f"mode={sub['mode']}, provider={sub['provider']}, tier={sub['tier']}",
+        f"status={sub['status']}, total={_fmt_rub(sub['total_rub'])}",
+        f"payers={len(sub['payer_ids'])}, invoices={len(invoices)}",
+    ]
+    if invoices:
+        lines.append("invoices:")
+        lines.append(_format_invoice_rows(invoices))
+    await message.reply_text("\n".join(lines))
+
+
+@owner_only
+async def billstatus_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    del context
+    message = update.message
+    if not message:
+        return
+
+    summary = billing.get_chat_activity_summary(message.chat_id)
+    ent = summary.get("entitlement")
+    active_ids = summary.get("active_users", [])
+    lines = [
+        f"billing status chat={message.chat_id}",
+        f"active users={summary.get('active_count', 0)}: {', '.join(str(x) for x in active_ids[:20]) or '-'}",
+    ]
+    if ent:
+        lines.extend(
+            [
+                f"entitlement status={ent.get('status')}",
+                f"tier={ent.get('tier')}, mode={ent.get('mode')}, provider={ent.get('provider')}",
+                f"expires_at={ent.get('expires_at')}",
+            ]
+        )
+    else:
+        lines.append("entitlement: none")
+    await message.reply_text("\n".join(lines))
+
+
+@owner_only
+async def billinvoices_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    del context
+    message = update.message
+    if not message:
+        return
+    invoices = billing.list_chat_invoices(message.chat_id, limit=20)
+    await message.reply_text(_format_invoice_rows(invoices))
+
+
+async def billpay_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    del context
+    message = update.message
+    if not message or not message.from_user:
+        return
+
+    parts = (message.text or "").strip().split()
+    if len(parts) < 2:
+        await message.reply_text("использование: /billpay <invoice_id>")
+        return
+    invoice_id = parts[1].strip()
+
+    try:
+        result = billing.pay_invoice_mock(
+            invoice_id=invoice_id,
+            paid_by_user_id=message.from_user.id,
+        )
+    except BillingError as e:
+        await message.reply_text(f"billing error: {e}")
+        return
+
+    invoice = result["invoice"]
+    sub = result["subscription"] or {}
+    lines = [
+        f"invoice paid: {invoice['invoice_id']}",
+        f"amount={_fmt_rub(invoice['amount_rub'])}, status={invoice['status']}",
+        f"subscription={sub.get('subscription_id')} status={sub.get('status')}",
+    ]
+    if sub.get("status") == "active":
+        lines.append(f"activated until {sub.get('expires_at')}")
+    await message.reply_text("\n".join(lines))
+
+
+@owner_only
+async def billabuse_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    del context
+    message = update.message
+    if not message:
+        return
+    rep = billing.get_abuse_report(chat_id=message.chat_id, limit=10)
+    today_map = rep.get("invoice_batches_today", {})
+    lines = [
+        f"abuse report today={rep.get('today')}",
+        f"invoice batches today (all chats): {today_map}",
+    ]
+    flags = rep.get("flags", [])
+    if not flags:
+        lines.append("flags: none")
+    else:
+        lines.append("flags:")
+        for f in flags:
+            lines.append(f"- {f.get('ts')} | {f.get('kind')} | {f.get('details')}")
+    await message.reply_text("\n".join(lines))
+
+
+@owner_only
+async def billref_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    del context
+    message = update.message
+    if not message or not message.from_user:
+        return
+
+    parts = (message.text or "").strip().split()
+    action = parts[1].lower() if len(parts) > 1 else "help"
+
+    if action == "create":
+        pct = _parse_int(parts[2], 10) if len(parts) > 2 else 10
+        months = _parse_int(parts[3], 3) if len(parts) > 3 else 3
+        try:
+            prg = billing.create_affiliate_program(
+                owner_user_id=message.from_user.id,
+                commission_pct=pct,
+                duration_months=months,
+            )
+            await message.reply_text(
+                f"ref program created\nprogram_id={prg['program_id']}\ncode={prg['code']}\ncommission={prg['commission_pct']}%\nduration={prg['duration_months']}m"
+            )
+        except BillingError as e:
+            await message.reply_text(f"billing error: {e}")
+        return
+
+    if action == "apply":
+        if len(parts) < 3:
+            await message.reply_text("использование: /billref apply <CODE>")
+            return
+        code = parts[2].strip()
+        try:
+            ap = billing.apply_referral_code(message.from_user.id, code)
+            await message.reply_text(
+                f"ref applied\nprogram={ap['program_id']}\nexpires_at={ap['expires_at']}"
+            )
+        except BillingError as e:
+            await message.reply_text(f"billing error: {e}")
+        return
+
+    if action == "balance":
+        uid = _parse_int(parts[2], message.from_user.id) if len(parts) > 2 else message.from_user.id
+        bal = billing.get_affiliate_balance(uid)
+        await message.reply_text(f"affiliate balance user={uid}: {_fmt_rub(bal)}")
+        return
+
+    await message.reply_text("использование: /billref create [pct] [months] | /billref apply <CODE> | /billref balance [user_id]")
+
+
 @owner_only
 async def setprompt_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     del context
@@ -1804,6 +2082,14 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start_cmd))
     application.add_handler(CommandHandler("admin", admin_cmd))
     application.add_handler(CommandHandler("panel", admin_cmd))
+    application.add_handler(CommandHandler("billhelp", billhelp_cmd))
+    application.add_handler(CommandHandler("billquote", billquote_cmd))
+    application.add_handler(CommandHandler("billsetup", billsetup_cmd))
+    application.add_handler(CommandHandler("billstatus", billstatus_cmd))
+    application.add_handler(CommandHandler("billinvoices", billinvoices_cmd))
+    application.add_handler(CommandHandler("billpay", billpay_cmd))
+    application.add_handler(CommandHandler("billabuse", billabuse_cmd))
+    application.add_handler(CommandHandler("billref", billref_cmd))
     application.add_handler(CommandHandler("setprompt", setprompt_cmd))
     application.add_handler(CommandHandler("appendprompt", appendprompt_cmd))
     application.add_handler(CommandHandler("showprompt", showprompt_cmd))
