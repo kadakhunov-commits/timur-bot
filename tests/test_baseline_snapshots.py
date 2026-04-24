@@ -32,6 +32,18 @@ def test_sanitize_reply_text_snapshot() -> None:
     assert got == s["expected"]
 
 
+def test_sanitize_reply_text_removes_promo_footer() -> None:
+    raw = "Нормальный ответ\n\npromo: upgrade to remove limits"
+    got = runtime.sanitize_reply_text(raw)
+    assert got == "нормальный ответ"
+
+
+def test_sanitize_reply_text_removes_ru_limit_footer() -> None:
+    raw = "Нормальный ответ\n\nлимит free-тарифа на сегодня, апгрейднись"
+    got = runtime.sanitize_reply_text(raw)
+    assert got == "нормальный ответ"
+
+
 def test_split_into_chain_snapshot() -> None:
     s = _snapshots()["split_into_chain"]
     got = runtime.split_into_chain(s["text"])

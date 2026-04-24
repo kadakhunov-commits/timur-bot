@@ -95,6 +95,8 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
     openai_base_url = os.getenv("OPENAI_BASE_URL", "").strip()
     gemini_api_key = os.getenv("GEMINI_API_KEY", "").strip()
     miniapp_url = os.getenv("MINIAPP_URL", "").strip()
+    openai_text_model = os.getenv("OPENAI_TEXT_MODEL", "").strip()
+    openai_vision_model = os.getenv("OPENAI_VISION_MODEL", "").strip()
     if not telegram_bot_token:
         raise ConfigError("TELEGRAM_BOT_TOKEN not set in .env")
     if not openai_api_key:
@@ -119,25 +121,27 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
     active_mode = str(defaults.get("active_mode", "default"))
     if active_mode not in modes:
         active_mode = "default" if "default" in modes else next(iter(modes.keys()))
+    memory_path_env = os.getenv("MEMORY_PATH", "").strip()
+    billing_path_env = os.getenv("BILLING_PATH", "").strip()
 
     return AppConfig(
         base_dir=root,
-        memory_path=root / "memory.json",
-        billing_path=root / "billing_state.json",
+        memory_path=Path(memory_path_env) if memory_path_env else root / "memory.json",
+        billing_path=Path(billing_path_env) if billing_path_env else root / "billing_state.json",
         telegram_bot_token=telegram_bot_token,
         openai_api_key=openai_api_key,
         openai_base_url=openai_base_url,
         gemini_api_key=gemini_api_key,
         miniapp_url=miniapp_url,
         owner_id=int(runtime.get("owner_id", 428469927)),
-        text_model=str(models.get("text", "gpt-4o-mini")),
-        vision_model=str(models.get("vision", "gpt-4o-mini")),
+        text_model=openai_text_model or str(models.get("text", "gpt-4o-mini")),
+        vision_model=openai_vision_model or str(models.get("vision", "gpt-4o-mini")),
         voice_model=str(models.get("voice", "gemini-3.1-flash-tts-preview")),
         voice_name=str(models.get("voice_name", "Kore")),
         voice_style_prompt=str(
             models.get(
                 "voice_style_prompt",
-                "[slightly raspy] [casual, confident, warm] говори с легким кавказским акцентом, дружелюбно и с подколом",
+                "[slightly raspy] [casual, confident, warm] [light caucasian accent]",
             )
         ).strip(),
         max_history_per_chat=int(limits.get("max_history_per_chat", 100)),
@@ -168,6 +172,6 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
         default_system_prompt=str(persona.get("default_system_prompt", "")).strip(),
         default_style_settings=str(defaults.get("style_settings", "")),
         default_bio=str(defaults.get("bio", "")),
-        default_toxicity_level=int(defaults.get("toxicity_level", 82)),
+        default_toxicity_level=int(defaults.get("toxicity_level", 45)),
         default_active_mode=active_mode,
     )

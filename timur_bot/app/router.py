@@ -1,4 +1,4 @@
-from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler, filters
+from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler, MessageReactionHandler, filters
 
 from timur_bot.handlers.admin import admin_callback_handler, admin_cmd, miniapp_cmd, web_app_data_handler
 from timur_bot.handlers.billing import (
@@ -11,24 +11,32 @@ from timur_bot.handlers.billing import (
     billsetup_cmd,
     billstatus_cmd,
 )
-from timur_bot.handlers.chat import photo_handler, start_cmd, text_handler
+from timur_bot.handlers.chat import photo_handler, reaction_handler, start_cmd, story_cmd, text_handler
 from timur_bot.handlers.owner import (
     appendprompt_cmd,
+    bit_cmd,
+    bits_cmd,
     clearmemory_cmd,
     dump_cmd,
+    funny_cmd,
+    mode_cmd,
     remember_cmd,
     resetprompt_cmd,
     setbio_cmd,
     setheat_cmd,
+    setmode_cmd,
     setprompt_cmd,
     setstyle_cmd,
+    showmode_cmd,
     showprompt_cmd,
+    unfunny_cmd,
     whois_cmd,
 )
 
 
 def register_handlers(application) -> None:
     application.add_handler(CommandHandler("start", start_cmd))
+    application.add_handler(CommandHandler("story", story_cmd))
     application.add_handler(CommandHandler("admin", admin_cmd))
     application.add_handler(CommandHandler("panel", admin_cmd))
     application.add_handler(CommandHandler("miniapp", miniapp_cmd))
@@ -47,11 +55,19 @@ def register_handlers(application) -> None:
     application.add_handler(CommandHandler("setbio", setbio_cmd))
     application.add_handler(CommandHandler("setstyle", setstyle_cmd))
     application.add_handler(CommandHandler("setheat", setheat_cmd))
+    application.add_handler(CommandHandler("mode", mode_cmd))
+    application.add_handler(CommandHandler("setmode", setmode_cmd))
+    application.add_handler(CommandHandler("showmode", showmode_cmd))
+    application.add_handler(CommandHandler("bit", bit_cmd))
+    application.add_handler(CommandHandler("bits", bits_cmd))
+    application.add_handler(CommandHandler("funny", funny_cmd))
+    application.add_handler(CommandHandler("unfunny", unfunny_cmd))
     application.add_handler(CommandHandler("remember", remember_cmd))
     application.add_handler(CommandHandler("whois", whois_cmd))
     application.add_handler(CommandHandler("dump", dump_cmd))
     application.add_handler(CommandHandler("clearmemory", clearmemory_cmd))
     application.add_handler(CallbackQueryHandler(admin_callback_handler, pattern=r"^adm:"))
     application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, web_app_data_handler))
+    application.add_handler(MessageReactionHandler(reaction_handler))
     application.add_handler(MessageHandler(filters.PHOTO & ~filters.COMMAND, photo_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))

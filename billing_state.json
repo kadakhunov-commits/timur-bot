@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "config": {
+    "pricing": {
+      "per_active_rub": 45,
+      "min_group_rub": 199,
+      "max_group_rub": 3490,
+      "active_window_days": 30,
+      "active_threshold_messages": 3
+    },
+    "split": {
+      "activation_ratio": 1.0,
+      "change_cooldown_hours": 24,
+      "max_invoice_batches_per_chat_per_day": 3
+    },
+    "free_promo": {
+      "enabled": true,
+      "daily_quota": 30,
+      "watermark_every_n": 4,
+      "watermark_text": "promo: upgrade to remove limits"
+    },
+    "providers": {
+      "stars": {
+        "enabled": true
+      },
+      "yookassa": {
+        "enabled": true
+      }
+    },
+    "affiliate": {
+      "default_commission_pct": 10,
+      "default_duration_months": 3,
+      "max_commission_pct": 30
+    }
+  },
+  "chats": {
+    "93135242": {
+      "users": {
+        "93135242": {
+          "first_seen": "2026-04-24T13:01:50.166159+00:00",
+          "last_seen": "2026-04-24T13:02:08.817605+00:00",
+          "username": "unterlantas",
+          "name": "рустем 🧌",
+          "is_bot": false,
+          "activity_days": {
+            "2026-04-24": 4
+          },
+          "risk_score": 0
+        }
+      },
+      "entitlement": null,
+      "metrics": {
+        "bot_replies": {
+          "2026-04-24": 1
+        }
+      }
+    }
+  },
+  "subscriptions": {},
+  "invoices": {},
+  "ledger": [],
+  "abuse": {
+    "invoice_batches_per_day": {},
+    "last_plan_change_ts": {},
+    "flags": []
+  },
+  "referrals": {
+    "programs": {},
+    "codes": {},
+    "user_attribution": {},
+    "affiliate_balances": {},
+    "events": []
+  }
+}

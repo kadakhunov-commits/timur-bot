@@ -3,7 +3,7 @@ import os
 os.environ.setdefault("TELEGRAM_BOT_TOKEN", "test-token")
 os.environ.setdefault("OPENAI_API_KEY", "test-api-key")
 
-from telegram.ext import CommandHandler
+from telegram.ext import CommandHandler, MessageReactionHandler
 
 from timur_bot.app.router import register_handlers
 
@@ -20,7 +20,8 @@ def test_register_handlers_smoke() -> None:
     app = DummyApp()
     register_handlers(app)
 
-    assert len(app.handlers) == 27
+    assert len(app.handlers) == 36
+    assert any(isinstance(h, MessageReactionHandler) for h in app.handlers)
 
     commands = []
     for h in app.handlers:
@@ -30,6 +31,7 @@ def test_register_handlers_smoke() -> None:
     assert sorted(commands) == sorted(
         [
             "start",
+            "story",
             "admin",
             "panel",
             "miniapp",
@@ -48,6 +50,13 @@ def test_register_handlers_smoke() -> None:
             "setbio",
             "setstyle",
             "setheat",
+            "mode",
+            "setmode",
+            "showmode",
+            "bit",
+            "bits",
+            "funny",
+            "unfunny",
             "remember",
             "whois",
             "dump",
