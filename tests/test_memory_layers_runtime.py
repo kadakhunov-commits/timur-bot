@@ -90,3 +90,9 @@ def test_effective_toxicity_caps_default_and_chill_modes() -> None:
 
     memory["config"]["active_mode"] = "chill"
     assert runtime.get_effective_toxicity_level(memory) == 18
+
+
+def test_looks_like_memory_request_detection() -> None:
+    assert runtime.looks_like_memory_request("тимур высри чето из памяти")
+    assert runtime.looks_like_memory_request("вспомни старый прикол")
+    assert not runtime.looks_like_memory_request("просто ответь по теме")
