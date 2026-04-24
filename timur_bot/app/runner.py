@@ -7,5 +7,5 @@ from timur_bot.services.bot_logic import TELEGRAM_BOT_TOKEN, logger
 def main() -> None:
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     register_handlers(application)
-    logger.info("Starting Timur bot...")
+    logger.info("Запускаю Timur Bot...")
     application.run_polling()
