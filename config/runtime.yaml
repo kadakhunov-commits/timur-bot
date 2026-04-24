@@ -5,10 +5,10 @@ models:
   vision: "gpt-4o-mini"
 
 limits:
-  max_history_per_chat: 100
-  max_log_per_chat: 1000
-  max_user_samples: 20
-  max_quotes_per_user: 6
+  max_history_per_chat: 320
+  max_log_per_chat: 800
+  max_user_samples: 60
+  max_quotes_per_user: 10
   max_keywords_per_user: 40
   max_topic_edges: 300
   max_user_relations: 300
