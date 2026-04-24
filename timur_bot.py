@@ -7,15 +7,17 @@ import logging
 import os
 import random
 import re
+import subprocess
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 from dotenv import load_dotenv
 from openai import OpenAI
-from telegram import Message, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.ext import (
     Application,
+    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
     MessageHandler,
@@ -97,6 +99,15 @@ ARCHETYPE_LEXICON = {
     "романтик": {"девушка", "парень", "любовь", "влюб", "свидание", "сердце", "поцелуй"},
 }
 
+PERSONA_MODES = {
+    "default": "базовый режим: едкий и смешной собеседник, коротко и по делу.",
+    "savage": "режим злой прожарки: больше сарказма и черного юмора, но без опасных тем и травли.",
+    "chill": "режим чилл: спокойный друган с мягкими шутками, минимум токсичности.",
+    "poet": "режим стихов: отвечай рифмованно, максимум 2 короткие строки.",
+    "npc": "режим npc: будто второстепенный персонаж из игры с абсурдными репликами.",
+    "quotes": "режим цитат: отвечай как короткой псевдо-цитатой/афоризмом.",
+}
+
 # =========================
 # ЛОГИ
 # =========================
@@ -140,6 +151,8 @@ def default_memory() -> Dict[str, Any]:
             "style_settings": "",
             "bio": "",
             "toxicity_level": 82,
+            "active_mode": "default",
+            "mode_overrides": {},
             "last_random_story_ts": None,
             "vision_usage": {},
         },
@@ -171,6 +184,8 @@ def load_memory() -> Dict[str, Any]:
         cfg.setdefault("style_settings", "")
         cfg.setdefault("bio", "")
         cfg.setdefault("toxicity_level", 82)
+        cfg.setdefault("active_mode", "default")
+        cfg.setdefault("mode_overrides", {})
         cfg.setdefault("last_random_story_ts", None)
         cfg.setdefault("vision_usage", {})
 
@@ -577,6 +592,25 @@ def get_toxicity_level(memory: Dict[str, Any]) -> int:
     return max(0, min(100, val))
 
 
+def get_active_mode(memory: Dict[str, Any]) -> str:
+    cfg = memory.setdefault("config", {})
+    mode = str(cfg.get("active_mode", "default")).strip().lower()
+    if mode not in PERSONA_MODES:
+        mode = "default"
+    return mode
+
+
+def get_mode_prompt(memory: Dict[str, Any]) -> str:
+    cfg = memory.setdefault("config", {})
+    active_mode = get_active_mode(memory)
+    overrides = cfg.get("mode_overrides", {})
+    if isinstance(overrides, dict):
+        custom = str(overrides.get(active_mode, "")).strip()
+        if custom:
+            return custom
+    return PERSONA_MODES.get(active_mode, PERSONA_MODES["default"])
+
+
 def select_user_profile(memory: Dict[str, Any], user_id: int) -> str:
     user_mem = get_user_mem(memory, user_id)
     pieces = []
@@ -744,6 +778,8 @@ def build_chat_messages(memory: Dict[str, Any], message: Message) -> List[Dict[s
 
     toxicity = get_toxicity_level(memory)
     full_system += f"\nуровень прожарки: {toxicity}/100\n"
+    full_system += f"активный режим личности: {get_active_mode(memory)}\n"
+    full_system += "инструкция режима: " + get_mode_prompt(memory) + "\n"
 
     style_settings = get_style_settings(memory)
     if style_settings:
@@ -925,6 +961,467 @@ async def send_reply_with_style(
 
 
 # =========================
+# ADMIN PANEL
+# =========================
+
+def _is_owner(update: Update) -> bool:
+    user = update.effective_user
+    return bool(user and user.id == OWNER_ID)
+
+
+def _admin_main_keyboard(chat_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("режим личности", callback_data=f"adm:mode_menu:{chat_id}"),
+                InlineKeyboardButton("вредность", callback_data=f"adm:heat_menu:{chat_id}"),
+            ],
+            [
+                InlineKeyboardButton("облака ассоциаций", callback_data=f"adm:cloud_menu:{chat_id}"),
+            ],
+            [
+                InlineKeyboardButton("редактировать промпт", callback_data=f"adm:input:system_prompt:{chat_id}"),
+                InlineKeyboardButton("редактировать стиль", callback_data=f"adm:input:style:{chat_id}"),
+            ],
+            [
+                InlineKeyboardButton("редактировать био", callback_data=f"adm:input:bio:{chat_id}"),
+                InlineKeyboardButton("обновить из github", callback_data=f"adm:update_pull:{chat_id}"),
+            ],
+            [
+                InlineKeyboardButton("обновить экран", callback_data=f"adm:root:{chat_id}"),
+            ],
+        ]
+    )
+
+
+def _admin_mode_keyboard(chat_id: int, active_mode: str) -> InlineKeyboardMarkup:
+    rows: List[List[InlineKeyboardButton]] = []
+    mode_names = list(PERSONA_MODES.keys())
+    for i in range(0, len(mode_names), 2):
+        line: List[InlineKeyboardButton] = []
+        for mode in mode_names[i:i + 2]:
+            marker = "● " if mode == active_mode else ""
+            line.append(
+                InlineKeyboardButton(
+                    f"{marker}{mode}",
+                    callback_data=f"adm:set_mode:{mode}:{chat_id}",
+                )
+            )
+        rows.append(line)
+
+    rows.append(
+        [
+            InlineKeyboardButton("кастомизировать режим", callback_data=f"adm:mode_edit_menu:{chat_id}"),
+            InlineKeyboardButton("назад", callback_data=f"adm:root:{chat_id}"),
+        ]
+    )
+    return InlineKeyboardMarkup(rows)
+
+
+def _admin_mode_edit_keyboard(chat_id: int) -> InlineKeyboardMarkup:
+    rows: List[List[InlineKeyboardButton]] = []
+    mode_names = list(PERSONA_MODES.keys())
+    for i in range(0, len(mode_names), 2):
+        line: List[InlineKeyboardButton] = []
+        for mode in mode_names[i:i + 2]:
+            line.append(
+                InlineKeyboardButton(
+                    f"редактировать {mode}",
+                    callback_data=f"adm:input:mode:{mode}:{chat_id}",
+                )
+            )
+        rows.append(line)
+    rows.append([InlineKeyboardButton("назад", callback_data=f"adm:mode_menu:{chat_id}")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _admin_heat_keyboard(chat_id: int, heat: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("-20", callback_data=f"adm:heat_delta:-20:{chat_id}"),
+                InlineKeyboardButton("-5", callback_data=f"adm:heat_delta:-5:{chat_id}"),
+                InlineKeyboardButton("+5", callback_data=f"adm:heat_delta:5:{chat_id}"),
+                InlineKeyboardButton("+20", callback_data=f"adm:heat_delta:20:{chat_id}"),
+            ],
+            [
+                InlineKeyboardButton("0", callback_data=f"adm:heat_set:0:{chat_id}"),
+                InlineKeyboardButton("50", callback_data=f"adm:heat_set:50:{chat_id}"),
+                InlineKeyboardButton("100", callback_data=f"adm:heat_set:100:{chat_id}"),
+            ],
+            [
+                InlineKeyboardButton("ввести вручную", callback_data=f"adm:input:heat:{chat_id}"),
+                InlineKeyboardButton("назад", callback_data=f"adm:root:{chat_id}"),
+            ],
+        ]
+    )
+
+
+def _admin_cloud_users_keyboard(memory: Dict[str, Any], chat_id: int) -> InlineKeyboardMarkup:
+    chat_mem = get_chat_mem(memory, chat_id)
+    participants = chat_mem.get("participants", {})
+    p_sorted = sorted(
+        participants.values(),
+        key=lambda p: int(p.get("message_count", 0)),
+        reverse=True,
+    )[:12]
+
+    rows: List[List[InlineKeyboardButton]] = []
+    for p in p_sorted:
+        uid = int(p.get("user_id", 0))
+        if not uid:
+            continue
+        name = p.get("name") or p.get("username") or str(uid)
+        rows.append(
+            [InlineKeyboardButton(name[:28], callback_data=f"adm:cloud_user:{uid}:{chat_id}")]
+        )
+
+    rows.append([InlineKeyboardButton("назад", callback_data=f"adm:root:{chat_id}")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _format_admin_status(memory: Dict[str, Any], chat_id: int) -> str:
+    chat_mem = get_chat_mem(memory, chat_id)
+    participants_cnt = len(chat_mem.get("participants", {}))
+    relations_cnt = len(chat_mem.get("user_relations", {}))
+    topic_edges_cnt = len(chat_mem.get("topic_edges", {}))
+    return (
+        "админ панель тимура\n"
+        f"чат: {chat_id}\n"
+        f"режим: {get_active_mode(memory)}\n"
+        f"вредность: {get_toxicity_level(memory)}/100\n"
+        f"персонажей в памяти: {participants_cnt}\n"
+        f"связей user-user: {relations_cnt}\n"
+        f"ребер облака тем: {topic_edges_cnt}"
+    )
+
+
+def _format_cloud_for_user(memory: Dict[str, Any], chat_id: int, user_id: int) -> str:
+    chat_mem = get_chat_mem(memory, chat_id)
+    participants = chat_mem.get("participants", {})
+    p = participants.get(str(user_id))
+    if not p:
+        return "по этому персонажу пока нет данных"
+
+    name = p.get("name") or p.get("username") or str(user_id)
+    archetypes = _top_items(p.get("archetypes", {}), n=4)
+    keywords = _top_items(p.get("keywords", {}), n=8)
+    archetype_text = ", ".join(a for a, _ in archetypes) if archetypes else "нет"
+    keyword_text = ", ".join(k for k, _ in keywords) if keywords else "нет"
+
+    topic_links = []
+    for edge, weight in chat_mem.get("topic_edges", {}).items():
+        if edge.startswith(f"u:{user_id}|k:"):
+            topic = edge.split("|", 1)[1].replace("k:", "", 1)
+            topic_links.append((topic, float(weight)))
+    topic_links.sort(key=lambda x: (-x[1], x[0]))
+
+    rel = []
+    for key, weight in chat_mem.get("user_relations", {}).items():
+        if "|" not in key:
+            continue
+        a_str, b_str = key.split("|", 1)
+        a, b = int(a_str), int(b_str)
+        if user_id not in (a, b):
+            continue
+        other = b if a == user_id else a
+        pdata = participants.get(str(other), {})
+        other_name = pdata.get("name") or pdata.get("username") or str(other)
+        rel.append((other_name, float(weight)))
+    rel.sort(key=lambda x: (-x[1], x[0]))
+
+    lines = [
+        f"ассоциативная карта: {name}",
+        f"сообщений: {p.get('message_count', 0)}",
+        "архетипы: " + archetype_text,
+        "ключевые слова: " + keyword_text,
+    ]
+    if topic_links:
+        lines.append("сильные темы: " + ", ".join(t for t, _ in topic_links[:8]))
+    if rel:
+        lines.append("связи с людьми: " + ", ".join(n for n, _ in rel[:6]))
+    return "\n".join(lines)
+
+
+def _set_admin_pending(context: ContextTypes.DEFAULT_TYPE, payload: Dict[str, Any]) -> None:
+    context.user_data["admin_pending"] = payload
+
+
+def _clear_admin_pending(context: ContextTypes.DEFAULT_TYPE) -> None:
+    context.user_data.pop("admin_pending", None)
+
+
+async def _run_git_pull() -> str:
+    try:
+        proc = await asyncio.to_thread(
+            subprocess.run,
+            ["git", "pull", "--rebase", "origin", "main"],
+            cwd=str(BASE_DIR),
+            text=True,
+            capture_output=True,
+            timeout=60,
+            check=False,
+        )
+        out = (proc.stdout or "").strip()
+        err = (proc.stderr or "").strip()
+        result = out if out else err
+        if not result:
+            result = "команда выполнена без вывода"
+        if len(result) > 3000:
+            result = result[:3000] + "\n...\n[обрезано]"
+        return result
+    except Exception as e:
+        return f"ошибка обновления: {e}"
+
+
+async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    del context
+    if not _is_owner(update):
+        return
+    message = update.message
+    if not message:
+        return
+    memory = load_memory()
+    chat_id = message.chat_id
+    await message.reply_text(
+        _format_admin_status(memory, chat_id),
+        reply_markup=_admin_main_keyboard(chat_id),
+    )
+
+
+async def _handle_admin_pending_text(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    memory: Dict[str, Any],
+) -> bool:
+    if not _is_owner(update):
+        return False
+    message = update.effective_message
+    if not message:
+        return False
+
+    pending = context.user_data.get("admin_pending")
+    if not pending:
+        return False
+
+    text = _extract_message_text(message)
+    if not text:
+        return True
+
+    if text.strip().lower() == "/cancel":
+        _clear_admin_pending(context)
+        await message.reply_text("действие отменено")
+        return True
+
+    cfg = memory.setdefault("config", {})
+    action = pending.get("action", "")
+
+    if action == "system_prompt":
+        cfg["system_prompt"] = text.strip()
+        save_memory(memory)
+        _clear_admin_pending(context)
+        await message.reply_text("system prompt обновлен")
+        return True
+
+    if action == "style":
+        cfg["style_settings"] = text.strip()
+        save_memory(memory)
+        _clear_admin_pending(context)
+        await message.reply_text("style settings обновлены")
+        return True
+
+    if action == "bio":
+        cfg["bio"] = text.strip()
+        save_memory(memory)
+        _clear_admin_pending(context)
+        await message.reply_text("био обновлено")
+        return True
+
+    if action == "heat":
+        try:
+            heat = int(text.strip())
+        except ValueError:
+            await message.reply_text("нужно число 0..100 или /cancel")
+            return True
+        cfg["toxicity_level"] = max(0, min(100, heat))
+        save_memory(memory)
+        _clear_admin_pending(context)
+        await message.reply_text(f"вредность обновлена: {cfg['toxicity_level']}")
+        return True
+
+    if action == "mode_override":
+        mode = str(pending.get("mode", "default"))
+        overrides = cfg.setdefault("mode_overrides", {})
+        overrides[mode] = text.strip()
+        save_memory(memory)
+        _clear_admin_pending(context)
+        await message.reply_text(f"кастомный текст для режима {mode} обновлен")
+        return True
+
+    _clear_admin_pending(context)
+    await message.reply_text("неизвестное действие, сбросил ожидание")
+    return True
+
+
+async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query or not _is_owner(update):
+        if query:
+            await query.answer("нет доступа", show_alert=True)
+        return
+
+    data = query.data or ""
+    memory = load_memory()
+
+    parts = data.split(":")
+    if len(parts) < 3 or parts[0] != "adm":
+        await query.answer()
+        return
+
+    action = parts[1]
+    await query.answer()
+
+    if action == "root":
+        chat_id = int(parts[2])
+        _clear_admin_pending(context)
+        await query.edit_message_text(
+            _format_admin_status(memory, chat_id),
+            reply_markup=_admin_main_keyboard(chat_id),
+        )
+        return
+
+    if action == "mode_menu":
+        chat_id = int(parts[2])
+        await query.edit_message_text(
+            "выбери режим личности",
+            reply_markup=_admin_mode_keyboard(chat_id, get_active_mode(memory)),
+        )
+        return
+
+    if action == "mode_edit_menu":
+        chat_id = int(parts[2])
+        await query.edit_message_text(
+            "выбери режим, для которого меняем кастомный текст",
+            reply_markup=_admin_mode_edit_keyboard(chat_id),
+        )
+        return
+
+    if action == "set_mode" and len(parts) >= 4:
+        mode = parts[2]
+        chat_id = int(parts[3])
+        if mode not in PERSONA_MODES:
+            await query.answer("неизвестный режим", show_alert=True)
+            return
+        memory.setdefault("config", {})["active_mode"] = mode
+        save_memory(memory)
+        await query.edit_message_text(
+            f"режим переключен: {mode}",
+            reply_markup=_admin_mode_keyboard(chat_id, mode),
+        )
+        return
+
+    if action == "heat_menu":
+        chat_id = int(parts[2])
+        heat = get_toxicity_level(memory)
+        await query.edit_message_text(
+            f"текущая вредность: {heat}/100",
+            reply_markup=_admin_heat_keyboard(chat_id, heat),
+        )
+        return
+
+    if action == "heat_delta" and len(parts) >= 4:
+        delta = int(parts[2])
+        chat_id = int(parts[3])
+        cfg = memory.setdefault("config", {})
+        heat = get_toxicity_level(memory) + delta
+        cfg["toxicity_level"] = max(0, min(100, heat))
+        save_memory(memory)
+        await query.edit_message_text(
+            f"текущая вредность: {cfg['toxicity_level']}/100",
+            reply_markup=_admin_heat_keyboard(chat_id, cfg["toxicity_level"]),
+        )
+        return
+
+    if action == "heat_set" and len(parts) >= 4:
+        val = int(parts[2])
+        chat_id = int(parts[3])
+        memory.setdefault("config", {})["toxicity_level"] = max(0, min(100, val))
+        save_memory(memory)
+        await query.edit_message_text(
+            f"текущая вредность: {get_toxicity_level(memory)}/100",
+            reply_markup=_admin_heat_keyboard(chat_id, get_toxicity_level(memory)),
+        )
+        return
+
+    if action == "cloud_menu":
+        chat_id = int(parts[2])
+        await query.edit_message_text(
+            "выбери персонажа для просмотра ассоциативного облака",
+            reply_markup=_admin_cloud_users_keyboard(memory, chat_id),
+        )
+        return
+
+    if action == "cloud_user" and len(parts) >= 4:
+        user_id = int(parts[2])
+        chat_id = int(parts[3])
+        await query.edit_message_text(
+            _format_cloud_for_user(memory, chat_id, user_id),
+            reply_markup=InlineKeyboardMarkup(
+                [
+                    [InlineKeyboardButton("к списку", callback_data=f"adm:cloud_menu:{chat_id}")],
+                    [InlineKeyboardButton("в главное меню", callback_data=f"adm:root:{chat_id}")],
+                ]
+            ),
+        )
+        return
+
+    if action == "input":
+        input_kind = parts[2]
+        if input_kind == "mode" and len(parts) >= 5:
+            mode = parts[3]
+            chat_id = int(parts[4])
+            _set_admin_pending(context, {"action": "mode_override", "mode": mode})
+            await query.edit_message_text(
+                f"пришли новый текст для режима {mode} одним сообщением\n/cancel чтобы отменить",
+                reply_markup=InlineKeyboardMarkup(
+                    [[InlineKeyboardButton("назад", callback_data=f"adm:mode_edit_menu:{chat_id}")]]
+                ),
+            )
+            return
+
+        chat_id = int(parts[3]) if len(parts) >= 4 else query.message.chat_id
+        if input_kind in {"system_prompt", "style", "bio", "heat"}:
+            _set_admin_pending(context, {"action": input_kind})
+            hints = {
+                "system_prompt": "пришли новый system prompt одним сообщением",
+                "style": "пришли новый style settings одним сообщением",
+                "bio": "пришли новое био тимура одним сообщением",
+                "heat": "пришли число 0..100",
+            }
+            await query.edit_message_text(
+                hints[input_kind] + "\n/cancel чтобы отменить",
+                reply_markup=InlineKeyboardMarkup(
+                    [[InlineKeyboardButton("назад", callback_data=f"adm:root:{chat_id}")]]
+                ),
+            )
+            return
+
+    if action == "update_pull":
+        chat_id = int(parts[2])
+        await query.edit_message_text("обновляю из github, пару секунд...")
+        pull_result = await _run_git_pull()
+        await query.edit_message_text(
+            "результат обновления:\n" + pull_result,
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("в меню", callback_data=f"adm:root:{chat_id}")]]
+            ),
+        )
+        return
+
+    await query.answer("непонятная команда панели", show_alert=True)
+
+
+# =========================
 # TELEGRAM HANDLERS
 # =========================
 
@@ -939,6 +1436,9 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     message = update.effective_message
 
     if not message or not message.from_user:
+        return
+
+    if await _handle_admin_pending_text(update, context, memory):
         return
 
     logger.info(
@@ -1302,6 +1802,8 @@ def main() -> None:
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
     application.add_handler(CommandHandler("start", start_cmd))
+    application.add_handler(CommandHandler("admin", admin_cmd))
+    application.add_handler(CommandHandler("panel", admin_cmd))
     application.add_handler(CommandHandler("setprompt", setprompt_cmd))
     application.add_handler(CommandHandler("appendprompt", appendprompt_cmd))
     application.add_handler(CommandHandler("showprompt", showprompt_cmd))
@@ -1314,6 +1816,7 @@ def main() -> None:
     application.add_handler(CommandHandler("dump", dump_cmd))
     application.add_handler(CommandHandler("clearmemory", clearmemory_cmd))
 
+    application.add_handler(CallbackQueryHandler(admin_callback_handler, pattern=r"^adm:"))
     application.add_handler(MessageHandler(filters.PHOTO & ~filters.COMMAND, photo_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
