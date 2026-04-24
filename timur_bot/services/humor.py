@@ -34,6 +34,18 @@ MAX_FUNNY_EXAMPLES = 240
 MAX_BOT_OUTPUTS = 80
 MAX_FEEDBACK_LOG = 120
 CALLBACK_COOLDOWN_USES = 3
+BLOCKED_CALLBACK_PATTERNS = (
+    re.compile(r"мит[яи].*(сн[её]с|удал[ие]).*сообщ", re.I),
+    re.compile(r"сообщени[яй].*(сн[её]с|удал[ие]).*кадыр", re.I),
+    re.compile(r"(сн[её]с|удал[ие]).*сообщени[яй].*кадыр", re.I),
+)
+
+
+def _is_blocked_callback_text(text: str) -> bool:
+    clean = re.sub(r"\s+", " ", (text or "").strip().lower())
+    if not clean:
+        return False
+    return any(p.search(clean) for p in BLOCKED_CALLBACK_PATTERNS)
 
 
 def ensure_humor_schema(chat_mem: Dict[str, Any]) -> Dict[str, Any]:
@@ -189,6 +201,9 @@ def select_joke_bit(chat_mem: Dict[str, Any], text: str) -> Optional[Dict[str, A
     bank = layers.get("joke_bank", [])
     if not bank:
         return None
+    bank = [bit for bit in bank if not _is_blocked_callback_text(str(bit.get("text", "")))]
+    if not bank:
+        return None
 
     query = _tokens(text)
     overused = layers.get("overused_bits", {})
@@ -210,6 +225,15 @@ def select_joke_bit(chat_mem: Dict[str, Any], text: str) -> Optional[Dict[str, A
 def select_funny_examples(chat_mem: Dict[str, Any], text: str, limit: int = 2) -> List[Dict[str, Any]]:
     layers = ensure_humor_schema(chat_mem)
     examples = layers.get("funny_examples", [])
+    if not examples:
+        return []
+    examples = [
+        example
+        for example in examples
+        if not _is_blocked_callback_text(
+            str(example.get("good_reply", "")) + " " + " ".join(str(item.get("text", "")) for item in example.get("context", []))
+        )
+    ]
     if not examples:
         return []
     query = _tokens(text)
