@@ -55,6 +55,13 @@ def sanitize_reply_text(raw: str) -> str:
 
     text = raw.strip()
     text = re.sub(r"^\s*тимур\s*[:\-]\s*", "", text, flags=re.IGNORECASE)
+    # Remove accidental provider promo footer before any other normalization.
+    text = re.sub(
+        r"\s*promo:\s*upgrade to remove limits\s*$",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
     text = text.lower()
     text = re.sub("[\U00010000-\U0010ffff]", "", text)
     if len(text) > 400:
