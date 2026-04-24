@@ -749,6 +749,22 @@ def is_blocked_memory_text(text: str) -> bool:
     return any(pattern.search(clean) for pattern in BLOCKED_MEMORY_PATTERNS)
 
 
+def looks_like_memory_request(text: str) -> bool:
+    clean = re.sub(r"\s+", " ", str(text or "")).strip().lower()
+    if not clean:
+        return False
+    hints = (
+        "из памяти",
+        "память",
+        "вспомни",
+        "вспоминай",
+        "старое",
+        "старый прикол",
+        "что было",
+    )
+    return any(h in clean for h in hints)
+
+
 def enforce_reply_guardrails(reply_text: str) -> str:
     clean = sanitize_reply_text(reply_text)
     if not clean:
@@ -958,6 +974,8 @@ def build_chat_messages(
 
     system_prompt = get_system_prompt(memory)
     user_profile = select_user_profile(memory, tg_user.id)
+    user_text = _extract_message_text(message)
+    memory_requested = looks_like_memory_request(user_text)
     chat_history = select_chat_history_for_context(memory, message.chat_id)
     recent_facts = select_recent_facts_for_context(memory, message.chat_id)
     random_memories = select_old_random_memories(memory, message.chat_id)
@@ -973,16 +991,14 @@ def build_chat_messages(
 
     full_system = system_prompt + "\n\n"
     full_system += (
-        "правила стиля:\n"
+        "гайд по стилю:\n"
         "- всегда используй только строчные буквы\n"
         "- без эмодзи\n"
         "- максимум 2 очень коротких предложения в одном сообщении\n"
-        "- сначала смешная мысль или абсурдная добивка, потом уже колкость\n"
-        "- не заменяй юмор прямым оскорблением\n"
-        "- нельзя призывать к насилию или унижать по защищенным признакам\n"
-        "- не объясняй как ты думаешь, просто говори\n"
-        "- локальные мемы используй редко и только когда они прямо попадают в контекст\n"
-        "- запрещено повторять старый мем про удаленные сообщения кадыра\n"
+        "- делай упор на естественный живой вайб, а не на шаблон\n"
+        "- подкол должен быть дружеским, без личного унижения\n"
+        "- локальные мемы только когда они реально к месту\n"
+        "- не повторяй старый мем про удаленные сообщения кадыра\n"
     )
 
     toxicity = get_effective_toxicity_level(memory)
@@ -998,10 +1014,10 @@ def build_chat_messages(
     if bio_settings:
         full_system += "\nбио тимура от владельца:\n" + bio_settings + "\n"
 
-    if user_profile:
+    if user_profile and random.random() < 0.6:
         full_system += "\nинфа о собеседнике:\n" + user_profile
 
-    if association_context:
+    if association_context and (memory_requested or random.random() < 0.4):
         full_system += "\n\nкарта персонажей и ассоциаций:\n" + association_context
 
     full_system += "\n\n" + format_humor_prompt(humor_plan) + "\n"
@@ -1009,17 +1025,15 @@ def build_chat_messages(
     if hist_lines:
         full_system += "\n\nпоследние сообщения в чате:\n" + "\n".join(hist_lines)
 
-    if recent_facts:
+    if recent_facts and (memory_requested or random.random() < 0.4):
         full_system += "\n\nнедавние факты беседы (приоритет):\n"
-        for line in recent_facts:
+        for line in recent_facts[:2]:
             full_system += f"- {line}\n"
 
-    if random_memories:
+    if random_memories and memory_requested:
         full_system += "\n\nдалекие факты беседы (редкие точечные отсылки):\n"
-        for line in random_memories:
+        for line in random_memories[:1]:
             full_system += f"- {line}\n"
-
-    user_text = _extract_message_text(message)
 
     return [
         {"role": "system", "content": full_system},

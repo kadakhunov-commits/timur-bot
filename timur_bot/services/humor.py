@@ -320,26 +320,25 @@ def choose_humor_plan(
 
 def format_humor_prompt(plan: Dict[str, Any]) -> str:
     lines = [
-        "комедийное задание:",
+        "ориентир для шутки (не жесткая инструкция):",
         f"- режим: {plan.get('mode', 'deadpan')}",
         f"- цель: {plan.get('target_user_name') or plan.get('target_user_id')}",
-        f"- прием: {plan.get('instruction', '')}",
+        f"- если ложится по контексту: {plan.get('instruction', '')}",
     ]
     bit = plan.get("bit")
     if bit:
-        lines.append(f"- локальный bit: {bit.get('text')}")
+        lines.append(f"- возможный локальный bit: {bit.get('text')}")
     examples = plan.get("examples") or []
     if examples:
-        lines.append("- похожие удачные примеры из чата:")
-        for example in examples[:2]:
+        lines.append("- один похожий удачный пример из чата:")
+        for example in examples[:1]:
             ctx = " / ".join(
                 f"{item.get('author')}: {item.get('text')}" for item in example.get("context", [])[-3:]
             )
             lines.append(f"  контекст: {ctx}")
             lines.append(f"  удачный ответ: {example.get('good_reply')}")
-    lines.append("- не объясняй шутку и не делай стендап-монолог")
-    lines.append("- не называй человека тупым/дебилом/ничтожным, смеши через ситуацию")
-    lines.append("- не переходи на личные наезды, психоанализ и унижение интеллекта")
+    lines.append("- если подсказка мешает, игнорируй ее и ответь естественно по вайбу чата")
+    lines.append("- без личных наездов и унижения интеллекта")
     return "\n".join(lines)
 
 
