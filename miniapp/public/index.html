@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>timur.bot admin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@800&family=Unbounded:wght@400;700;900&display=swap" rel="stylesheet" />
+  <script src="https://telegram.org/js/telegram-web-app.js?62"></script>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+  <style>
+    :root {
+      --accent: #00f0ff;
+      --accent-2: #7000ff;
+      --accent-gradient: linear-gradient(135deg, #00f0ff 0%, #7000ff 100%);
+      --bg-color: var(--tg-theme-bg-color, #0f0f12);
+      --secondary-bg: var(--tg-theme-secondary-bg-color, #1a1a1f);
+      --text-color: var(--tg-theme-text-color, #fff);
+      --hint: var(--tg-theme-hint-color, #8e8e93);
+      --glass: rgba(255, 255, 255, 0.05);
+      --glass-border: rgba(255, 255, 255, 0.12);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(900px 420px at -20% -8%, rgba(0, 240, 255, 0.18), transparent 62%),
+        radial-gradient(800px 420px at 120% 10%, rgba(112, 0, 255, 0.20), transparent 58%),
+        var(--bg-color);
+      color: var(--text-color);
+      font-family: 'Unbounded', sans-serif;
+      padding-bottom: calc(104px + var(--tg-content-safe-area-inset-bottom, 0px));
+    }
+
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      display: flex;
+      gap: 10px;
+      padding: calc(14px + var(--tg-safe-area-inset-top, 0px)) 16px 14px;
+      overflow-x: auto;
+      background: color-mix(in srgb, var(--bg-color) 90%, transparent);
+      border-bottom: 1px solid var(--glass-border);
+      backdrop-filter: blur(16px);
+    }
+    nav::-webkit-scrollbar { display: none; }
+
+    .nav-btn {
+      white-space: nowrap;
+      border: 1px solid var(--glass-border);
+      border-radius: 14px;
+      padding: 10px 14px;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--hint);
+      background: color-mix(in srgb, var(--secondary-bg) 88%, transparent);
+      transition: .22s;
+      cursor: pointer;
+    }
+    .nav-btn.active {
+      background: #fff;
+      color: #090b0f;
+      border-color: #fff;
+    }
+
+    .container { padding: 20px 16px; max-width: 920px; margin: 0 auto; }
+    .section { display: none; animation: slide .34s ease; }
+    .section.active { display: block; }
+    @keyframes slide { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+
+    .logo {
+      font-family: 'Syne', sans-serif;
+      font-size: 36px;
+      line-height: .84;
+      letter-spacing: -2px;
+      margin: 0 0 14px;
+    }
+
+    .gradient-text {
+      background: var(--accent-gradient);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      color: transparent;
+    }
+
+    .card {
+      border: 1px solid var(--glass-border);
+      border-radius: 24px;
+      background: var(--glass);
+      backdrop-filter: blur(18px);
+      padding: 18px;
+      margin-bottom: 14px;
+    }
+
+    .label {
+      font-size: 11px;
+      font-weight: 900;
+      text-transform: uppercase;
+      color: var(--hint);
+      letter-spacing: 1px;
+      margin-bottom: 10px;
+      display: block;
+    }
+
+    .persona-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .chip {
+      border: 1px solid var(--glass-border);
+      border-radius: 16px;
+      text-align: center;
+      padding: 14px;
+      font-size: 12px;
+      font-weight: 700;
+      background: color-mix(in srgb, var(--secondary-bg) 85%, transparent);
+      cursor: pointer;
+    }
+    .chip.active { border-color: var(--accent); color: var(--accent); }
+
+    .row { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+    .small { font-size: 11px; color: var(--hint); }
+    .preview {
+      margin-top: 12px;
+      border-left: 3px solid var(--accent);
+      border-radius: 12px;
+      background: color-mix(in srgb, var(--secondary-bg) 82%, transparent);
+      padding: 12px;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .member-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+    .member-tab {
+      border-radius: 999px;
+      border: 1px solid var(--glass-border);
+      padding: 8px 12px;
+      background: color-mix(in srgb, var(--secondary-bg) 88%, transparent);
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .member-tab.active { color: var(--accent); border-color: var(--accent); }
+
+    .cloud-radial {
+      border: 1px solid var(--glass-border);
+      border-radius: 18px;
+      background:
+        radial-gradient(420px 200px at 50% 44%, rgba(0, 240, 255, 0.08), transparent 60%),
+        radial-gradient(460px 240px at 50% 56%, rgba(112, 0, 255, 0.09), transparent 62%),
+        color-mix(in srgb, var(--secondary-bg) 86%, transparent);
+      min-height: 320px;
+      position: relative;
+      overflow: hidden;
+    }
+    .cloud-svg { width: 100%; height: 320px; display: block; }
+
+    .switch-wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; }
+    .switch-btn {
+      border: 1px solid var(--glass-border);
+      border-radius: 14px;
+      padding: 11px;
+      text-align: center;
+      font-size: 11px;
+      font-weight: 700;
+      background: color-mix(in srgb, var(--secondary-bg) 86%, transparent);
+      cursor: pointer;
+    }
+    .switch-btn.active { background: #fff; color: #0a0c10; border-color: #fff; }
+
+    .price-main {
+      font-family: 'Syne', sans-serif;
+      font-size: 38px;
+      line-height: 1;
+      margin-top: 8px;
+    }
+
+    .table {
+      margin-top: 10px;
+      border: 1px solid var(--glass-border);
+      border-radius: 14px;
+      overflow: hidden;
+    }
+    .tr {
+      display: grid;
+      grid-template-columns: 1.4fr .8fr .6fr;
+      gap: 8px;
+      padding: 10px;
+      font-size: 11px;
+      border-bottom: 1px solid var(--glass-border);
+      background: color-mix(in srgb, var(--secondary-bg) 88%, transparent);
+    }
+    .tr:last-child { border-bottom: none; }
+    .tr.head { color: var(--hint); text-transform: uppercase; font-size: 10px; }
+
+    .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+    .btn {
+      border: none;
+      border-radius: 14px;
+      padding: 12px;
+      font-family: 'Unbounded', sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .btn.primary { background: #fff; color: #090b0f; }
+    .btn.secondary { background: color-mix(in srgb, var(--secondary-bg) 88%, transparent); color: var(--text-color); border: 1px solid var(--glass-border); }
+
+    .bottom-bar {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      padding: 14px 16px;
+      padding-bottom: calc(14px + var(--tg-content-safe-area-inset-bottom, 0px));
+      background: linear-gradient(to top, color-mix(in srgb, var(--bg-color) 96%, transparent), transparent);
+    }
+    .save-btn {
+      width: 100%;
+      border: none;
+      border-radius: 18px;
+      padding: 16px;
+      font-family: 'Syne', sans-serif;
+      font-size: 15px;
+      text-transform: uppercase;
+      color: #fff;
+      background: var(--accent-gradient);
+    }
+
+    .toast {
+      position: fixed;
+      left: 50%;
+      transform: translateX(-50%);
+      bottom: calc(88px + var(--tg-content-safe-area-inset-bottom, 0px));
+      border: 1px solid var(--glass-border);
+      border-radius: 12px;
+      background: color-mix(in srgb, var(--secondary-bg) 90%, transparent);
+      padding: 10px 12px;
+      font-size: 12px;
+      font-weight: 700;
+      opacity: 0;
+      pointer-events: none;
+      transition: .2s;
+    }
+    .toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <nav>
+    <div class="nav-btn active" data-section="settings">Настройки</div>
+    <div class="nav-btn" data-section="members">Память</div>
+    <div class="nav-btn" data-section="billing">Оплата</div>
+  </nav>
+
+  <div class="container">
+    <section id="settings" class="section active">
+      <h1 class="logo">timur.<br><span class="gradient-text">bot</span></h1>
+      <div class="card">
+        <span class="label">Режим личности</span>
+        <div class="persona-grid" id="personaGrid"></div>
+        <div style="margin-top:12px" class="row"><span class="small">Уровень вредности</span><b id="heatValue">82/100</b></div>
+        <input id="heatRange" type="range" min="0" max="100" value="82" style="width:100%; accent-color:#00f0ff; margin-top:8px" />
+        <div class="preview" id="previewText"></div>
+      </div>
+    </section>
+
+    <section id="members" class="section">
+      <h2 class="logo">data.<span class="gradient-text">cloud</span></h2>
+      <div class="card">
+        <span class="label">Персонажи беседы</span>
+        <div class="member-tabs" id="memberTabs"></div>
+        <div class="cloud-radial">
+          <svg id="cloudSvg" class="cloud-svg" viewBox="0 0 800 320" preserveAspectRatio="xMidYMid meet"></svg>
+        </div>
+        <div class="small" style="margin-top:10px" id="archText"></div>
+        <div class="small" id="linksText"></div>
+      </div>
+    </section>
+
+    <section id="billing" class="section">
+      <h2 class="logo">pay.<span class="gradient-text">hub</span></h2>
+      <div class="card">
+        <span class="label">Схема оплаты</span>
+        <div class="switch-wrap">
+          <div class="switch-btn active" data-mode="owner">Админ платит за всех</div>
+          <div class="switch-btn" data-mode="split">Split на участников</div>
+        </div>
+        <div class="row"><span class="small">Активных за 30 дней</span><b id="activeUsers">13</b></div>
+        <div class="row"><span class="small">Платящих</span><b id="payerCount">10</b></div>
+        <div class="row"><span class="small">Цена за активного</span><b id="pricePerActive">45₽</b></div>
+        <div class="row"><span class="small">Итого (внутри)</span><b id="totalRub">585₽</b></div>
+        <div class="price-main" id="totalStars">699 Stars</div>
+        <div class="small">Для цифровых функций в Telegram используются Stars (целые значения).</div>
+
+        <div class="table">
+          <div class="tr head"><div>Участник</div><div>Статус</div><div>Доля</div></div>
+          <div id="payerRows"></div>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn secondary" id="createInvoices">Сформировать инвойсы</button>
+          <button class="btn primary" id="payNow">Оплатить</button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="bottom-bar">
+    <button class="save-btn" id="saveAll">Сохранить конфиг</button>
+  </div>
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const tg = window.Telegram?.WebApp;
+    if (tg) {
+      tg.ready();
+      tg.expand();
+    }
+
+    const state = {
+      persona: 'toxic',
+      heat: 82,
+      billingMode: 'owner',
+      activeUsers30d: 13,
+      payerCount: 10,
+      pricePerActiveRub: 45,
+      minRub: 199,
+      maxRub: 3490,
+      starsPerRub: 1.2,
+      selectedMember: 'timur',
+      members: [
+        { id: 'alex', title: '@alex_crypto', tags: ['Лудоман', 'NFT', 'ТЕМКИ', 'Стейкинг', 'Python'], archetypes: ['драматик', 'айтишник'], links: ['@masha_dev', '@timur'] },
+        { id: 'masha', title: '@masha_dev', tags: ['Frontend', 'UX/UI', 'Awwwards', 'Swift', 'Дедлайны'], archetypes: ['айтишник', 'мемолог'], links: ['@alex_crypto', '@timur'] },
+        { id: 'timur', title: '@timur', tags: ['Сленг', 'Прожарка', 'Казань', 'Зал', 'Ирония', 'Мемы'], archetypes: ['мемолог', 'спортсмен'], links: ['@alex_crypto', '@masha_dev'] }
+      ],
+      previews: {
+        toxic: 'опять ты? это было настолько криво что даже баг засмущался',
+        genius: 'решение есть просто не надо ломать архитектуру из-за одной фичи',
+        slang: 'бро ща чётко разложу и будет вообще красота',
+        silent: '...'
+      }
+    };
+
+    const PERSONAS = [
+      ['toxic', 'TOXIC AI'],
+      ['genius', 'GENIUS'],
+      ['slang', 'SLANG'],
+      ['silent', 'SILENT']
+    ];
+
+    let cloudSim = null;
+
+    function haptic(kind = 'selection') {
+      if (!tg?.HapticFeedback) return;
+      try {
+        if (kind === 'selection') tg.HapticFeedback.selectionChanged();
+        if (kind === 'soft') tg.HapticFeedback.impactOccurred('soft');
+        if (kind === 'success') tg.HapticFeedback.notificationOccurred('success');
+      } catch (_) {}
+    }
+
+    function showToast(text) {
+      const el = document.getElementById('toast');
+      el.textContent = text;
+      el.classList.add('show');
+      setTimeout(() => el.classList.remove('show'), 1600);
+    }
+
+    function totalRub() {
+      const raw = state.activeUsers30d * state.pricePerActiveRub;
+      return Math.max(state.minRub, Math.min(state.maxRub, raw));
+    }
+
+    function totalStars() {
+      return Math.max(1, Math.round(totalRub() * state.starsPerRub));
+    }
+
+    function renderNav() {
+      const tabs = document.querySelectorAll('.nav-btn');
+      const sections = document.querySelectorAll('.section');
+      tabs.forEach(t => {
+        t.onclick = () => {
+          tabs.forEach(x => x.classList.remove('active'));
+          sections.forEach(s => s.classList.remove('active'));
+          t.classList.add('active');
+          document.getElementById(t.dataset.section).classList.add('active');
+          haptic('selection');
+        };
+      });
+    }
+
+    function renderPersona() {
+      const wrap = document.getElementById('personaGrid');
+      wrap.innerHTML = '';
+      PERSONAS.forEach(([id, title]) => {
+        const el = document.createElement('div');
+        el.className = 'chip' + (state.persona === id ? ' active' : '');
+        el.textContent = title;
+        el.onclick = () => {
+          state.persona = id;
+          renderPersona();
+          renderPreview();
+          haptic('soft');
+        };
+        wrap.appendChild(el);
+      });
+      const r = document.getElementById('heatRange');
+      r.value = String(state.heat);
+      r.oninput = e => {
+        state.heat = Number(e.target.value);
+        document.getElementById('heatValue').textContent = state.heat + '/100';
+      };
+      document.getElementById('heatValue').textContent = state.heat + '/100';
+    }
+
+    function renderPreview() {
+      document.getElementById('previewText').textContent = state.previews[state.persona] || '...';
+    }
+
+    function renderMembers() {
+      const tabs = document.getElementById('memberTabs');
+      tabs.innerHTML = '';
+      state.members.forEach(m => {
+        const b = document.createElement('button');
+        b.className = 'member-tab' + (state.selectedMember === m.id ? ' active' : '');
+        b.textContent = m.title;
+        b.onclick = () => {
+          state.selectedMember = m.id;
+          renderMembers();
+          haptic('selection');
+        };
+        tabs.appendChild(b);
+      });
+
+      const m = state.members.find(x => x.id === state.selectedMember) || state.members[0];
+      renderRadialCloud(m.tags);
+      document.getElementById('archText').textContent = 'Архетипы: ' + m.archetypes.join(', ');
+      document.getElementById('linksText').textContent = 'Связи: ' + m.links.join(', ');
+    }
+
+    function renderRadialCloud(tags) {
+      const svg = d3.select('#cloudSvg');
+      const host = document.getElementById('cloudSvg');
+      const w = Math.max(320, host.clientWidth || 800);
+      const h = 320;
+      const cx = w / 2;
+      const cy = h / 2;
+
+      svg.attr('viewBox', `0 0 ${w} ${h}`);
+      svg.selectAll('*').remove();
+      if (cloudSim) cloudSim.stop();
+
+      const defs = svg.append('defs');
+      const glow = defs.append('filter').attr('id', 'glow');
+      glow.append('feGaussianBlur').attr('stdDeviation', '4').attr('result', 'blur');
+      const merge = glow.append('feMerge');
+      merge.append('feMergeNode').attr('in', 'blur');
+      merge.append('feMergeNode').attr('in', 'SourceGraphic');
+
+      const sorted = [...tags].sort((a, b) => b.length - a.length);
+      const maxLen = Math.max(...sorted.map(t => t.length), 8);
+      const minLen = Math.min(...sorted.map(t => t.length), 3);
+      const range = Math.max(1, maxLen - minLen);
+
+      const nodes = sorted.map((label, i) => {
+        const k = (label.length - minLen) / range;
+        const r = 24 + k * 34;
+        const ring = 52 + (i % 3) * 38 + k * 8;
+        const ang = (Math.PI * 2 * i) / Math.max(1, sorted.length);
+        return {
+          label,
+          r,
+          baseRing: ring,
+          baseAngle: ang,
+          phase: Math.random() * Math.PI * 2,
+          x: cx + Math.cos(ang) * ring,
+          y: cy + Math.sin(ang) * ring,
+          vx: 0,
+          vy: 0
+        };
+      });
+
+      function orbitForce() {
+        let local = [];
+        function force(alpha) {
+          const t = Date.now() / 1700;
+          for (const d of local) {
+            const wobble = Math.sin(t + d.phase) * 8;
+            const a = d.baseAngle + t * 0.1;
+            const rr = d.baseRing + wobble;
+            const tx = cx + Math.cos(a) * rr;
+            const ty = cy + Math.sin(a) * rr;
+            d.vx += (tx - d.x) * 0.003 * alpha;
+            d.vy += (ty - d.y) * 0.003 * alpha;
+          }
+        }
+        force.initialize = n => { local = n; };
+        return force;
+      }
+
+      const g = svg.append('g');
+      const node = g.selectAll('g').data(nodes).enter().append('g').style('cursor', 'pointer');
+
+      node.append('circle')
+        .attr('r', d => d.r)
+        .attr('fill', (d, i) => i % 2 ? 'rgba(0,240,255,.12)' : 'rgba(112,0,255,.14)')
+        .attr('stroke', (d, i) => i % 2 ? 'rgba(0,240,255,.8)' : 'rgba(145,98,255,.85)')
+        .attr('stroke-width', 1.2)
+        .attr('filter', 'url(#glow)');
+
+      node.append('text')
+        .attr('text-anchor', 'middle')
+        .attr('dy', '.34em')
+        .style('font-family', 'Unbounded, sans-serif')
+        .style('font-weight', 700)
+        .style('font-size', d => `${Math.max(10, Math.min(22, d.r * .42))}px`)
+        .style('fill', '#dffcff')
+        .text(d => d.label);
+
+      node.on('click', (_, d) => {
+        showToast('тег: ' + d.label);
+        haptic('soft');
+      });
+
+      cloudSim = d3.forceSimulation(nodes)
+        .force('collide', d3.forceCollide().radius(d => d.r + 6).iterations(2))
+        .force('charge', d3.forceManyBody().strength(-10))
+        .force('center', d3.forceCenter(cx, cy).strength(.02))
+        .force('orbit', orbitForce())
+        .alpha(0.95)
+        .alphaDecay(.03)
+        .on('tick', () => node.attr('transform', d => `translate(${d.x},${d.y})`));
+    }
+
+    function renderBilling() {
+      document.querySelectorAll('.switch-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.mode === state.billingMode);
+        b.onclick = () => {
+          state.billingMode = b.dataset.mode;
+          state.payerCount = state.billingMode === 'owner' ? 1 : Math.min(10, state.activeUsers30d);
+          renderBilling();
+          haptic('selection');
+        };
+      });
+
+      const rub = totalRub();
+      const stars = totalStars();
+      document.getElementById('activeUsers').textContent = state.activeUsers30d;
+      document.getElementById('payerCount').textContent = state.payerCount;
+      document.getElementById('pricePerActive').textContent = state.pricePerActiveRub + '₽';
+      document.getElementById('totalRub').textContent = rub + '₽';
+      document.getElementById('totalStars').textContent = stars + ' Stars';
+
+      const rows = document.getElementById('payerRows');
+      rows.innerHTML = '';
+      const picked = state.members.slice(0, state.payerCount);
+      const share = Math.max(1, Math.ceil(stars / Math.max(1, state.payerCount)));
+      picked.forEach(m => {
+        const tr = document.createElement('div');
+        tr.className = 'tr';
+        tr.innerHTML = `<div>${m.title}</div><div>pending</div><div>${share}</div>`;
+        rows.appendChild(tr);
+      });
+    }
+
+    function serializeConfig() {
+      return {
+        persona: state.persona,
+        heat: state.heat,
+        billing: {
+          mode: state.billingMode,
+          activeUsers30d: state.activeUsers30d,
+          payerCount: state.payerCount,
+          totalRub: totalRub(),
+          totalStars: totalStars(),
+          currency: 'XTR'
+        },
+        selectedMember: state.selectedMember,
+        ts: new Date().toISOString()
+      };
+    }
+
+    function sendData(payload) {
+      const raw = JSON.stringify(payload);
+      if (tg?.sendData) tg.sendData(raw);
+      else console.log(raw);
+    }
+
+    function bindActions() {
+      document.getElementById('createInvoices').onclick = () => {
+        showToast('Инвойсы сформированы (mock)');
+        haptic('success');
+      };
+
+      document.getElementById('payNow').onclick = () => {
+        showToast('Оплата в Stars открыта (mock)');
+        haptic('success');
+      };
+
+      document.getElementById('saveAll').onclick = () => {
+        sendData({ type: 'admin_config', payload: serializeConfig() });
+        showToast('Конфиг отправлен');
+        haptic('success');
+      };
+    }
+
+    function syncTheme() {
+      if (!tg?.themeParams) return;
+      const p = tg.themeParams;
+      if (p.bg_color) document.documentElement.style.setProperty('--bg-color', p.bg_color);
+      if (p.text_color) document.documentElement.style.setProperty('--text-color', p.text_color);
+      if (p.hint_color) document.documentElement.style.setProperty('--hint', p.hint_color);
+      if (p.secondary_bg_color) document.documentElement.style.setProperty('--secondary-bg', p.secondary_bg_color);
+    }
+
+    function boot() {
+      renderNav();
+      renderPersona();
+      renderPreview();
+      renderMembers();
+      renderBilling();
+      bindActions();
+      syncTheme();
+      if (tg?.onEvent) tg.onEvent('themeChanged', syncTheme);
+    }
+
+    boot();
+  </script>
+</body>
+</html>
