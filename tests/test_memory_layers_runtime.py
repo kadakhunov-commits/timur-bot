@@ -71,3 +71,22 @@ def test_reply_guardrail_blocks_repeated_deleted_messages_meme() -> None:
     safe = runtime.enforce_reply_guardrails(blocked)
 
     assert safe == "этот старый мем уже помер давай свежак"
+
+
+def test_reply_guardrail_softens_toxic_personal_attack() -> None:
+    toxic = "память как у золотой рыбки, рустем"
+
+    safe = runtime.enforce_reply_guardrails(toxic)
+
+    assert safe == "ок без наездов давай по сути"
+
+
+def test_effective_toxicity_caps_default_and_chill_modes() -> None:
+    memory = runtime.default_memory()
+    memory["config"]["toxicity_level"] = 90
+
+    memory["config"]["active_mode"] = "default"
+    assert runtime.get_effective_toxicity_level(memory) == 28
+
+    memory["config"]["active_mode"] = "chill"
+    assert runtime.get_effective_toxicity_level(memory) == 18

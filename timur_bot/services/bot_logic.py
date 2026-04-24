@@ -94,6 +94,12 @@ BLOCKED_MEMORY_PATTERNS = (
     re.compile(r"сообщени[яй].*(сн[её]с|удал[ие]).*кадыр", re.IGNORECASE),
     re.compile(r"(сн[её]с|удал[ие]).*сообщени[яй].*кадыр", re.IGNORECASE),
 )
+TOXIC_REPLY_PATTERNS = (
+    re.compile(r"память как у золотой рыбки", re.IGNORECASE),
+    re.compile(r"опять .*поумнич", re.IGNORECASE),
+    re.compile(r"лучше бы .*чем", re.IGNORECASE),
+    re.compile(r"\b(туп(ой|ая)|дебил|идиот|ничтож)\b", re.IGNORECASE),
+)
 
 # =========================
 # ЛОГИ
@@ -726,6 +732,16 @@ def get_toxicity_level(memory: Dict[str, Any]) -> int:
     return max(0, min(100, val))
 
 
+def get_effective_toxicity_level(memory: Dict[str, Any]) -> int:
+    base = get_toxicity_level(memory)
+    mode = get_active_mode(memory)
+    if mode == "chill":
+        return min(base, 18)
+    if mode == "default":
+        return min(base, 28)
+    return base
+
+
 def is_blocked_memory_text(text: str) -> bool:
     clean = re.sub(r"\s+", " ", str(text or "")).strip().lower()
     if not clean:
@@ -740,6 +756,9 @@ def enforce_reply_guardrails(reply_text: str) -> str:
     if is_blocked_memory_text(clean):
         logger.warning("Блокирую заезженный мем в ответе LLM")
         return "этот старый мем уже помер давай свежак"
+    if any(pattern.search(clean) for pattern in TOXIC_REPLY_PATTERNS):
+        logger.warning("Смягчаю токсичный ответ LLM")
+        return "ок без наездов давай по сути"
     return clean
 
 
@@ -966,7 +985,7 @@ def build_chat_messages(
         "- запрещено повторять старый мем про удаленные сообщения кадыра\n"
     )
 
-    toxicity = get_toxicity_level(memory)
+    toxicity = get_effective_toxicity_level(memory)
     full_system += f"\nуровень прожарки: {toxicity}/100\n"
     full_system += f"активный режим личности: {get_active_mode(memory)}\n"
     full_system += "инструкция режима: " + get_mode_prompt(memory) + "\n"
@@ -1037,7 +1056,7 @@ async def call_openai_vision(
     humor_plan = humor_plan or build_humor_plan(memory, message)
     text_context = (
         "тебе прислали фотку в чате. "
-        "сделай короткую смешную токсичную реакцию в стиле дружеской прожарки, "
+        "сделай короткую смешную ироничную реакцию в стиле дружеской подколки, "
         "без технического описания, максимум 1–2 коротких фразы. "
         "без эмодзи, маленькими буквами."
     )
@@ -1704,7 +1723,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     logger.info(
         "Готовлю текстовый ответ: режим=%s токсичность=%s источник=LLM",
         get_active_mode(memory),
-        get_toxicity_level(memory),
+        get_effective_toxicity_level(memory),
     )
     messages = build_chat_messages(memory, message, humor_plan=humor_plan)
     reply_text = await call_openai_text(messages)
@@ -2182,6 +2201,47 @@ async def setheat_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     save_memory(memory)
 
     await update.message.reply_text(f"уровень прожарки теперь {val}")
+
+
+@owner_only
+async def mode_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    del context
+    message = update.message
+    if not message:
+        return
+
+    memory = load_memory()
+    parts = (message.text or "").split(" ", 1)
+    if len(parts) < 2 or not parts[1].strip():
+        current = get_active_mode(memory)
+        modes = ", ".join(PERSONA_MODES.keys())
+        await message.reply_text(f"текущий режим: {current}\nдоступные: {modes}\nиспользование: /mode <режим>")
+        return
+
+    requested = parts[1].strip().lower()
+    if requested not in PERSONA_MODES:
+        modes = ", ".join(PERSONA_MODES.keys())
+        await message.reply_text(f"неизвестный режим: {requested}\nдоступные: {modes}")
+        return
+
+    memory.setdefault("config", {})["active_mode"] = requested
+    save_memory(memory)
+    await message.reply_text(f"режим переключен: {requested}")
+
+
+@owner_only
+async def setmode_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await mode_cmd(update, context)
+
+
+@owner_only
+async def showmode_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    del context
+    message = update.message
+    if not message:
+        return
+    memory = load_memory()
+    await message.reply_text(f"текущий режим: {get_active_mode(memory)}")
 
 
 @owner_only

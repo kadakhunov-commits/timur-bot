@@ -80,3 +80,9 @@ def test_humor_plan_skips_blocked_repeated_callback_meme() -> None:
 
     blocked_bit = plan.get("bit")
     assert not blocked_bit or blocked_bit.get("text") != "митя снес сообщения кадыра"
+
+
+def test_humor_plan_avoids_roast_without_explicit_request() -> None:
+    chat = {}
+    plan = choose_humor_plan(chat, text="тимур что скажешь", user_id=1, user_name="A")
+    assert plan["mode"] != "roast_user"
