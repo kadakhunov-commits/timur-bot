@@ -20,7 +20,7 @@ def test_register_handlers_smoke() -> None:
     app = DummyApp()
     register_handlers(app)
 
-    assert len(app.handlers) == 25
+    assert len(app.handlers) == 27
 
     commands = []
     for h in app.handlers:
@@ -32,6 +32,7 @@ def test_register_handlers_smoke() -> None:
             "start",
             "admin",
             "panel",
+            "miniapp",
             "billhelp",
             "billquote",
             "billsetup",

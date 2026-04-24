@@ -22,6 +22,7 @@ class AppConfig:
     openai_api_key: str
     openai_base_url: str
     gemini_api_key: str
+    miniapp_url: str
     owner_id: int
     text_model: str
     vision_model: str
@@ -93,6 +94,7 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
     openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
     openai_base_url = os.getenv("OPENAI_BASE_URL", "").strip()
     gemini_api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    miniapp_url = os.getenv("MINIAPP_URL", "").strip()
     if not telegram_bot_token:
         raise ConfigError("TELEGRAM_BOT_TOKEN not set in .env")
     if not openai_api_key:
@@ -126,6 +128,7 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
         openai_api_key=openai_api_key,
         openai_base_url=openai_base_url,
         gemini_api_key=gemini_api_key,
+        miniapp_url=miniapp_url,
         owner_id=int(runtime.get("owner_id", 428469927)),
         text_model=str(models.get("text", "gpt-4o-mini")),
         vision_model=str(models.get("vision", "gpt-4o-mini")),
