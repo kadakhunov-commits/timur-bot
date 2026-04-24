@@ -11,7 +11,7 @@ from timur_bot.handlers.billing import (
     billsetup_cmd,
     billstatus_cmd,
 )
-from timur_bot.handlers.chat import photo_handler, reaction_handler, start_cmd, text_handler
+from timur_bot.handlers.chat import photo_handler, reaction_handler, start_cmd, story_cmd, text_handler
 from timur_bot.handlers.owner import (
     appendprompt_cmd,
     bit_cmd,
@@ -36,6 +36,7 @@ from timur_bot.handlers.owner import (
 
 def register_handlers(application) -> None:
     application.add_handler(CommandHandler("start", start_cmd))
+    application.add_handler(CommandHandler("story", story_cmd))
     application.add_handler(CommandHandler("admin", admin_cmd))
     application.add_handler(CommandHandler("panel", admin_cmd))
     application.add_handler(CommandHandler("billhelp", billhelp_cmd))

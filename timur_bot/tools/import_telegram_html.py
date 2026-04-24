@@ -256,6 +256,21 @@ def _default_memory(system_prompt: str = "") -> Dict[str, Any]:
             "mode_overrides": {},
             "last_random_story_ts": None,
             "vision_usage": {},
+            "life": {
+                "enabled": True,
+                "timezone": "Europe/Moscow",
+                "daily_target": 3,
+                "quiet_hours": {"start": "00:00", "end": "10:00"},
+                "cooldown_per_chat_minutes": 360,
+                "slots_date": "",
+                "daily_slots": [],
+                "sent_slots": [],
+                "chat_last_emit": {},
+                "story_log": [],
+                "last_story_id": 0,
+                "last_emit_ts": None,
+                "last_emit_chat_id": None,
+            },
         },
     }
 
