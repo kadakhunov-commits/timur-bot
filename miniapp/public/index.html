@@ -16,8 +16,11 @@
       --hint: var(--tg-theme-hint-color, #8f95a8);
       --line: rgba(255, 255, 255, 0.14);
       --cyan: #2ee6ff;
-      --violet: #7445ff;
-      --gradient: linear-gradient(135deg, #2ee6ff 0%, #7445ff 100%);
+      --violet: #5e48f5;
+      --gradient: linear-gradient(135deg, #2ee6ff 0%, #5e48f5 100%);
+      --surface: color-mix(in srgb, var(--bg) 92%, transparent);
+      --app-safe-top: var(--tg-safe-area-inset-top, 0px);
+      --app-safe-bottom: var(--tg-content-safe-area-inset-bottom, 0px);
     }
 
     * { box-sizing: border-box; }
@@ -25,10 +28,10 @@
     body {
       font-family: "Unbounded", system-ui, sans-serif;
       background:
-        radial-gradient(900px 420px at -10% 8%, rgba(46, 230, 255, 0.18), transparent 58%),
-        radial-gradient(1000px 500px at 110% 18%, rgba(116, 69, 255, 0.2), transparent 60%),
+        radial-gradient(900px 420px at -10% 8%, rgba(46, 230, 255, 0.12), transparent 58%),
+        radial-gradient(1000px 500px at 110% 18%, rgba(94, 72, 245, 0.14), transparent 60%),
         var(--bg);
-      padding-bottom: calc(84px + var(--tg-content-safe-area-inset-bottom, 0px));
+      padding-bottom: calc(84px + var(--app-safe-bottom));
     }
 
     nav {
@@ -38,10 +41,10 @@
       display: flex;
       gap: 10px;
       overflow-x: auto;
-      padding: calc(14px + var(--tg-safe-area-inset-top, 0px)) 16px 14px;
+      padding: calc(12px + var(--app-safe-top)) 16px 12px;
       border-bottom: 1px solid var(--line);
       backdrop-filter: blur(14px);
-      background: color-mix(in srgb, var(--bg) 90%, transparent);
+      background: color-mix(in srgb, var(--surface) 94%, transparent);
     }
     nav::-webkit-scrollbar { display: none; }
     .tab-btn {
@@ -57,17 +60,17 @@
     }
     .tab-btn.active { background: #fff; color: #0f1320; border-color: #fff; }
 
-    .container { max-width: 760px; margin: 0 auto; padding: 14px 12px; }
+    .container { max-width: 760px; margin: 0 auto; padding: 12px; }
     .section { display: none; animation: rise .28s ease; }
     .section.active { display: block; }
     @keyframes rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
 
     .logo {
       font-family: "Syne", sans-serif;
-      font-size: clamp(34px, 10vw, 62px);
+      font-size: clamp(28px, 8vw, 52px);
       line-height: 0.84;
       letter-spacing: -2px;
-      margin: 0 0 16px;
+      margin: 0 0 10px;
     }
     .grad {
       background: var(--gradient);
@@ -110,6 +113,28 @@
     .chip.active { color: var(--cyan); border-color: rgba(46, 230, 255, 0.7); }
 
     .small { color: var(--hint); font-size: 12px; line-height: 1.5; }
+    .lede {
+      color: color-mix(in srgb, var(--text) 86%, var(--hint));
+      font-size: 12px;
+      line-height: 1.55;
+      margin: 0 0 14px;
+      max-width: 42ch;
+    }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: color-mix(in srgb, var(--card) 88%, transparent);
+      color: var(--hint);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: .8px;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
     .preview {
       margin-top: 12px;
       border-left: 3px solid var(--cyan);
@@ -118,6 +143,20 @@
       background: color-mix(in srgb, var(--card) 88%, transparent);
       font-size: 13px;
     }
+    .status {
+      margin-bottom: 12px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 12px 14px;
+      background: color-mix(in srgb, var(--card) 82%, transparent);
+      font-size: 12px;
+      line-height: 1.5;
+      color: var(--text);
+    }
+    .status[data-tone="muted"] { color: var(--hint); }
+    .status[data-tone="success"] { border-color: rgba(46, 230, 255, 0.35); }
+    .status[data-tone="warning"] { border-color: rgba(255, 208, 110, 0.35); }
+    .status.hidden { display: none; }
 
     .member-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
     .member-btn {
@@ -137,13 +176,23 @@
       border-radius: 16px;
       min-height: clamp(260px, 44vh, 360px);
       background:
-        radial-gradient(460px 240px at 50% 50%, rgba(46, 230, 255, 0.1), transparent 65%),
-        radial-gradient(500px 260px at 54% 52%, rgba(116, 69, 255, 0.14), transparent 68%),
-        rgba(0,0,0,0.1);
+        radial-gradient(460px 240px at 50% 50%, rgba(46, 230, 255, 0.07), transparent 65%),
+        radial-gradient(500px 260px at 54% 52%, rgba(94, 72, 245, 0.1), transparent 68%),
+        rgba(0,0,0,0.08);
       overflow: hidden;
       position: relative;
     }
     #cloudCanvas { width: 100%; height: clamp(260px, 44vh, 360px); display: block; }
+    .empty-state {
+      min-height: 220px;
+      display: grid;
+      place-items: center;
+      text-align: center;
+      padding: 24px;
+      color: var(--hint);
+      font-size: 12px;
+      line-height: 1.5;
+    }
 
     .row { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
     .mode-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; }
@@ -200,9 +249,10 @@
       right: 0;
       bottom: 0;
       padding: 10px 12px;
-      padding-bottom: calc(10px + var(--tg-content-safe-area-inset-bottom, 0px));
+      padding-bottom: calc(10px + var(--app-safe-bottom));
       background: linear-gradient(to top, color-mix(in srgb, var(--bg) 96%, transparent), transparent);
     }
+    .bottom.hidden { display: none; }
     .save {
       width: 100%;
       border: none;
@@ -215,6 +265,28 @@
       color: #fff;
       background: var(--gradient);
       cursor: pointer;
+    }
+    .stack {
+      display: grid;
+      gap: 10px;
+    }
+    .metric {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: baseline;
+      padding: 10px 0;
+      border-bottom: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+    }
+    .metric:last-child { border-bottom: none; }
+    .note {
+      margin-top: 12px;
+      padding: 12px;
+      border-radius: 14px;
+      border: 1px dashed color-mix(in srgb, var(--line) 88%, transparent);
+      color: var(--hint);
+      font-size: 11px;
+      line-height: 1.55;
     }
 
     .bubble {
@@ -251,8 +323,11 @@
   </nav>
 
   <main class="container">
+    <div id="statusBox" class="status" data-tone="muted">панель загружается и подстраивается под telegram</div>
     <section id="settings" class="section active">
+      <div class="eyebrow">telegram admin panel</div>
       <h1 class="logo">timur.<span class="grad">bot</span></h1>
+      <p class="lede">меняй поведение бота быстро: сначала режим и вредность, потом проверь память и только после этого отправляй конфиг в чат.</p>
       <div class="card">
         <span class="label">Режим личности</span>
         <div id="personaGrid" class="persona-grid"></div>
@@ -266,11 +341,13 @@
     </section>
 
     <section id="memory" class="section">
+      <div class="eyebrow">memory preview</div>
       <h1 class="logo">data.<span class="grad">cloud</span></h1>
+      <p class="lede">здесь только preview того, как бот видит людей и темы. можно быстро проверить перекосы перед сохранением настроек.</p>
       <div class="card">
         <span class="label">Персонажи беседы</span>
         <div id="memberTabs" class="member-tabs"></div>
-        <div class="bubble-wrap">
+        <div class="bubble-wrap" id="bubbleWrap">
           <canvas id="cloudCanvas"></canvas>
         </div>
         <div class="small" id="archText" style="margin-top:10px"></div>
@@ -279,32 +356,33 @@
     </section>
 
     <section id="billing" class="section">
+      <div class="eyebrow">billing preview</div>
       <h1 class="logo">pay.<span class="grad">hub</span></h1>
+      <p class="lede">это честный preview биллинга, не экран мгновенной оплаты. здесь мы считаем схему и при желании отправляем квоту обратно в чат.</p>
       <div class="card">
         <span class="label">Схема оплаты</span>
         <div class="mode-grid">
           <button class="mode-btn active" data-mode="owner">Админ платит за всех</button>
           <button class="mode-btn" data-mode="split">Split на участников</button>
         </div>
-        <div class="row"><span class="small">Активных за 30 дней</span><b id="activeUsers">13</b></div>
-        <div class="row"><span class="small">Платящих</span><b id="payerCount">10</b></div>
-        <div class="row"><span class="small">Цена за активного</span><b id="pricePer">45₽</b></div>
-        <div class="row"><span class="small">Итог (RUB)</span><b id="sumRub">585₽</b></div>
+        <div class="stack">
+          <div class="metric"><span class="small">Активных за 30 дней</span><b id="activeUsers">13</b></div>
+          <div class="metric"><span class="small">Платящих</span><b id="payerCount">10</b></div>
+          <div class="metric"><span class="small">Цена за активного</span><b id="pricePer">45₽</b></div>
+          <div class="metric"><span class="small">Итог (RUB)</span><b id="sumRub">585₽</b></div>
+        </div>
         <div id="sumStars" class="price">699 Stars</div>
-        <div class="small">Для цифровых функций в Telegram используются Stars, сумма целая.</div>
+        <div class="small">для digital-функций в telegram используются stars. реальная оплата пока остается в командах бота.</div>
         <div class="table">
           <div class="tr head"><div>Участник</div><div>Статус</div><div>Доля</div></div>
           <div id="payerRows"></div>
         </div>
-        <div class="buttons">
-          <button class="btn">Сформировать инвойсы</button>
-          <button class="btn primary">Оплатить</button>
-        </div>
+        <div class="note" id="billingNote">main button сверху telegram отправит квоту в чат. инвойс здесь не открывается, чтобы не обещать несуществующий flow.</div>
       </div>
     </section>
   </main>
 
-  <div class="bottom">
+  <div id="fallbackBar" class="bottom">
     <button id="saveBtn" class="save">Сохранить конфиг</button>
   </div>
 
@@ -315,35 +393,55 @@
       tg.expand();
     }
 
+    function decodeLaunchState() {
+      const params = new URLSearchParams(window.location.search);
+      const encoded = params.get("state");
+      if (!encoded) return null;
+      try {
+        const normalized = encoded.replace(/-/g, "+").replace(/_/g, "/");
+        const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
+        const binary = atob(padded);
+        const bytes = Uint8Array.from(binary, ch => ch.charCodeAt(0));
+        const decoded = new TextDecoder("utf-8").decode(bytes);
+        return JSON.parse(decoded);
+      } catch (_) {
+        return null;
+      }
+    }
+
+    const launchState = decodeLaunchState() || {};
+    const personasFromLaunch = (launchState.settings?.personas || []).map(item => [
+      item.id,
+      item.title
+    ]);
+
     const state = {
       currentTab: "settings",
-      persona: "toxic",
-      heat: 82,
+      activeMode: launchState.settings?.activeMode || "default",
+      heat: launchState.settings?.heat ?? 82,
       billingMode: "owner",
-      activeUsers30d: 13,
-      payerCount: 10,
-      pricePerRub: 45,
-      minRub: 199,
-      maxRub: 3490,
+      activeUsers30d: launchState.billing?.activeUsers30d ?? 0,
+      payerCount: launchState.billing?.payerCountOwner ?? 0,
+      payerCountOwner: launchState.billing?.payerCountOwner ?? 0,
+      payerCountSplit: launchState.billing?.payerCountSplit ?? 0,
+      pricePerRub: launchState.billing?.pricePerRub ?? 45,
+      minRub: launchState.billing?.minRub ?? 199,
+      maxRub: launchState.billing?.maxRub ?? 3490,
       starsPerRub: 1.2,
-      selectedMember: "masha",
-      previews: {
-        toxic: "опять ты? это было так криво что даже баг засмущался",
-        genius: "решение простое если не ломать архитектуру ради одной фичи",
-        slang: "бро ща раскидаю по фактам и будет красота",
-        silent: "..."
-      },
-      personas: [
-        ["toxic", "TOXIC AI"],
-        ["genius", "GENIUS"],
-        ["slang", "SLANG"],
-        ["silent", "SILENT"]
+      selectedMember: launchState.memory?.selectedMember || "",
+      previewText: launchState.settings?.previewText || "коротко жестко но по делу",
+      personas: personasFromLaunch.length ? personasFromLaunch : [
+        ["default", "DEFAULT"],
+        ["savage", "SAVAGE"],
+        ["chill", "CHILL"],
+        ["quotes", "QUOTES"]
       ],
-      members: [
-        { id: "alex", title: "@alex_crypto", tags: ["Стейкинг", "NFT", "Python", "Темки", "Лудоман"], archetypes: ["драматик", "айтишник"], links: ["@masha_dev", "@timur"] },
-        { id: "masha", title: "@masha_dev", tags: ["Frontend", "UX/UI", "Swift", "Awwwards", "Дедлайны"], archetypes: ["айтишник", "мемолог"], links: ["@alex_crypto", "@timur"] },
-        { id: "timur", title: "@timur", tags: ["Сленг", "Прожарка", "Казань", "Зал", "Ирония", "Мемы"], archetypes: ["мемолог", "спортсмен"], links: ["@alex_crypto", "@masha_dev"] }
-      ]
+      members: launchState.memory?.members || [],
+      chatId: launchState.chatId || null,
+      statusTone: "muted",
+      statusText: tg ? "панель готова. main button в telegram отправит действие в чат." : "telegram web app не найден. это fallback-preview в браузере.",
+      dirty: false,
+      submitted: false
     };
 
     let cloudEngine = null;
@@ -357,16 +455,136 @@
       } catch (_) {}
     }
 
+    function markDirty() {
+      state.dirty = true;
+      state.submitted = false;
+      syncClosingConfirmation();
+      syncPrimaryAction();
+    }
+
+    function showStatus(text, tone = "muted") {
+      state.statusText = text;
+      state.statusTone = tone;
+      const box = document.getElementById("statusBox");
+      box.textContent = text;
+      box.dataset.tone = tone;
+      box.classList.toggle("hidden", !text);
+    }
+
+    function syncViewportVars() {
+      const root = document.documentElement;
+      const safe = tg?.safeAreaInset || {};
+      const contentSafe = tg?.contentSafeAreaInset || {};
+      root.style.setProperty("--app-safe-top", `${safe.top || 0}px`);
+      root.style.setProperty("--app-safe-bottom", `${contentSafe.bottom || safe.bottom || 0}px`);
+    }
+
+    function totalRub() {
+      const raw = state.activeUsers30d * state.pricePerRub;
+      return Math.max(state.minRub, Math.min(state.maxRub, raw));
+    }
+
+    function totalStars() {
+      return Math.max(1, Math.round(totalRub() * state.starsPerRub));
+    }
+
+    function serializeConfig() {
+      return {
+        chat_id: state.chatId,
+        active_mode: state.activeMode,
+        heat: state.heat,
+        selected_member: state.selectedMember,
+        ts: new Date().toISOString()
+      };
+    }
+
+    function sendPayload(type, payload) {
+      const raw = JSON.stringify({ type, payload });
+      if (tg?.sendData) {
+        tg.sendData(raw);
+        state.submitted = true;
+        state.dirty = false;
+        syncClosingConfirmation();
+        haptic("success");
+        return true;
+      }
+      console.log(raw);
+      showStatus("telegram web app недоступен, payload выведен в console.log", "warning");
+      return false;
+    }
+
+    function handlePrimaryAction() {
+      if (state.currentTab === "billing") {
+        const ok = sendPayload("billing_quote_request", {
+          chat_id: state.chatId,
+          mode: state.billingMode
+        });
+        if (ok) showStatus("квота улетела в чат. telegram закроет окно после sendData.", "success");
+        return;
+      }
+      const ok = sendPayload("admin_config", serializeConfig());
+      if (ok) showStatus("конфиг отправлен в чат и будет применен ботом.", "success");
+    }
+
+    function fallbackPrimaryAction() {
+      handlePrimaryAction();
+    }
+
+    function syncPrimaryAction() {
+      const fallbackBar = document.getElementById("fallbackBar");
+      const saveBtn = document.getElementById("saveBtn");
+      const texts = {
+        settings: state.dirty ? "Сохранить настройки" : "Отправить настройки",
+        memory: "Вернуться к настройкам",
+        billing: "Отправить квоту"
+      };
+      const title = texts[state.currentTab] || "Продолжить";
+
+      if (state.currentTab === "memory") {
+        if (tg?.MainButton) tg.MainButton.hide();
+        fallbackBar.classList.add("hidden");
+        return;
+      }
+
+      saveBtn.textContent = title;
+      fallbackBar.classList.toggle("hidden", Boolean(tg));
+
+      if (tg?.MainButton) {
+        tg.MainButton.setText(title);
+        tg.MainButton.show();
+      }
+    }
+
+    function syncBackButton() {
+      if (!tg?.BackButton) return;
+      if (state.currentTab === "settings") tg.BackButton.hide();
+      else tg.BackButton.show();
+    }
+
+    function syncClosingConfirmation() {
+      if (!tg?.enableClosingConfirmation || !tg?.disableClosingConfirmation) return;
+      if (state.dirty && !state.submitted) tg.enableClosingConfirmation();
+      else tg.disableClosingConfirmation();
+    }
+
+    function switchTab(tabId) {
+      state.currentTab = tabId;
+      document.querySelectorAll(".tab-btn").forEach(btn => {
+        btn.classList.toggle("active", btn.dataset.tab === tabId);
+      });
+      document.querySelectorAll(".section").forEach(section => {
+        section.classList.toggle("active", section.id === tabId);
+      });
+      if (tabId === "memory") maybeResumeBubble();
+      else stopBubbleCloud();
+      syncBackButton();
+      syncPrimaryAction();
+      haptic("selection");
+    }
+
     function renderTabs() {
-      const tabButtons = document.querySelectorAll(".tab-btn");
-      const sections = document.querySelectorAll(".section");
-      tabButtons.forEach(btn => {
-        btn.onclick = () => {
-          state.currentTab = btn.dataset.tab;
-          tabButtons.forEach(x => x.classList.toggle("active", x === btn));
-          sections.forEach(s => s.classList.toggle("active", s.id === state.currentTab));
-          haptic("selection");
-        };
+      document.querySelectorAll(".tab-btn").forEach(btn => {
+        btn.onclick = () => switchTab(btn.dataset.tab);
       });
     }
 
@@ -376,11 +594,13 @@
       state.personas.forEach(([id, title]) => {
         const b = document.createElement("button");
         b.type = "button";
-        b.className = "chip" + (state.persona === id ? " active" : "");
+        b.className = "chip" + (state.activeMode === id ? " active" : "");
         b.textContent = title;
         b.onclick = () => {
-          state.persona = id;
+          state.activeMode = id;
+          state.previewText = `режим ${title.toLowerCase()} активен`;
           renderSettings();
+          markDirty();
           haptic("soft");
         };
         wrap.appendChild(b);
@@ -390,12 +610,39 @@
       range.oninput = e => {
         state.heat = Number(e.target.value);
         document.getElementById("heatValue").textContent = state.heat + "/100";
+        markDirty();
       };
       document.getElementById("heatValue").textContent = state.heat + "/100";
-      document.getElementById("previewText").textContent = state.previews[state.persona] || "...";
+      document.getElementById("previewText").textContent = state.previewText || "...";
+    }
+
+    function stopBubbleCloud() {
+      if (cloudEngine?.raf) cancelAnimationFrame(cloudEngine.raf);
+      cloudEngine = null;
+    }
+
+    function renderEmptyMembers() {
+      stopBubbleCloud();
+      document.getElementById("memberTabs").innerHTML = "";
+      document.getElementById("bubbleWrap").innerHTML = '<div class="empty-state">память пока пустая. сначала дай боту пообщаться в чате, потом здесь появятся люди, темы и связи.</div>';
+      document.getElementById("archText").textContent = "архетипы: пока нет данных";
+      document.getElementById("linksText").textContent = "связи: тоже пока пусто";
+    }
+
+    function ensureCanvas() {
+      const wrap = document.getElementById("bubbleWrap");
+      if (!document.getElementById("cloudCanvas")) {
+        wrap.innerHTML = '<canvas id="cloudCanvas"></canvas>';
+      }
+      return document.getElementById("cloudCanvas");
     }
 
     function renderMembers() {
+      if (!state.members.length) {
+        renderEmptyMembers();
+        return;
+      }
+
       const tabs = document.getElementById("memberTabs");
       tabs.innerHTML = "";
       state.members.forEach(m => {
@@ -412,20 +659,17 @@
       });
 
       const m = state.members.find(x => x.id === state.selectedMember) || state.members[0];
-      document.getElementById("archText").textContent = "Архетипы: " + m.archetypes.join(", ");
-      document.getElementById("linksText").textContent = "Связи: " + m.links.join(", ");
-      renderBubbleCloud(m.tags);
-    }
-
-    function stopBubbleCloud() {
-      if (cloudEngine?.raf) cancelAnimationFrame(cloudEngine.raf);
-      cloudEngine = null;
+      state.selectedMember = m.id;
+      document.getElementById("archText").textContent = "архетипы: " + (m.archetypes || []).join(", ");
+      document.getElementById("linksText").textContent = "связи: " + (m.links || []).join(", ");
+      renderBubbleCloud(m.tags || []);
     }
 
     function renderBubbleCloud(tags) {
       stopBubbleCloud();
+      if (document.hidden || state.currentTab !== "memory" || !tags.length) return;
 
-      const canvas = document.getElementById("cloudCanvas");
+      const canvas = ensureCanvas();
       const wrap = canvas.parentElement;
       const dpr = Math.max(1, window.devicePixelRatio || 1);
       const w = wrap.clientWidth || 900;
@@ -438,24 +682,23 @@
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.font = "800 20px Unbounded, sans-serif";
 
       const cx = w * 0.52;
       const cy = h * 0.52;
       const nodes = tags.map((label, i) => {
-        const base = 30 + label.length * 3.2;
-        const r = Math.max(30, Math.min(92, base));
+        const base = 28 + label.length * 3;
+        const r = Math.max(28, Math.min(86, base));
         const angle = (Math.PI * 2 * i) / Math.max(1, tags.length);
-        const ring = Math.min(w, h) * 0.16 + (i % 3) * 30 + Math.random() * 18;
+        const ring = Math.min(w, h) * 0.16 + (i % 3) * 28 + Math.random() * 16;
         return {
           label,
           r,
           x: cx + Math.cos(angle) * ring,
           y: cy + Math.sin(angle) * ring,
-          vx: (Math.random() - 0.5) * 0.22,
-          vy: (Math.random() - 0.5) * 0.22,
+          vx: (Math.random() - 0.5) * 0.18,
+          vy: (Math.random() - 0.5) * 0.18,
           phase: Math.random() * Math.PI * 2,
-          wobble: 0.022 + Math.random() * 0.018,
+          wobble: 0.02 + Math.random() * 0.014,
           wobblePhase: Math.random() * Math.PI * 2
         };
       });
@@ -485,16 +728,16 @@
             a.y -= ny * overlap;
             b.x += nx * overlap;
             b.y += ny * overlap;
-            a.vx -= nx * 0.03;
-            a.vy -= ny * 0.03;
-            b.vx += nx * 0.03;
-            b.vy += ny * 0.03;
+            a.vx -= nx * 0.025;
+            a.vy -= ny * 0.025;
+            b.vx += nx * 0.025;
+            b.vy += ny * 0.025;
           }
         }
       }
 
       function drawDropletPath(ctx2d, rr, t, wobble, wobblePhase) {
-        const points = 44;
+        const points = 40;
         const pts = [];
         for (let i = 0; i < points; i += 1) {
           const a = (Math.PI * 2 * i) / points;
@@ -502,7 +745,7 @@
             1 +
             Math.sin(a * 2.1 + t * 0.42 + wobblePhase) * wobble +
             Math.cos(a * 3.4 - t * 0.37 + wobblePhase * 0.9) * (wobble * 0.72);
-          const r = rr * Math.max(0.9, Math.min(1.08, noise));
+          const r = rr * Math.max(0.9, Math.min(1.06, noise));
           pts.push({ x: Math.cos(a) * r, y: Math.sin(a) * r });
         }
         ctx2d.beginPath();
@@ -520,60 +763,46 @@
       function drawBubble(n, t) {
         const pulse = 1 + Math.sin(t * 0.45 + n.phase) * 0.014;
         const rr = n.r * pulse;
-
         ctx.save();
         ctx.translate(n.x, n.y);
 
         const g = ctx.createRadialGradient(-rr * 0.36, -rr * 0.42, rr * 0.14, 0, 0, rr * 1.12);
-        g.addColorStop(0, "rgba(236,253,255,0.34)");
-        g.addColorStop(0.48, "rgba(128,232,255,0.2)");
-        g.addColorStop(1, "rgba(44,174,214,0.12)");
-        ctx.strokeStyle = "rgba(129,236,255,0.44)";
-        ctx.shadowColor = "rgba(76,215,255,0.3)";
-
+        g.addColorStop(0, "rgba(236,253,255,0.28)");
+        g.addColorStop(0.48, "rgba(128,232,255,0.16)");
+        g.addColorStop(1, "rgba(44,174,214,0.1)");
+        ctx.strokeStyle = "rgba(129,236,255,0.36)";
+        ctx.shadowColor = "rgba(76,215,255,0.18)";
         ctx.fillStyle = g;
-        ctx.lineWidth = 1.2;
-        ctx.shadowBlur = 18;
+        ctx.lineWidth = 1.1;
+        ctx.shadowBlur = 14;
         drawDropletPath(ctx, rr, t, n.wobble, n.wobblePhase);
         ctx.fill();
         ctx.stroke();
 
-        const gloss = ctx.createRadialGradient(-rr * 0.42, -rr * 0.52, rr * 0.02, -rr * 0.3, -rr * 0.32, rr * 0.6);
-        gloss.addColorStop(0, "rgba(255,255,255,0.32)");
-        gloss.addColorStop(1, "rgba(255,255,255,0)");
-        ctx.fillStyle = gloss;
-        ctx.beginPath();
-        ctx.ellipse(-rr * 0.16, -rr * 0.2, rr * 0.52, rr * 0.42, -0.35, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.strokeStyle = "rgba(215,252,255,0.34)";
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.ellipse(-rr * 0.2, -rr * 0.22, rr * 0.38, rr * 0.28, -0.4, 3.8, 5.95);
-        ctx.stroke();
-
         ctx.shadowBlur = 0;
         ctx.fillStyle = "rgba(233,251,255,0.95)";
-        ctx.strokeStyle = "rgba(5,9,18,0.18)";
-        ctx.lineWidth = 2.2;
-        const textSize = Math.max(12, Math.min(22, rr * 0.33));
+        ctx.strokeStyle = "rgba(5,9,18,0.16)";
+        ctx.lineWidth = 2.1;
+        const textSize = Math.max(11, Math.min(20, rr * 0.31));
         ctx.font = `800 ${textSize}px Unbounded, sans-serif`;
         ctx.strokeText(n.label, 0, 0);
         ctx.fillText(n.label, 0, 0);
-
         ctx.restore();
       }
 
       function frame(now) {
+        if (document.hidden || state.currentTab !== "memory") {
+          stopBubbleCloud();
+          return;
+        }
         const t = now * 0.0007;
         ctx.clearRect(0, 0, w, h);
-
         for (let i = 0; i < nodes.length; i += 1) {
           const n = nodes[i];
-          n.vx += Math.cos(t + i * 0.7 + n.phase) * 0.009;
-          n.vy += Math.sin(t * 1.08 + i * 0.6 + n.phase) * 0.009;
-          n.vx += (cx - n.x) * 0.00035;
-          n.vy += (cy - n.y) * 0.00035;
+          n.vx += Math.cos(t + i * 0.7 + n.phase) * 0.007;
+          n.vy += Math.sin(t * 1.08 + i * 0.6 + n.phase) * 0.007;
+          n.vx += (cx - n.x) * 0.00032;
+          n.vy += (cy - n.y) * 0.00032;
           n.vx *= 0.993;
           n.vy *= 0.993;
           n.x += n.vx;
@@ -581,22 +810,16 @@
           keepInside(n);
         }
         collide();
-
         nodes.forEach(n => drawBubble(n, t));
         cloudEngine.raf = requestAnimationFrame(frame);
       }
 
-      cloudEngine = { raf: 0 };
-      cloudEngine.raf = requestAnimationFrame(frame);
+      cloudEngine = { raf: requestAnimationFrame(frame) };
     }
 
-    function totalRub() {
-      const raw = state.activeUsers30d * state.pricePerRub;
-      return Math.max(state.minRub, Math.min(state.maxRub, raw));
-    }
-
-    function totalStars() {
-      return Math.max(1, Math.round(totalRub() * state.starsPerRub));
+    function maybeResumeBubble() {
+      const current = state.members.find(x => x.id === state.selectedMember) || state.members[0];
+      if (current) renderBubbleCloud(current.tags || []);
     }
 
     function renderBilling() {
@@ -604,7 +827,7 @@
         btn.classList.toggle("active", btn.dataset.mode === state.billingMode);
         btn.onclick = () => {
           state.billingMode = btn.dataset.mode;
-          state.payerCount = state.billingMode === "owner" ? 1 : Math.min(10, state.activeUsers30d);
+          state.payerCount = state.billingMode === "owner" ? state.payerCountOwner : state.payerCountSplit;
           renderBilling();
           haptic("selection");
         };
@@ -621,49 +844,65 @@
       const rows = document.getElementById("payerRows");
       rows.innerHTML = "";
       const pick = state.members.slice(0, state.payerCount);
-      const share = Math.ceil(stars / Math.max(1, state.payerCount));
-      pick.forEach(m => {
+      const share = Math.ceil(stars / Math.max(1, state.payerCount || 1));
+      if (!pick.length) {
         const tr = document.createElement("div");
         tr.className = "tr";
-        tr.innerHTML = `<div>${m.title}</div><div>pending</div><div>${share}</div>`;
+        tr.innerHTML = "<div>нет активных участников</div><div>preview</div><div>0</div>";
         rows.appendChild(tr);
-      });
+      } else {
+        pick.forEach(m => {
+          const tr = document.createElement("div");
+          tr.className = "tr";
+          tr.innerHTML = `<div>${m.title}</div><div>preview</div><div>${share}</div>`;
+          rows.appendChild(tr);
+        });
+      }
     }
 
-    function serializeConfig() {
-      return {
-        persona: state.persona,
-        heat: state.heat,
-        selectedMember: state.selectedMember,
-        billing: {
-          mode: state.billingMode,
-          activeUsers30d: state.activeUsers30d,
-          payerCount: state.payerCount,
-          totalRub: totalRub(),
-          totalStars: totalStars(),
-          currency: "XTR"
-        },
-        ts: new Date().toISOString()
+    function bindFallbackButton() {
+      document.getElementById("saveBtn").onclick = () => {
+        if (state.currentTab === "memory") {
+          switchTab("settings");
+          return;
+        }
+        fallbackPrimaryAction();
       };
     }
 
-    function bindSave() {
-      const saveBtn = document.getElementById("saveBtn");
-      saveBtn.onclick = () => {
-        const payload = JSON.stringify({ type: "admin_config", payload: serializeConfig() });
-        if (tg?.sendData) tg.sendData(payload);
-        else console.log(payload);
-        haptic("success");
-      };
+    function bindTelegramChrome() {
+      if (!tg) return;
+      try {
+        tg.onEvent("backButtonClicked", () => switchTab("settings"));
+        tg.onEvent("viewportChanged", () => {
+          syncViewportVars();
+          if (state.currentTab === "memory") renderMembers();
+        });
+        tg.onEvent("safeAreaChanged", syncViewportVars);
+        tg.onEvent("contentSafeAreaChanged", syncViewportVars);
+        tg.MainButton.onClick(handlePrimaryAction);
+      } catch (_) {}
     }
 
     function bootstrap() {
+      syncViewportVars();
       renderTabs();
       renderSettings();
       renderMembers();
       renderBilling();
-      bindSave();
-      window.addEventListener("resize", () => renderMembers());
+      bindFallbackButton();
+      bindTelegramChrome();
+      syncBackButton();
+      syncPrimaryAction();
+      syncClosingConfirmation();
+      window.addEventListener("resize", () => {
+        syncViewportVars();
+        if (state.currentTab === "memory") renderMembers();
+      });
+      document.addEventListener("visibilitychange", () => {
+        if (document.hidden) stopBubbleCloud();
+        else if (state.currentTab === "memory") maybeResumeBubble();
+      });
     }
 
     bootstrap();

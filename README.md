@@ -16,9 +16,13 @@ python3 -m pip install -r requirements.txt
 TELEGRAM_BOT_TOKEN=...
 OPENAI_API_KEY=...
 OPENAI_BASE_URL=
+GEMINI_API_KEY=
+MINIAPP_URL=
 ```
 
 `OPENAI_BASE_URL` опционален. Если пустой, используется стандартный endpoint SDK.
+`GEMINI_API_KEY` нужен для voice/TTS.
+`MINIAPP_URL` нужен для запуска Telegram Mini App из `/admin` и `/miniapp`.
 
 3. Запусти бота:
 
