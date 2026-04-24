@@ -19309,6 +19309,17 @@
             "last_seen_ts": "2026-04-24T14:29:30.384594"
           },
           {
+            "id": "8d20296353c8",
+            "text": "Идет мемезация...",
+            "source": "import",
+            "tags": [],
+            "weight": 10.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.414583"
+          },
+          {
             "id": "7897246b2f2f",
             "text": "Бляя",
             "source": "import",
@@ -19318,17 +19329,6 @@
             "funny": 0,
             "unfunny": 0,
             "last_seen_ts": "2026-04-24T14:29:30.384592"
-          },
-          {
-            "id": "8d20296353c8",
-            "text": "Идет мемезация...",
-            "source": "import",
-            "tags": [],
-            "weight": 8.0,
-            "uses": 0,
-            "funny": 0,
-            "unfunny": 0,
-            "last_seen_ts": "2026-04-24T14:29:30.384425"
           },
           {
             "id": "dbba05724458",
@@ -19428,6 +19428,28 @@
             "funny": 0,
             "unfunny": 0,
             "last_seen_ts": "2026-04-24T14:29:30.384484"
+          },
+          {
+            "id": "c094c3012b92",
+            "text": "Блятор спецназовца",
+            "source": "import",
+            "tags": [],
+            "weight": 5.9,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.418955"
+          },
+          {
+            "id": "917a63eda782",
+            "text": "Мажор бля",
+            "source": "import",
+            "tags": [],
+            "weight": 5.9,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.410026"
           },
           {
             "id": "6638ecaede42",
@@ -19705,17 +19727,6 @@
             "last_seen_ts": "2026-04-24T14:29:30.384633"
           },
           {
-            "id": "c094c3012b92",
-            "text": "Блятор спецназовца",
-            "source": "import",
-            "tags": [],
-            "weight": 3.9,
-            "uses": 0,
-            "funny": 0,
-            "unfunny": 0,
-            "last_seen_ts": "2026-04-24T14:29:30.384640"
-          },
-          {
             "id": "19178a5f93a3",
             "text": "В городе пиздец",
             "source": "import",
@@ -19771,17 +19782,6 @@
             "last_seen_ts": "2026-04-24T14:29:30.384676"
           },
           {
-            "id": "917a63eda782",
-            "text": "Мажор бля",
-            "source": "import",
-            "tags": [],
-            "weight": 3.9,
-            "uses": 0,
-            "funny": 0,
-            "unfunny": 0,
-            "last_seen_ts": "2026-04-24T14:29:30.384683"
-          },
-          {
             "id": "79aca7797ba0",
             "text": "Миш тебе короче любую справку надо?",
             "source": "import",
@@ -19802,6 +19802,1238 @@
             "funny": 0,
             "unfunny": 0,
             "last_seen_ts": "2026-04-24T14:29:30.384699"
+          },
+          {
+            "id": "d265eb3ff01e",
+            "text": "@andrewoch в 17:20?",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.411630"
+          },
+          {
+            "id": "53a6b36a3de9",
+            "text": "@ddkaao тебе взять?",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.410428"
+          },
+          {
+            "id": "b18cb4361660",
+            "text": "i chop oak for pindoring",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.420132"
+          },
+          {
+            "id": "7f007e7aa301",
+            "text": "А ты даже поцеловать себя не дал",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.411446"
+          },
+          {
+            "id": "cc026fcd76bd",
+            "text": "Ахахах",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.416213"
+          },
+          {
+            "id": "c9e1cd5c1c8d",
+            "text": "В баззаре",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.409973"
+          },
+          {
+            "id": "0d6651744e0d",
+            "text": "Взаимно",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.412938"
+          },
+          {
+            "id": "7ad0fbafdac9",
+            "text": "Да Рустем, желательно удалить Данила из дискордников, а то не понимает наших приколов",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.416557"
+          },
+          {
+            "id": "dc1213c082a9",
+            "text": "Завтра повезу в ремонт",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.418867"
+          },
+          {
+            "id": "ccee773e9363",
+            "text": "Зп задерживают",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.417879"
+          },
+          {
+            "id": "c5272ef839e6",
+            "text": "Как бы так покупать чипсы чтобы их сжирал только ты а не все остальные",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.414396"
+          },
+          {
+            "id": "ecede820419b",
+            "text": "Кроме как появляется шрек такой же вообще но красный и злой",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.411013"
+          },
+          {
+            "id": "81eaac9ffc0b",
+            "text": "Круто, там самый сок",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.417741"
+          },
+          {
+            "id": "b67c37bd49c1",
+            "text": "Куплю тебе чипсы",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.413210"
+          },
+          {
+            "id": "48be8d410ff9",
+            "text": "Лол Юля",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.416338"
+          },
+          {
+            "id": "c8ec37ee1c9a",
+            "text": "Лучший состав друзей моих",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.417189"
+          },
+          {
+            "id": "732c3fd66cbe",
+            "text": "Макроэкономику",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.418268"
+          },
+          {
+            "id": "42520a1f28a5",
+            "text": "Мир 20:50",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.421398"
+          },
+          {
+            "id": "ab0d38003fc2",
+            "text": "Миша офлайн",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.414626"
+          },
+          {
+            "id": "ca79c62aaab7",
+            "text": "Мороги нажрал башка болит",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.412649"
+          },
+          {
+            "id": "dde6a74ece4b",
+            "text": "Мы так один раз с какого-то урока убегали, и на втором этаже Инессу встретили и она очень удобно проводила нас к кабинету",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.418322"
+          },
+          {
+            "id": "83e2393e5394",
+            "text": "Не туда свернут",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.414002"
+          },
+          {
+            "id": "214de9e10307",
+            "text": "Нюдсы слей",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.414040"
+          },
+          {
+            "id": "b6722c3e3f6a",
+            "text": "Сегодня закупил чипсы и осталось 40 рублей",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.419412"
+          },
+          {
+            "id": "4a77cd0130fc",
+            "text": "То есть ты каждый раз одни и те же видео заливаешь в инсту?",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.413781"
+          },
+          {
+            "id": "70d9236ed6a0",
+            "text": "Тож с маман хотел съездить",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.420244"
+          },
+          {
+            "id": "194df661e6d3",
+            "text": "Ты в другом городе живешь или что",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.413478"
+          },
+          {
+            "id": "93fa05c75a52",
+            "text": "Хобби",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.420382"
+          },
+          {
+            "id": "88faabc13b64",
+            "text": "Холод, ветрище пиздец, а можно еще больше киберпанк наворотов визуальных чтобы был не роутер а танк-авианосец",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.421201"
+          },
+          {
+            "id": "447c42b752d7",
+            "text": "Чёто оказывается нихуя я занят теперь",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.420548"
+          },
+          {
+            "id": "c0bada1f8d8d",
+            "text": "Эм я полину тогда хотел",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.419368"
+          },
+          {
+            "id": "b3ef01b6acfc",
+            "text": "Эта?",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.420881"
+          },
+          {
+            "id": "6941b69a4f1b",
+            "text": "Я в японию улетаю",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.419540"
+          },
+          {
+            "id": "c6639d5874da",
+            "text": "Я думал двиг опять взорвал",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.414910"
+          },
+          {
+            "id": "05b2b428a381",
+            "text": "Я помню обхожу Андрея вокруг а у него со всех сторон спина",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.414871"
+          },
+          {
+            "id": "b69b9791dc3a",
+            "text": "Я похож на бреда питта?",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.419126"
+          },
+          {
+            "id": "8999c99ccd82",
+            "text": "а блин мелких денег нет",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.420058"
+          },
+          {
+            "id": "1882bab7ad92",
+            "text": "а к нам нет",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.418553"
+          },
+          {
+            "id": "4a58f0422831",
+            "text": "а как бл",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.413932"
+          },
+          {
+            "id": "b6ad569889da",
+            "text": "бл ржу юсуф на др завтра себе лимузин арендовал",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.409507"
+          },
+          {
+            "id": "caa9c5e3c28c",
+            "text": "бл у меня в тот вечер инет вырубился нахуй",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.411780"
+          },
+          {
+            "id": "96394c1e0f57",
+            "text": "в конце разрядил обстановку",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.412502"
+          },
+          {
+            "id": "9f918609182c",
+            "text": "в чем выгода",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.416404"
+          },
+          {
+            "id": "b04ab1213473",
+            "text": "в январе нихуя не делал",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.412806"
+          },
+          {
+            "id": "d9f6633f465e",
+            "text": "видимо пошёл спрашивать",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.412866"
+          },
+          {
+            "id": "a13d1bc2d470",
+            "text": "включай прямо сейчас",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.421564"
+          },
+          {
+            "id": "f25794f0f62b",
+            "text": "волосатая",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.414541"
+          },
+          {
+            "id": "33b54ae61c10",
+            "text": "вспомнил как мы году в 2020 с данилом в одной кровати в услоне лежали и перед сном 5 часов обсуждали какой супергерой сильнее",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.416800"
+          },
+          {
+            "id": "80a4019fc918",
+            "text": "вы дарите хуйню хуйню, или хуйню но полезную?",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.420635"
+          },
+          {
+            "id": "a3c44b38db42",
+            "text": "где сквидвард",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.419935"
+          },
+          {
+            "id": "d4f57dba817b",
+            "text": "да",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.414269"
+          },
+          {
+            "id": "8b0bf6221a4d",
+            "text": "да с телефона",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.415492"
+          },
+          {
+            "id": "2cfd9d1a6ff5",
+            "text": "данилу за обучение в итисе заплати",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.414098"
+          },
+          {
+            "id": "272e5e1c9c56",
+            "text": "дождаться бы ещё когда у нас после войны будет",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.419187"
+          },
+          {
+            "id": "9adc6176958a",
+            "text": "дуров спалит и закроет бота прост",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.411115"
+          },
+          {
+            "id": "8d56e2f6ddb2",
+            "text": "еба ну и хуйня",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.409015"
+          },
+          {
+            "id": "bbf8367dc445",
+            "text": "её бы мы так быстро не собрали",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.411270"
+          },
+          {
+            "id": "cf1dcffc822e",
+            "text": "запомним",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.413292"
+          },
+          {
+            "id": "2a30b0403e5c",
+            "text": "зашел к ан по вопросу одному а там ее нет, и какие-то 3 чувака в шортах отжимаются синхронно под счет",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.420715"
+          },
+          {
+            "id": "0014a71b8049",
+            "text": "и ахуевали какой из героев какая имба",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.412987"
+          },
+          {
+            "id": "90156211b997",
+            "text": "и тиктоки с мылом",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.418011"
+          },
+          {
+            "id": "8362169696c6",
+            "text": "интерфейс был довольно 3д но чат сук все испортил",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.411376"
+          },
+          {
+            "id": "300c8d9d1032",
+            "text": "используя библиотеку со словарём русского и английского найти все слова на другом языке которые можно случайно получить если перепутать раскладку клавы",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.417042"
+          },
+          {
+            "id": "f5b3f78bda37",
+            "text": "кого бл если не тебя",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.416039"
+          },
+          {
+            "id": "651daae2c1c2",
+            "text": "купи уже",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.413092"
+          },
+          {
+            "id": "c8230d0c0bb3",
+            "text": "куплю за 3к",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.415380"
+          },
+          {
+            "id": "a1b6e16dda52",
+            "text": "ля ну а завтра?",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.421150"
+          },
+          {
+            "id": "bcd2a7980752",
+            "text": "мачо",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.415774"
+          },
+          {
+            "id": "d9d75ce386c1",
+            "text": "мы решили короче сьебать с заднего входа",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.415099"
+          },
+          {
+            "id": "0713f73aa659",
+            "text": "на улице в них будешь как игорь камышев",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.418917"
+          },
+          {
+            "id": "ce6256afd690",
+            "text": "не",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.415193"
+          },
+          {
+            "id": "a25fc718e147",
+            "text": "не, в скуре пидоры",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.411317"
+          },
+          {
+            "id": "89c1048ea2b4",
+            "text": "не, тут гораздо стильнее",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.416874"
+          },
+          {
+            "id": "4ba98f23afed",
+            "text": "нет до",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.410054"
+          },
+          {
+            "id": "286942fca62b",
+            "text": "норм поднимать можно",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.413661"
+          },
+          {
+            "id": "573b17a07c9d",
+            "text": "оказалось нет",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.410641"
+          },
+          {
+            "id": "1a8b4e8efd94",
+            "text": "он про тебя сегодня говорил",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.416926"
+          },
+          {
+            "id": "02dc13857598",
+            "text": "оставить?",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.415978"
+          },
+          {
+            "id": "fbc25e876294",
+            "text": "отмывание 100 рублей",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.416692"
+          },
+          {
+            "id": "93c276cf586e",
+            "text": "пиздец скам на дрочеров идеальный",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.418198"
+          },
+          {
+            "id": "ba3348d2544a",
+            "text": "пока тебя в рф не было тут одичали все",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.414830"
+          },
+          {
+            "id": "3219d6272cbc",
+            "text": "попросил его на татарском написать рэп чет долго думает",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.420937"
+          },
+          {
+            "id": "7198a0741d11",
+            "text": "последний рабочий день перед easter holidays",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.410398"
+          },
+          {
+            "id": "d5d7d8055177",
+            "text": "потому что не понял",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.415664"
+          },
+          {
+            "id": "3669c121299f",
+            "text": "пранк бл",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.418062"
+          },
+          {
+            "id": "d51e3673084b",
+            "text": "прост не выключать",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.417566"
+          },
+          {
+            "id": "230c2599c9ab",
+            "text": "с родителями тоже связь оборвать",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.410935"
+          },
+          {
+            "id": "53b251172575",
+            "text": "сука скам ебаный пхахахахха, это когда колесо начало в обратную сторону вращаться из-за грузика",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.411408"
+          },
+          {
+            "id": "906b16db6b3c",
+            "text": "схуя",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.410745"
+          },
+          {
+            "id": "48cbab0d4a62",
+            "text": "так а хули ты тогда",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.418778"
+          },
+          {
+            "id": "833b221d8cef",
+            "text": "так я давно писал что с телефона не работает",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.417353"
+          },
+          {
+            "id": "fcd1c694a62b",
+            "text": "типа призрачный гонщик которого еще в квм нет",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.412273"
+          },
+          {
+            "id": "58823eba519f",
+            "text": "типичный гос учреждения момент",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.415436"
+          },
+          {
+            "id": "ed20bd9caede",
+            "text": "ты же говорил что тебя жена будет возить",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.410875"
+          },
+          {
+            "id": "5c9f531ba297",
+            "text": "ты конченый?",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.419658"
+          },
+          {
+            "id": "09af9c95b47c",
+            "text": "у меня дилдо в жопе",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.415144"
+          },
+          {
+            "id": "5cb67174e6de",
+            "text": "у меня работает",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.413739"
+          },
+          {
+            "id": "31c88e78d800",
+            "text": "у проектора автофокус есть",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.420290"
+          },
+          {
+            "id": "6b0b324a58b5",
+            "text": "удобно, но всё равно буду иногда ходить в уник чисто рофлить",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.421461"
+          },
+          {
+            "id": "d4b54f18f152",
+            "text": "уфф",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.412621"
+          },
+          {
+            "id": "82110ae425c3",
+            "text": "хз",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.415898"
+          },
+          {
+            "id": "1b7260a597e2",
+            "text": "хорошая идея",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.414304"
+          },
+          {
+            "id": "f5fad8e6cdad",
+            "text": "хочет сниматься",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.412348"
+          },
+          {
+            "id": "7ddadf4d8464",
+            "text": "че у нас",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.410363"
+          },
+          {
+            "id": "4eed19683534",
+            "text": "четырехполосная велодорожка нахуй",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.410824"
+          },
+          {
+            "id": "53799d83eb4a",
+            "text": "чтобы диджею жизнь испортить",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.413256"
+          },
+          {
+            "id": "91ec17e15168",
+            "text": "это же счита мини сервер, зачем его выключать",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.417482"
+          },
+          {
+            "id": "55541d365998",
+            "text": "я думал он забрал типа мои доки только на всякий случай",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.419740"
+          },
+          {
+            "id": "c438d97df967",
+            "text": "я думал только водители страдают",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.413514"
+          },
+          {
+            "id": "7d90ec1a7fdf",
+            "text": "я зашел на его почту",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.417264"
+          },
+          {
+            "id": "66815fdd2e7c",
+            "text": "я знаю, что не бесплатно",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.418669"
+          },
+          {
+            "id": "568eba380c36",
+            "text": "я пока тебя на делимобиле отвозил у меня 2 колеса лопнуло",
+            "source": "curated_example",
+            "tags": [],
+            "weight": 2.0,
+            "uses": 0,
+            "funny": 0,
+            "unfunny": 0,
+            "last_seen_ts": "2026-04-24T15:26:26.415943"
           }
         ],
         "overused_bits": {},
@@ -19840,7 +21072,5333 @@
             }
           },
           "feedback": []
-        }
+        },
+        "funny_examples": [
+          {
+            "id": "d718c213aa40",
+            "context": [
+              {
+                "author": "Andrew",
+                "text": "Лол"
+              },
+              {
+                "author": "Andrew",
+                "text": "лол"
+              },
+              {
+                "author": "Rustem",
+                "text": "лол"
+              },
+              {
+                "author": "Mitya",
+                "text": "лол"
+              },
+              {
+                "author": "Rustem",
+                "text": "эм"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "норм поднимать можно"
+              },
+              {
+                "author": "kadyr",
+                "text": "сук хахаха"
+              },
+              {
+                "author": "Rustem",
+                "text": "митя предложил везде это видео распространить"
+              }
+            ],
+            "good_reply": "@andrewoch в 17:20?",
+            "tags": [
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "6749083ff3ff",
+            "context": [
+              {
+                "author": "Andrew",
+                "text": "Не напоминай ему!!!"
+              },
+              {
+                "author": "Rustem",
+                "text": "что про зельвенского думаешь?"
+              },
+              {
+                "author": "Kyamal",
+                "text": "хорошо, напомню"
+              },
+              {
+                "author": "Andrew",
+                "text": "Wow Kevin Spacey kissed man!!!"
+              },
+              {
+                "author": "Andrew",
+                "text": "Kevin Gaycey"
+              },
+              {
+                "author": "Rustem",
+                "text": "че он мне объяснить пытался"
+              },
+              {
+                "author": "Andrew",
+                "text": "Макроэкономику"
+              },
+              {
+                "author": "Rustem",
+                "text": "@all"
+              }
+            ],
+            "good_reply": "@ddkaao тебе взять?",
+            "tags": [
+              "deadpan",
+              "local",
+              "roast_light"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "0b2c2bc3ab5c",
+            "context": [
+              {
+                "author": "Danka Manonin",
+                "text": "Я заебался писать"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "лол"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "крутое развлечение"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Чёто оказывается нихуя я занят теперь"
+              },
+              {
+                "author": "Andrew",
+                "text": "опа пары закончились а я уже дома"
+              },
+              {
+                "author": "Andrew",
+                "text": "удобно, но всё равно буду иногда ходить в уник чисто рофлить"
+              },
+              {
+                "author": "Andrew",
+                "text": "обожаю с этим играться теперь"
+              },
+              {
+                "author": "Misha",
+                "text": "еще еще хочу"
+              }
+            ],
+            "good_reply": "i chop oak for pindoring",
+            "tags": [
+              "deadpan",
+              "absurd",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "ea07a8af1a11",
+            "context": [
+              {
+                "author": "Danka Manonin",
+                "text": "Две взять или одну?"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Лол Малика"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Ебать"
+              },
+              {
+                "author": "kadyr",
+                "text": "2"
+              },
+              {
+                "author": "Misha",
+                "text": "Смотря какой размер пачки"
+              },
+              {
+                "author": "kadyr",
+                "text": "она не в казани по моему"
+              },
+              {
+                "author": "Misha",
+                "text": "Возьми чапмана рэд еще"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Я щас стою разговариваю с ней"
+              }
+            ],
+            "good_reply": "А ты даже поцеловать себя не дал",
+            "tags": [
+              "deadpan",
+              "absurd",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "ff7d59328781",
+            "context": [
+              {
+                "author": "kadyr",
+                "text": "провинциальный шик чисто"
+              },
+              {
+                "author": "Kyamal",
+                "text": "Нихуя"
+              },
+              {
+                "author": "Misha",
+                "text": "Устрой там Диляре мото мото романтик"
+              },
+              {
+                "author": "Misha",
+                "text": "Такое там замутить можно"
+              },
+              {
+                "author": "Misha",
+                "text": "Чисто лепестков роз насыпать 10 кг"
+              },
+              {
+                "author": "Mitya",
+                "text": "лол"
+              },
+              {
+                "author": "Misha",
+                "text": "Везде"
+              },
+              {
+                "author": "Mitya",
+                "text": "скок стоит?"
+              }
+            ],
+            "good_reply": "Ахахах",
+            "tags": [
+              "short",
+              "absurd",
+              "local",
+              "deadpan"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "4c0054c2875a",
+            "context": [
+              {
+                "author": "kadyr",
+                "text": "молекулы"
+              },
+              {
+                "author": "Rustem",
+                "text": "Ароматы я там брал"
+              },
+              {
+                "author": "Rustem",
+                "text": "Лол"
+              },
+              {
+                "author": "Rustem",
+                "text": "Странный магазин"
+              },
+              {
+                "author": "Mitya",
+                "text": "ароматы"
+              },
+              {
+                "author": "Mitya",
+                "text": "пердежь данилу тип?"
+              },
+              {
+                "author": "kadyr",
+                "text": "poop spray"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "блятор спецназовца ржачный, который работает @ddkaao ?"
+              }
+            ],
+            "good_reply": "Блятор спецназовца",
+            "tags": [
+              "short",
+              "deadpan",
+              "roast_light",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "8b54d4d797c4",
+            "context": [
+              {
+                "author": "Misha",
+                "text": "Кому за додо"
+              },
+              {
+                "author": "Andrew",
+                "text": "Кстати да"
+              },
+              {
+                "author": "Andrew",
+                "text": "Данилу"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Андрей ты можешь не кидать, я за цветы девочкам должен"
+              },
+              {
+                "author": "Andrew",
+                "text": "Лан"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Миша Кямаль за пиццу кинете?🥺"
+              },
+              {
+                "author": "Misha",
+                "text": "Угу"
+              },
+              {
+                "author": "Andrew",
+                "text": "https://youtu.be/iId5WDsYxZ4?si=CG9BEQYK_xu7j7VQ"
+              }
+            ],
+            "good_reply": "В баззаре",
+            "tags": [
+              "short",
+              "absurd",
+              "local",
+              "deadpan"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "61cd9ee74980",
+            "context": [
+              {
+                "author": "Danka Manonin",
+                "text": "Лол"
+              },
+              {
+                "author": "Mitya",
+                "text": "как они вообще с тобой связались"
+              },
+              {
+                "author": "Rustem",
+                "text": "я вспомнил мем где чел в прямом эфире соловьева по скайпу сказал «сейчас покажу» и показал по первому каналу свои яйца крупным планом"
+              },
+              {
+                "author": "Mitya",
+                "text": "по вотсаппу"
+              },
+              {
+                "author": "Andrew",
+                "text": "ахуеть, как же чат мощно детали сохраняет"
+              },
+              {
+                "author": "Andrew",
+                "text": "я для ролика сделал 8 фоток, каждый раз добавляя условия. И каждый раз чат идеально сохранял предыдущую картинку, добавляя условие"
+              },
+              {
+                "author": "PlayStation NEWS 13.04.2025 04:19:22",
+                "text": "Второй трейлер GTA 6 покажут 7 июня — в сеть слили трейлер Summer Game Fest"
+              },
+              {
+                "author": "Misha",
+                "text": "Элина сказала что кямаль та еще горячая штучка"
+              }
+            ],
+            "good_reply": "Взаимно",
+            "tags": [
+              "deadpan",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "f7776b9e2f32",
+            "context": [
+              {
+                "author": "kadyr",
+                "text": "нет"
+              },
+              {
+                "author": "Kyamal",
+                "text": "я не приду"
+              },
+              {
+                "author": "Andrew",
+                "text": "Мы че вдвоем можем в итоге"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Ну Лан ("
+              },
+              {
+                "author": "Andrew",
+                "text": "Печально"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "Холод, ветрище пиздец, а можно еще больше киберпанк наворотов визуальных чтобы был не роутер а танк-авианосец"
+              },
+              {
+                "author": "Rustem 11.11.2023 10:56:02",
+                "text": "так не люблю нормисов"
+              },
+              {
+                "author": "Rustem 11.11.2023 10:56:02",
+                "text": "с другой стороны не хотел бы чтобы весь мир из подмечателей состоял"
+              }
+            ],
+            "good_reply": "Да Рустем, желательно удалить Данила из дискордников, а то не понимает наших приколов",
+            "tags": [
+              "deadpan",
+              "local",
+              "roast_light"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "41841d3e99c0",
+            "context": [
+              {
+                "author": "kadyr",
+                "text": "читать лень или что"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "лол"
+              },
+              {
+                "author": "Mitya",
+                "text": "правильно"
+              },
+              {
+                "author": "Andrew",
+                "text": "да"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Пацаны не будет модема, у меня тариф 50 рублей в час"
+              },
+              {
+                "author": "Rustem",
+                "text": "дали кучу советов но хуй с ним"
+              },
+              {
+                "author": "Rustem",
+                "text": "классно"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Для раздачи"
+              }
+            ],
+            "good_reply": "Завтра повезу в ремонт",
+            "tags": [
+              "short",
+              "local",
+              "deadpan",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "ca58583aef94",
+            "context": [
+              {
+                "author": "Rustem",
+                "text": "на неделе сбор смотрим новый выпуск супернтндзя"
+              },
+              {
+                "author": "Rustem",
+                "text": "!!"
+              },
+              {
+                "author": "Misha",
+                "text": "Го че нетто"
+              },
+              {
+                "author": "Misha",
+                "text": "Хуленетто"
+              },
+              {
+                "author": "Rustem",
+                "text": "чезабретто"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "Хуленеттоji"
+              },
+              {
+                "author": "Misha",
+                "text": "Кямаль я нашел твой планшет за 10к на вб"
+              },
+              {
+                "author": "Kyamal",
+                "text": "Покупай"
+              }
+            ],
+            "good_reply": "Зп задерживают",
+            "tags": [
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "a2bafabf17ff",
+            "context": [
+              {
+                "author": "Danka Manonin",
+                "text": "Без наушников остался"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Ебануто круто ставлю лайк"
+              },
+              {
+                "author": "Mitya",
+                "text": "бл"
+              },
+              {
+                "author": "Mitya",
+                "text": "чел"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "В пизду, я заебался уже нахуй"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Сидишь копейку к копейке считаешь и стираешь наушники в тот же вечер"
+              },
+              {
+                "author": "Misha",
+                "text": "Новые наушники на др"
+              },
+              {
+                "author": "kadyr",
+                "text": "мем"
+              }
+            ],
+            "good_reply": "Идет мемезация...",
+            "tags": [
+              "deadpan",
+              "absurd",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "987e7addb32c",
+            "context": [
+              {
+                "author": "kadyr",
+                "text": "нет попросил купить самый дорогой билет"
+              },
+              {
+                "author": "kadyr",
+                "text": "не за свои деньги еду же"
+              },
+              {
+                "author": "Rustem",
+                "text": "красная стрела св"
+              },
+              {
+                "author": "Misha",
+                "text": ":)"
+              },
+              {
+                "author": "Kyamal",
+                "text": "Это Миша"
+              },
+              {
+                "author": "Kyamal",
+                "text": "Я добрый"
+              },
+              {
+                "author": "Misha",
+                "text": "Мить ты меня сам был"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "не помню"
+              }
+            ],
+            "good_reply": "Как бы так покупать чипсы чтобы их сжирал только ты а не все остальные",
+            "tags": [
+              "deadpan",
+              "absurd",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "5f9f87ab602f",
+            "context": [
+              {
+                "author": "Andrew",
+                "text": "Ебать тут детективно закручено как будто, но я просто не воспринимаю сейчас информацию"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "ахуеют наверное"
+              },
+              {
+                "author": "Rustem",
+                "text": "я сначала думал ты опечатался и имел ввиду красный шрек, а в голове представил красного халка"
+              },
+              {
+                "author": "Andrew",
+                "text": "Че за красный шрек"
+              },
+              {
+                "author": "Rustem",
+                "text": "хз"
+              },
+              {
+                "author": "Rustem",
+                "text": "я в голове красного халка представил и его со шреком перепутал"
+              },
+              {
+                "author": "Rustem",
+                "text": "антагонист"
+              },
+              {
+                "author": "Andrew",
+                "text": "В шреке 5 не придумали никакой другой сюжет"
+              }
+            ],
+            "good_reply": "Кроме как появляется шрек такой же вообще но красный и злой",
+            "tags": [
+              "absurd",
+              "local",
+              "dry",
+              "deadpan"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "a63a2bad8bb8",
+            "context": [
+              {
+                "author": "Mitya",
+                "text": "он попросил ещё по сбп не переводить"
+              },
+              {
+                "author": "Rustem",
+                "text": "не повезло вам"
+              },
+              {
+                "author": "Kyamal",
+                "text": "Если не скинете то без подарка останетесь"
+              },
+              {
+                "author": "kadyr",
+                "text": "да"
+              },
+              {
+                "author": "kadyr",
+                "text": "митя не подарю тебе"
+              },
+              {
+                "author": "Mitya",
+                "text": "что скинуть?"
+              },
+              {
+                "author": "Kyamal",
+                "text": "Я Рустему не дарю"
+              },
+              {
+                "author": "Rustem",
+                "text": "бля я с ума сойду от нервяков с этим аккаунтом эпл"
+              }
+            ],
+            "good_reply": "Круто, там самый сок",
+            "tags": [
+              "deadpan",
+              "absurd",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "10363494d199",
+            "context": [
+              {
+                "author": "Rustem",
+                "text": "кому ты веришь бл"
+              },
+              {
+                "author": "Rustem",
+                "text": "какой резон вообще"
+              },
+              {
+                "author": "Misha",
+                "text": "Недоступен"
+              },
+              {
+                "author": "Kyamal",
+                "text": "щас если у меня получается скидываешь мне 2300"
+              },
+              {
+                "author": "Misha",
+                "text": "Тож самое"
+              },
+              {
+                "author": "Misha",
+                "text": "Что ты хочешь за это"
+              },
+              {
+                "author": "Kyamal",
+                "text": "ничего лол"
+              },
+              {
+                "author": "Misha",
+                "text": "Ладно"
+              }
+            ],
+            "good_reply": "Куплю тебе чипсы",
+            "tags": [
+              "short",
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "475357786d00",
+            "context": [
+              {
+                "author": "Misha",
+                "text": "На кондициях"
+              },
+              {
+                "author": "kadyr",
+                "text": "хуя"
+              },
+              {
+                "author": "kadyr",
+                "text": "это чё за мерс"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Майбах"
+              },
+              {
+                "author": "Andrew",
+                "text": "Приснилось как у нас рандомно поставили урок снова в школе, первый урок математика кр и потом литра где надо сочинения сдать, которое мы не написали конечно же, думаем бля опять быстро писать но хоть теперь чатгпт изобре"
+              },
+              {
+                "author": "Rustem",
+                "text": "в конце разрядил обстановку"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Пришли в спа"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Ебать тут труселя пхпхпхп"
+              }
+            ],
+            "good_reply": "Лол Юля",
+            "tags": [
+              "long",
+              "absurd",
+              "local",
+              "deadpan"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "a44ccc07885e",
+            "context": [
+              {
+                "author": "Rustem",
+                "text": "миша кота испугал"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Чё не купили, Делов на 4 минуты и 15 рублей"
+              },
+              {
+                "author": "Misha",
+                "text": "Я в японию улетаю"
+              },
+              {
+                "author": "Misha",
+                "text": "Мухахах"
+              },
+              {
+                "author": "Misha",
+                "text": "🦹‍♂️"
+              },
+              {
+                "author": "Rustem",
+                "text": "пока"
+              },
+              {
+                "author": "Rustem",
+                "text": "тоже хочу"
+              },
+              {
+                "author": "Rustem",
+                "text": "но чтобы кто-нибудь за меня заплатил"
+              }
+            ],
+            "good_reply": "Лучший состав друзей моих",
+            "tags": [
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "9a7c7ff00ab1",
+            "context": [
+              {
+                "author": "kadyr",
+                "text": "бл пиздец я бы до того как купил свои первые аирподсы и подумать не мог бы о том, что реплику даже придется за 8 брать"
+              },
+              {
+                "author": "Rustem",
+                "text": "Найти бы день когда не лень и покататься по магазинам этих с Авито"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "копейки ебаные все стоит"
+              },
+              {
+                "author": "kadyr",
+                "text": "тогда для меня максимум был 2к за наушники"
+              },
+              {
+                "author": "Rustem",
+                "text": "8 блин стоили оригинал первых аирподс"
+              },
+              {
+                "author": "Rustem",
+                "text": "И мои текущие Jabra"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "Почему ты отказался"
+              },
+              {
+                "author": "Rustem",
+                "text": "И казалось пиздец как дорого"
+              }
+            ],
+            "good_reply": "Мажор бля",
+            "tags": [
+              "short",
+              "deadpan",
+              "local",
+              "roast_light"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "5204dcf6aa3d",
+            "context": [
+              {
+                "author": "Kyamal",
+                "text": "что напомнить"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "не надо"
+              },
+              {
+                "author": "Andrew",
+                "text": "Не напоминай ему!!!"
+              },
+              {
+                "author": "Rustem",
+                "text": "что про зельвенского думаешь?"
+              },
+              {
+                "author": "Kyamal",
+                "text": "хорошо, напомню"
+              },
+              {
+                "author": "Andrew",
+                "text": "Wow Kevin Spacey kissed man!!!"
+              },
+              {
+                "author": "Andrew",
+                "text": "Kevin Gaycey"
+              },
+              {
+                "author": "Rustem",
+                "text": "че он мне объяснить пытался"
+              }
+            ],
+            "good_reply": "Макроэкономику",
+            "tags": [
+              "absurd",
+              "deadpan",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "9a026208a82f",
+            "context": [
+              {
+                "author": "Rustem",
+                "text": "Мир 280"
+              },
+              {
+                "author": "kadyr",
+                "text": "го"
+              },
+              {
+                "author": "kadyr",
+                "text": "почему блин нет по пушке"
+              },
+              {
+                "author": "Rustem",
+                "text": "Глупость"
+              },
+              {
+                "author": "Mitya",
+                "text": "каст оппозиционеры"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "Пиздец"
+              },
+              {
+                "author": "Rustem",
+                "text": "Митя ещё такой Да есть по пушкинской как может не быть"
+              },
+              {
+                "author": "Rustem",
+                "text": "Кац"
+              }
+            ],
+            "good_reply": "Мир 20:50",
+            "tags": [
+              "short",
+              "deadpan",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "49b721ec5317",
+            "context": [
+              {
+                "author": "Rustem",
+                "text": "Если узнает то в отказ полный"
+              },
+              {
+                "author": "kadyr",
+                "text": "миша подойди к нему на англ что-то спроси пж"
+              },
+              {
+                "author": "kadyr",
+                "text": "и на диктофон запиши или видео"
+              },
+              {
+                "author": "Rustem",
+                "text": "How do you cum"
+              },
+              {
+                "author": "Misha",
+                "text": "Good morning"
+              },
+              {
+                "author": "Rustem",
+                "text": "What would you rather"
+              },
+              {
+                "author": "Rustem",
+                "text": "Пройди мимо и напевай I’m a man I’m a Misha"
+              },
+              {
+                "author": "kadyr",
+                "text": "не типа excuse my disturbing behaviour, but doing you apparently have knowledge of whereabouts of the nearest gay bar around here"
+              }
+            ],
+            "good_reply": "Миша офлайн",
+            "tags": [
+              "deadpan",
+              "absurd",
+              "local",
+              "callback"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "a7d18ca25a00",
+            "context": [
+              {
+                "author": "kadyr",
+                "text": "скинул уже"
+              },
+              {
+                "author": "Kyamal",
+                "text": "Ща скину обратно)"
+              },
+              {
+                "author": "kadyr",
+                "text": "сук"
+              },
+              {
+                "author": "Kyamal",
+                "text": "Хватило сук"
+              },
+              {
+                "author": "Kyamal",
+                "text": "В аптеку прост зашел"
+              },
+              {
+                "author": "kadyr",
+                "text": "презики покупаешь"
+              },
+              {
+                "author": "Kyamal",
+                "text": "Нет, Нурофен"
+              },
+              {
+                "author": "kadyr",
+                "text": "хорошо верю"
+              }
+            ],
+            "good_reply": "Мороги нажрал башка болит",
+            "tags": [
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "caac625d5855",
+            "context": [
+              {
+                "author": "Andrew",
+                "text": "Плакат к двери приставили чтобы выйти нельзя было"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "Ой"
+              },
+              {
+                "author": "kadyr",
+                "text": "лол"
+              },
+              {
+                "author": "kadyr",
+                "text": "мы решили короче сьебать с заднего входа"
+              },
+              {
+                "author": "kadyr",
+                "text": "идём туда, а там бл точка сбора всех на этот митинг"
+              },
+              {
+                "author": "Rustem",
+                "text": "Давай"
+              },
+              {
+                "author": "Andrew",
+                "text": "Лол"
+              },
+              {
+                "author": "Andrew",
+                "text": "Обложили"
+              }
+            ],
+            "good_reply": "Мы так один раз с какого-то урока убегали, и на втором этаже Инессу встретили и она очень удобно проводила нас к кабинету",
+            "tags": [
+              "local",
+              "deadpan",
+              "callback"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "3bf5e98b18e9",
+            "context": [
+              {
+                "author": "Andrew",
+                "text": "пока там оформитесь"
+              },
+              {
+                "author": "Rustem",
+                "text": "Наверное в 19 это за 3 часа"
+              },
+              {
+                "author": "kadyr",
+                "text": "ну так я их и так за 3-4 часа отправляю"
+              },
+              {
+                "author": "Misha",
+                "text": "Как бы так и надо"
+              },
+              {
+                "author": "Rustem",
+                "text": "А сейчас это часов за 7"
+              },
+              {
+                "author": "kadyr",
+                "text": "лол"
+              },
+              {
+                "author": "Misha",
+                "text": "А они сами не доедут что ли"
+              },
+              {
+                "author": "Andrew",
+                "text": "нет он их сразу на самолет"
+              }
+            ],
+            "good_reply": "Не туда свернут",
+            "tags": [
+              "deadpan",
+              "absurd",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "bec5ee70c752",
+            "context": [
+              {
+                "author": "Rustem",
+                "text": "Все по сообщениям понятно стало"
+              },
+              {
+                "author": "kadyr",
+                "text": "лол"
+              },
+              {
+                "author": "kadyr",
+                "text": "\"Лол, это было весело. Мечтаю попасть на соревнования по плаванию. Кстати, кто идет на концерт в выходные? Нужно встретиться!\""
+              },
+              {
+                "author": "Andrew",
+                "text": "Такой рофл бля, ученица знала что в конце июня у нее финал колледжа, но именно щас без выяснения всего свалила на дачу и компа нет с собой"
+              },
+              {
+                "author": "kadyr",
+                "text": "лол"
+              },
+              {
+                "author": "kadyr",
+                "text": "хороша"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "я 4 серию досматриваю"
+              },
+              {
+                "author": "Andrew",
+                "text": "тупо мне пароль дала от всего типа пж залей"
+              }
+            ],
+            "good_reply": "Нюдсы слей",
+            "tags": [
+              "deadpan",
+              "absurd",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "eba1b8a0f35b",
+            "context": [
+              {
+                "author": "Kyamal",
+                "text": "Дырка в коже ток небольшая, хз как быть"
+              },
+              {
+                "author": "Kyamal",
+                "text": "Зашью может"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Всё ещё предлагаю тебе забрать мои"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Я в них только пару раз вышел то"
+              },
+              {
+                "author": "Kyamal",
+                "text": "У меня 0 денег"
+              },
+              {
+                "author": "kadyr",
+                "text": "он говорит просто забрать"
+              },
+              {
+                "author": "kadyr",
+                "text": "дарит"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Ну не щас, на сезон"
+              }
+            ],
+            "good_reply": "Сегодня закупил чипсы и осталось 40 рублей",
+            "tags": [
+              "deadpan",
+              "absurd",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "4689a5857956",
+            "context": [
+              {
+                "author": "Rustem",
+                "text": "данилу за обучение в итисе заплати"
+              },
+              {
+                "author": "kadyr",
+                "text": "лол"
+              },
+              {
+                "author": "kadyr",
+                "text": "данил мы договорились"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "У меня тож"
+              },
+              {
+                "author": "Mitya",
+                "text": "дай 1000"
+              },
+              {
+                "author": "kadyr",
+                "text": "200 абрамскому на взятку"
+              },
+              {
+                "author": "Rustem",
+                "text": "попроси у даши она тебе 1000 долларов даст"
+              },
+              {
+                "author": "Rustem",
+                "text": "сук"
+              }
+            ],
+            "good_reply": "То есть ты каждый раз одни и те же видео заливаешь в инсту?",
+            "tags": [
+              "short",
+              "deadpan",
+              "absurd",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "0a58f9d085c3",
+            "context": [
+              {
+                "author": "Kyamal",
+                "text": "Я в тренажерный зал ходил только в униксе, когда в баскет играл"
+              },
+              {
+                "author": "kadyr",
+                "text": "бл такой ржачный город"
+              },
+              {
+                "author": "kadyr",
+                "text": "просто дефолт провинция"
+              },
+              {
+                "author": "kadyr",
+                "text": "я снял самый дорогой и крутой номер в городе"
+              },
+              {
+                "author": "kadyr",
+                "text": "йошка"
+              },
+              {
+                "author": "kadyr",
+                "text": "5 минут от центра лол"
+              },
+              {
+                "author": "kadyr",
+                "text": "не, тут гораздо стильнее"
+              },
+              {
+                "author": "kadyr",
+                "text": "прям оч красиво в некоторых местах я бы сказал"
+              }
+            ],
+            "good_reply": "Тож с маман хотел съездить",
+            "tags": [
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "b60c222fb2ce",
+            "context": [
+              {
+                "author": "сглыпа)",
+                "text": "извиняю"
+              },
+              {
+                "author": "kadyr",
+                "text": "лол"
+              },
+              {
+                "author": "kadyr",
+                "text": "наглый"
+              },
+              {
+                "author": "kadyr",
+                "text": "вот бы игнат умел в чатгпд"
+              },
+              {
+                "author": "Andrew",
+                "text": "как вне очереди получить обнову фигмы"
+              },
+              {
+                "author": "Andrew",
+                "text": "они постепенно ее внедряют"
+              },
+              {
+                "author": "Rustem",
+                "text": "Да можно давайте"
+              },
+              {
+                "author": "Rustem",
+                "text": "У кого у вас"
+              }
+            ],
+            "good_reply": "Ты в другом городе живешь или что",
+            "tags": [
+              "deadpan",
+              "local",
+              "roast_light"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "b2d76d33ceb6",
+            "context": [
+              {
+                "author": "Rustem",
+                "text": "я забрал"
+              },
+              {
+                "author": "Mitya",
+                "text": "осьминога"
+              },
+              {
+                "author": "kadyr",
+                "text": "че там было я забыл"
+              },
+              {
+                "author": "kadyr",
+                "text": "куриная консерва"
+              },
+              {
+                "author": "Andrew",
+                "text": "Я сегодня ходил письма воровал как раз у жильцов"
+              },
+              {
+                "author": "Andrew",
+                "text": "Ничего не пришло правда"
+              },
+              {
+                "author": "kadyr",
+                "text": "у соседей"
+              },
+              {
+                "author": "Rustem",
+                "text": "кадыр я надеюсь ты сделал дубликат ключей и через полгода ночью к мите зайдешл и оставишь посреди комнаты садового гнома"
+              }
+            ],
+            "good_reply": "Хобби",
+            "tags": [
+              "deadpan",
+              "absurd",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "4254975ca8cc",
+            "context": [
+              {
+                "author": "Rustem",
+                "text": "лол"
+              },
+              {
+                "author": "Rustem",
+                "text": "татуировки не красят женщину"
+              },
+              {
+                "author": "Mitya",
+                "text": "напиши в комменты"
+              },
+              {
+                "author": "kadyr",
+                "text": "нет"
+              },
+              {
+                "author": "Kyamal",
+                "text": "я не приду"
+              },
+              {
+                "author": "Andrew",
+                "text": "Мы че вдвоем можем в итоге"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Ну Лан ("
+              },
+              {
+                "author": "Andrew",
+                "text": "Печально"
+              }
+            ],
+            "good_reply": "Холод, ветрище пиздец, а можно еще больше киберпанк наворотов визуальных чтобы был не роутер а танк-авианосец",
+            "tags": [
+              "absurd",
+              "deadpan",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "d515e1b5bae1",
+            "context": [
+              {
+                "author": "Danka Manonin",
+                "text": "Так"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "А во сколько?"
+              },
+              {
+                "author": "Rustem",
+                "text": "ну а во сколько ты можешь"
+              },
+              {
+                "author": "Rustem",
+                "text": "ладно а в какой день тогда ты полностью свободен"
+              },
+              {
+                "author": "Rustem",
+                "text": "если ты работаешь"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Я заебался писать"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "лол"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "крутое развлечение"
+              }
+            ],
+            "good_reply": "Чёто оказывается нихуя я занят теперь",
+            "tags": [
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "3d137aed9345",
+            "context": [
+              {
+                "author": "Misha",
+                "text": "бля я в кз жил оказывается"
+              },
+              {
+                "author": "Mitya",
+                "text": "казани"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Ахуеть точно"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Ааооаоаоаоаоаоа"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "а че не 3 четырехугольник"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "а че снимали сегодня"
+              },
+              {
+                "author": "Mitya",
+                "text": "ага ага"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Сам такой"
+              }
+            ],
+            "good_reply": "Эм я полину тогда хотел",
+            "tags": [
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "668f59bf3299",
+            "context": [
+              {
+                "author": "Kyamal",
+                "text": "У меня нету доступа к ним"
+              },
+              {
+                "author": "Kyamal",
+                "text": "Мы все равно выигрываем"
+              },
+              {
+                "author": "Misha",
+                "text": "Блять"
+              },
+              {
+                "author": "Misha",
+                "text": "Нет"
+              },
+              {
+                "author": "Andrew",
+                "text": "Кямаль мой акк же есть?"
+              },
+              {
+                "author": "Kyamal",
+                "text": "Нету"
+              },
+              {
+                "author": "Kyamal",
+                "text": "Скажи почту"
+              },
+              {
+                "author": "Kyamal",
+                "text": "andynem2013@yandex.ru"
+              }
+            ],
+            "good_reply": "Эта?",
+            "tags": [
+              "short",
+              "deadpan",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "912737cf50a1",
+            "context": [
+              {
+                "author": "kadyr",
+                "text": "опа сво"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "По-моему эта фотка по другому выглядела"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Не по-моему Юсуф выше был"
+              },
+              {
+                "author": "Rustem",
+                "text": "чел слева думает о челе справа"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "А Кадыр маленький"
+              },
+              {
+                "author": "Rustem",
+                "text": "будет выше"
+              },
+              {
+                "author": "Rustem",
+                "text": "миша кота испугал"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Чё не купили, Делов на 4 минуты и 15 рублей"
+              }
+            ],
+            "good_reply": "Я в японию улетаю",
+            "tags": [
+              "deadpan",
+              "absurd",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "416dfc1af134",
+            "context": [
+              {
+                "author": "kadyr",
+                "text": "ещё у Ислама в машине"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Типичный я"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Взял машину на 2 часа чтоб туда сюда успеть"
+              },
+              {
+                "author": "Misha",
+                "text": "Будем смотреть истоки пока едем в даг"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "В итоге щас через 15 минут буду дома"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Час лишний"
+              },
+              {
+                "author": "Rustem",
+                "text": "Ещё можно в Эльдорадо пойти и там телек пялиться"
+              },
+              {
+                "author": "Rustem",
+                "text": "Сьезди на зимнюю горку"
+              }
+            ],
+            "good_reply": "Я думал двиг опять взорвал",
+            "tags": [
+              "deadpan",
+              "absurd",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "f589df1145d0",
+            "context": [
+              {
+                "author": "Misha",
+                "text": "Goes hard"
+              },
+              {
+                "author": "Andrew",
+                "text": "👡"
+              },
+              {
+                "author": "Misha",
+                "text": "Im a fetishist"
+              },
+              {
+                "author": "Andrew",
+                "text": "👅"
+              },
+              {
+                "author": "Misha",
+                "text": "Yes"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "косарь баксов и берешь что хочешь"
+              },
+              {
+                "author": "kadyr",
+                "text": "помню минут 40 так пранковал андрея"
+              },
+              {
+                "author": "Andrew",
+                "text": "лол"
+              }
+            ],
+            "good_reply": "Я помню обхожу Андрея вокруг а у него со всех сторон спина",
+            "tags": [
+              "deadpan",
+              "absurd",
+              "laugh_response_after"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "ef7c4a3fa432",
+            "context": [
+              {
+                "author": "Misha",
+                "text": "Ураааа"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "Хз пока"
+              },
+              {
+                "author": "Rustem",
+                "text": "пхвхвхвхвхвх"
+              },
+              {
+                "author": "Misha",
+                "text": "Поздравляю чуваки"
+              },
+              {
+                "author": "Rustem",
+                "text": "ты же тоже как победитель"
+              },
+              {
+                "author": "Rustem",
+                "text": "все мы"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "У меня 54% хотя я всего часа 2 пользуют вроде"
+              },
+              {
+                "author": "Rustem",
+                "text": "ты его знаешь"
+              }
+            ],
+            "good_reply": "Я похож на бреда питта?",
+            "tags": [
+              "local",
+              "absurd",
+              "deadpan"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "af70cb54169f",
+            "context": [
+              {
+                "author": "kadyr",
+                "text": "везу с собой подарочные деньги"
+              },
+              {
+                "author": "kadyr",
+                "text": "на че бы потратить"
+              },
+              {
+                "author": "kadyr",
+                "text": "диляре скажу что украли"
+              },
+              {
+                "author": "Rustem",
+                "text": "зайди в мак и спроси у кассира «сколько вам дать денег чтобы уволились прямо сейчас»"
+              },
+              {
+                "author": "kadyr",
+                "text": "лол"
+              },
+              {
+                "author": "Rustem",
+                "text": "мистер бист"
+              },
+              {
+                "author": "kadyr",
+                "text": "просто по баумана идти и говорить 1000 руб вам или 2000 следующему"
+              },
+              {
+                "author": "Rustem",
+                "text": "литр энжи"
+              }
+            ],
+            "good_reply": "а блин мелких денег нет",
+            "tags": [
+              "deadpan",
+              "absurd",
+              "local",
+              "callback"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "59e2061e6f9a",
+            "context": [
+              {
+                "author": "kadyr",
+                "text": "поезд"
+              },
+              {
+                "author": "kadyr",
+                "text": "ну если успею собрать вещи"
+              },
+              {
+                "author": "Mitya",
+                "text": "трусы бери"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Давай собирай"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "Но норм тема рил"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Диляра к девочкам придёт а ты нет что ли"
+              },
+              {
+                "author": "kadyr",
+                "text": "постараюсь"
+              },
+              {
+                "author": "Mitya",
+                "text": "кадыр тоже к девочкам придёт"
+              }
+            ],
+            "good_reply": "а к нам нет",
+            "tags": [
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "be12b5285611",
+            "context": [
+              {
+                "author": "kadyr",
+                "text": "сквидман"
+              },
+              {
+                "author": "kadyr",
+                "text": "о нет"
+              },
+              {
+                "author": "Mitya",
+                "text": "у меня работает"
+              },
+              {
+                "author": "Rustem",
+                "text": "лол"
+              },
+              {
+                "author": "Rustem",
+                "text": "он до сих пор работает что ли"
+              },
+              {
+                "author": "Mitya",
+                "text": "да"
+              },
+              {
+                "author": "kadyr",
+                "text": "рил?"
+              },
+              {
+                "author": "Mitya",
+                "text": "но не с телефона"
+              }
+            ],
+            "good_reply": "а как бл",
+            "tags": [
+              "short",
+              "deadpan",
+              "absurd",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "1fa43b767051",
+            "context": [
+              {
+                "author": "Mitya",
+                "text": "лол"
+              },
+              {
+                "author": "Rustem",
+                "text": "эм"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "норм поднимать можно"
+              },
+              {
+                "author": "kadyr",
+                "text": "сук хахаха"
+              },
+              {
+                "author": "Rustem",
+                "text": "митя предложил везде это видео распространить"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "@andrewoch в 17:20?"
+              },
+              {
+                "author": "Rustem",
+                "text": "подслушано казань, еду в татарстан"
+              },
+              {
+                "author": "Rustem",
+                "text": "чтобы диджею жизнь испортить"
+              }
+            ],
+            "good_reply": "бл ржу юсуф на др завтра себе лимузин арендовал",
+            "tags": [
+              "deadpan",
+              "local",
+              "chat_roughness"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "c7157bac099c",
+            "context": [
+              {
+                "author": "Mitya",
+                "text": "живодер"
+              },
+              {
+                "author": "kadyr",
+                "text": "барный стул чет сломался что ли"
+              },
+              {
+                "author": "Rustem",
+                "text": "у нее эмо период она сама захотела"
+              },
+              {
+                "author": "Rustem",
+                "text": "я их совместил мне так удобнее"
+              },
+              {
+                "author": "kadyr",
+                "text": "жопа широкая"
+              },
+              {
+                "author": "Rustem",
+                "text": "толстую картошку ел"
+              },
+              {
+                "author": "kadyr",
+                "text": "понял"
+              },
+              {
+                "author": "kadyr",
+                "text": "Дура огромная ебать"
+              }
+            ],
+            "good_reply": "бл у меня в тот вечер инет вырубился нахуй",
+            "tags": [
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "28d97b12d848",
+            "context": [
+              {
+                "author": "Mitya",
+                "text": "давидыч"
+              },
+              {
+                "author": "Kyamal",
+                "text": "хорошо"
+              },
+              {
+                "author": "Mitya",
+                "text": "жду"
+              },
+              {
+                "author": "Misha",
+                "text": "На кондициях"
+              },
+              {
+                "author": "kadyr",
+                "text": "хуя"
+              },
+              {
+                "author": "kadyr",
+                "text": "это чё за мерс"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Майбах"
+              },
+              {
+                "author": "Andrew",
+                "text": "Приснилось как у нас рандомно поставили урок снова в школе, первый урок математика кр и потом литра где надо сочинения сдать, которое мы не написали конечно же, думаем бля опять быстро писать но хоть теперь чатгпт изобре"
+              }
+            ],
+            "good_reply": "в конце разрядил обстановку",
+            "tags": [
+              "short",
+              "punchy_shape",
+              "laugh_response_after",
+              "local",
+              "absurd",
+              "callback"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "6f956655d995",
+            "context": [
+              {
+                "author": "Rustem",
+                "text": "фейковый пункт выдачи"
+              },
+              {
+                "author": "Andrew",
+                "text": "Типа просто по соседству с настоящими чтобы не в ту дверь заходили"
+              },
+              {
+                "author": "Andrew",
+                "text": "Хотя типа че мы код отсканировали и клиент стоит ждет заказ"
+              },
+              {
+                "author": "Andrew",
+                "text": "А мы такие пу пупу"
+              },
+              {
+                "author": "Andrew",
+                "text": "Смотрим друг на друга смотрим просто"
+              },
+              {
+                "author": "Rustem",
+                "text": "в целом можем например сканировать код, и сами тихонько бегать в настоящий пункт выдачи и приносить его заказ"
+              },
+              {
+                "author": "Andrew",
+                "text": "Сфоткал код на телефон и сгонял в соседний пвз"
+              },
+              {
+                "author": "Andrew",
+                "text": "Нахуя"
+              }
+            ],
+            "good_reply": "в чем выгода",
+            "tags": [
+              "short",
+              "absurd",
+              "deadpan",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "88b6d74eb01e",
+            "context": [
+              {
+                "author": "Andrew",
+                "text": "И нужно его победить"
+              },
+              {
+                "author": "Rustem",
+                "text": "типичный мультик"
+              },
+              {
+                "author": "Andrew",
+                "text": "О да любимый дизайн персонажей когда перекрашиваешь одного и того же персонажа и получается несколько"
+              },
+              {
+                "author": "Rustem",
+                "text": "хорошо что самая известная в мире киновселенная так не делает"
+              },
+              {
+                "author": "Rustem",
+                "text": "вигвамцев и вольфрамцев"
+              },
+              {
+                "author": "Andrew",
+                "text": "В марвел теперь бля у каждого супергероя одинаковые костюмы из наночастиц из ваканды, которые мгновенно исчезают или появляются, и одинаковые характеристики непробиваемого металла с кинетической отдачей"
+              },
+              {
+                "author": "Andrew",
+                "text": "Снаряди 100 человек такими костюмами ничего не изменится"
+              },
+              {
+                "author": "Rustem",
+                "text": "вспомнил как мы году в 2020 с данилом в одной кровати в услоне лежали и перед сном 5 часов обсуждали какой супергерой сильнее"
+              }
+            ],
+            "good_reply": "в январе нихуя не делал",
+            "tags": [
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "a29bd8300433",
+            "context": [
+              {
+                "author": "kadyr",
+                "text": "и на диктофон запиши или видео"
+              },
+              {
+                "author": "Rustem",
+                "text": "How do you cum"
+              },
+              {
+                "author": "Misha",
+                "text": "Good morning"
+              },
+              {
+                "author": "Rustem",
+                "text": "What would you rather"
+              },
+              {
+                "author": "Rustem",
+                "text": "Пройди мимо и напевай I’m a man I’m a Misha"
+              },
+              {
+                "author": "kadyr",
+                "text": "не типа excuse my disturbing behaviour, but doing you apparently have knowledge of whereabouts of the nearest gay bar around here"
+              },
+              {
+                "author": "Rustem",
+                "text": "Миша офлайн"
+              },
+              {
+                "author": "Rustem",
+                "text": "Уже это спросил"
+              }
+            ],
+            "good_reply": "видимо пошёл спрашивать",
+            "tags": [
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "8a6797be43d3",
+            "context": [
+              {
+                "author": "Kyamal",
+                "text": "Это его жена?"
+              },
+              {
+                "author": "Rustem",
+                "text": "bro"
+              },
+              {
+                "author": "Rustem",
+                "text": "символично"
+              },
+              {
+                "author": "Rustem",
+                "text": "они должны в самом последнем выпуске шоу сделать что кольца гаснут типа всё, это финал"
+              },
+              {
+                "author": "Rustem",
+                "text": "бля ебанутый выпуск просто"
+              },
+              {
+                "author": "Rustem",
+                "text": "у каждого из атлетов какая-то фигня случается рандомная на трассе"
+              },
+              {
+                "author": "Rustem",
+                "text": "посмотрите его, потому что следующий выпуск уже финал будет"
+              },
+              {
+                "author": "Mitya",
+                "text": "я ещё 6 не смотрел"
+              }
+            ],
+            "good_reply": "включай прямо сейчас",
+            "tags": [
+              "local",
+              "absurd",
+              "deadpan"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "6b950f56a33b",
+            "context": [
+              {
+                "author": "Misha",
+                "text": "Я скинул тебе за делик?"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "норм хостелы"
+              },
+              {
+                "author": "Misha",
+                "text": "Норм"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "Я за скалу"
+              },
+              {
+                "author": "Rustem",
+                "text": "лол мама новую собаку взяла"
+              },
+              {
+                "author": "Rustem",
+                "text": "чтобы рокки не скучно было"
+              },
+              {
+                "author": "Rustem",
+                "text": "я впервые вижу такую собаку"
+              },
+              {
+                "author": "kadyr",
+                "text": "смешная"
+              }
+            ],
+            "good_reply": "волосатая",
+            "tags": [
+              "deadpan",
+              "absurd",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "69b7858bb6b0",
+            "context": [
+              {
+                "author": "Rustem",
+                "text": "лол"
+              },
+              {
+                "author": "Andrew",
+                "text": "И нужно его победить"
+              },
+              {
+                "author": "Rustem",
+                "text": "типичный мультик"
+              },
+              {
+                "author": "Andrew",
+                "text": "О да любимый дизайн персонажей когда перекрашиваешь одного и того же персонажа и получается несколько"
+              },
+              {
+                "author": "Rustem",
+                "text": "хорошо что самая известная в мире киновселенная так не делает"
+              },
+              {
+                "author": "Rustem",
+                "text": "вигвамцев и вольфрамцев"
+              },
+              {
+                "author": "Andrew",
+                "text": "В марвел теперь бля у каждого супергероя одинаковые костюмы из наночастиц из ваканды, которые мгновенно исчезают или появляются, и одинаковые характеристики непробиваемого металла с кинетической отдачей"
+              },
+              {
+                "author": "Andrew",
+                "text": "Снаряди 100 человек такими костюмами ничего не изменится"
+              }
+            ],
+            "good_reply": "вспомнил как мы году в 2020 с данилом в одной кровати в услоне лежали и перед сном 5 часов обсуждали какой супергерой сильнее",
+            "tags": [
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "755f3710db1a",
+            "context": [
+              {
+                "author": "kadyr",
+                "text": "да"
+              },
+              {
+                "author": "kadyr",
+                "text": "у меня по моему рил ты"
+              },
+              {
+                "author": "kadyr",
+                "text": "надо посмотреть"
+              },
+              {
+                "author": "Mitya",
+                "text": "я не против"
+              },
+              {
+                "author": "Mitya",
+                "text": "все равно не знаю, что пожелать"
+              },
+              {
+                "author": "kadyr",
+                "text": "не помните на вб в пункте выдачи видно че получил?"
+              },
+              {
+                "author": "kadyr",
+                "text": "мне бл стыдно это забирать"
+              },
+              {
+                "author": "kadyr",
+                "text": "пацаны такой вопрос"
+              }
+            ],
+            "good_reply": "вы дарите хуйню хуйню, или хуйню но полезную?",
+            "tags": [
+              "deadpan",
+              "absurd",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "a5ed5f29c3b7",
+            "context": [
+              {
+                "author": "kadyr",
+                "text": "рил?"
+              },
+              {
+                "author": "Mitya",
+                "text": "но не с телефона"
+              },
+              {
+                "author": "kadyr",
+                "text": "а как бл"
+              },
+              {
+                "author": "Rustem",
+                "text": "лол"
+              },
+              {
+                "author": "kadyr",
+                "text": "с мака у меня тоже работает"
+              },
+              {
+                "author": "kadyr",
+                "text": "может пароль от нетфликса на его акк почты подойдет"
+              },
+              {
+                "author": "kadyr",
+                "text": "это не то"
+              },
+              {
+                "author": "Mitya",
+                "text": "так я давно писал что с телефона не работает"
+              }
+            ],
+            "good_reply": "где сквидвард",
+            "tags": [
+              "deadpan",
+              "absurd",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "c10eeb531a74",
+            "context": [
+              {
+                "author": "Andrew",
+                "text": "наши поднажали"
+              },
+              {
+                "author": "Misha",
+                "text": "А ну видимо"
+              },
+              {
+                "author": "Kyamal",
+                "text": "Бл везёт же девочкам"
+              },
+              {
+                "author": "Mitya",
+                "text": "а они ещё в магу идут в IT"
+              },
+              {
+                "author": "Andrew",
+                "text": "Миша а тебе то уже всё считай"
+              },
+              {
+                "author": "Andrew",
+                "text": "военник дадут и готово"
+              },
+              {
+                "author": "kadyr",
+                "text": "катю все поздравили"
+              },
+              {
+                "author": "Andrew",
+                "text": "Данил вчера весь вечер думал об этом"
+              }
+            ],
+            "good_reply": "да",
+            "tags": [
+              "deadpan",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "28d8df654cb1",
+            "context": [
+              {
+                "author": "kadyr",
+                "text": "сукаа лол"
+              },
+              {
+                "author": "kadyr",
+                "text": "подошел"
+              },
+              {
+                "author": "kadyr",
+                "text": "но там двухфакторка"
+              },
+              {
+                "author": "kadyr",
+                "text": "я скинул ему пуш чтобы он зашел и подтвердил вход"
+              },
+              {
+                "author": "Mitya",
+                "text": "лол"
+              },
+              {
+                "author": "Mitya",
+                "text": "ты зашёл с телефона?"
+              },
+              {
+                "author": "kadyr",
+                "text": "я зашел на его почту"
+              },
+              {
+                "author": "kadyr",
+                "text": "с его емейлом"
+              }
+            ],
+            "good_reply": "да с телефона",
+            "tags": [
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "252499f2501f",
+            "context": [
+              {
+                "author": "Rustem",
+                "text": "сука на 400к"
+              },
+              {
+                "author": "kadyr",
+                "text": "часы бл за 450"
+              },
+              {
+                "author": "Rustem",
+                "text": "лол бл"
+              },
+              {
+                "author": "Rustem",
+                "text": "статусность"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "Да хуйня это всё"
+              },
+              {
+                "author": "kadyr",
+                "text": "а что лучше"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "лол"
+              },
+              {
+                "author": "kadyr",
+                "text": "у меня"
+              }
+            ],
+            "good_reply": "данилу за обучение в итисе заплати",
+            "tags": [
+              "deadpan",
+              "absurd",
+              "local",
+              "roast_light"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "f28b56cf1a72",
+            "context": [
+              {
+                "author": "Rustem",
+                "text": "процент по вкладам 23 лол"
+              },
+              {
+                "author": "Rustem",
+                "text": "это норм что ли"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "чутка денег скопил хочу айфон купить"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "2021 надо было кредиты набирать"
+              },
+              {
+                "author": "kadyr",
+                "text": "ну может упадает после войны"
+              },
+              {
+                "author": "Andrew",
+                "text": "2026 ждать"
+              },
+              {
+                "author": "kadyr",
+                "text": "ща пока в пизду летит экономика"
+              },
+              {
+                "author": "Andrew",
+                "text": "Чтоб хоть немного"
+              }
+            ],
+            "good_reply": "дождаться бы ещё когда у нас после войны будет",
+            "tags": [
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "9b7c930412cc",
+            "context": [
+              {
+                "author": "kadyr",
+                "text": "жаль нельзя в хомяка донатить"
+              },
+              {
+                "author": "Mitya",
+                "text": "он все равно в турцию"
+              },
+              {
+                "author": "Andrew",
+                "text": "рил че там, написать блокчейн свой запилить телеграм игру"
+              },
+              {
+                "author": "Mitya",
+                "text": "это законно?"
+              },
+              {
+                "author": "kadyr",
+                "text": "и добавить функцию доната"
+              },
+              {
+                "author": "Andrew",
+                "text": "можно не хомяка а типа с аниме девочками чтобы еще и раздевать их можно было за коины"
+              },
+              {
+                "author": "Mitya",
+                "text": "лол"
+              },
+              {
+                "author": "Andrew",
+                "text": "экономика №1"
+              }
+            ],
+            "good_reply": "дуров спалит и закроет бота прост",
+            "tags": [
+              "deadpan",
+              "absurd",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "6033e9065ca6",
+            "context": [
+              {
+                "author": "Mitya",
+                "text": "зачем он так назвал лол"
+              },
+              {
+                "author": "Andrew",
+                "text": "ахуенное название"
+              },
+              {
+                "author": "kadyr",
+                "text": "оставить?"
+              },
+              {
+                "author": "Andrew",
+                "text": "да"
+              },
+              {
+                "author": "Mitya",
+                "text": "лол"
+              },
+              {
+                "author": "Andrew",
+                "text": "и рекламу по бокам еще"
+              },
+              {
+                "author": "Andrew",
+                "text": "и тиктоки с мылом"
+              },
+              {
+                "author": "Mitya",
+                "text": "контракта"
+              }
+            ],
+            "good_reply": "еба ну и хуйня",
+            "tags": [
+              "deadpan",
+              "absurd",
+              "local",
+              "chat_roughness"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "8eb08065e9aa",
+            "context": [
+              {
+                "author": "Andrew",
+                "text": "А не либо в куртке 20кг либо в куртке дебильной узкой"
+              },
+              {
+                "author": "Rustem",
+                "text": "ебаный рот палатки"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "У него еще китайские пельмени и брауни"
+              },
+              {
+                "author": "Kyamal",
+                "text": "как мы в ней жили бл"
+              },
+              {
+                "author": "Kyamal",
+                "text": "12 дней что-ли в ней 4ром были"
+              },
+              {
+                "author": "Rustem",
+                "text": "че ты нам на съемки ее не дал"
+              },
+              {
+                "author": "Kyamal",
+                "text": "так ее не было уже тогда"
+              },
+              {
+                "author": "Rustem",
+                "text": "жалко"
+              }
+            ],
+            "good_reply": "её бы мы так быстро не собрали",
+            "tags": [
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "50d8594f7fb3",
+            "context": [
+              {
+                "author": "kadyr",
+                "text": "лохи"
+              },
+              {
+                "author": "Andrew",
+                "text": "так есть ручной рычаг"
+              },
+              {
+                "author": "Rustem",
+                "text": "оказывается там стоит аккумулятор, и при отключении электричества он тратит его запас на то чтобы автоматически открыть ворота"
+              },
+              {
+                "author": "Andrew",
+                "text": "а, даже так"
+              },
+              {
+                "author": "Rustem",
+                "text": "я если бы проектировал такие ворота я бы не додумался до такой системы"
+              },
+              {
+                "author": "kadyr",
+                "text": "умно"
+              },
+              {
+                "author": "Rustem",
+                "text": "мне кажется если это частный дом то такая система немного странная конечно"
+              },
+              {
+                "author": "Andrew",
+                "text": "то есть если электричество отключается, сразу все ворота и замки открываются и можно заходить ворам"
+              }
+            ],
+            "good_reply": "запомним",
+            "tags": [
+              "short",
+              "deadpan",
+              "absurd",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "02eb195795b3",
+            "context": [
+              {
+                "author": "сглыпа)",
+                "text": "Да, могу просто так он всё норм сказал"
+              },
+              {
+                "author": "Mitya",
+                "text": "big"
+              },
+              {
+                "author": "Misha",
+                "text": "Точно, спасибо"
+              },
+              {
+                "author": "kadyr",
+                "text": "тәмле булсын"
+              },
+              {
+                "author": "Andrew",
+                "text": "мечтали"
+              },
+              {
+                "author": "kadyr",
+                "text": "лол"
+              },
+              {
+                "author": "Misha",
+                "text": "Сам нарисовал?"
+              },
+              {
+                "author": "Andrew",
+                "text": "Ага"
+              }
+            ],
+            "good_reply": "зашел к ан по вопросу одному а там ее нет, и какие-то 3 чувака в шортах отжимаются синхронно под счет",
+            "tags": [
+              "deadpan",
+              "absurd",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "e441e9be98b9",
+            "context": [
+              {
+                "author": "Rustem",
+                "text": "типичный мультик"
+              },
+              {
+                "author": "Andrew",
+                "text": "О да любимый дизайн персонажей когда перекрашиваешь одного и того же персонажа и получается несколько"
+              },
+              {
+                "author": "Rustem",
+                "text": "хорошо что самая известная в мире киновселенная так не делает"
+              },
+              {
+                "author": "Rustem",
+                "text": "вигвамцев и вольфрамцев"
+              },
+              {
+                "author": "Andrew",
+                "text": "В марвел теперь бля у каждого супергероя одинаковые костюмы из наночастиц из ваканды, которые мгновенно исчезают или появляются, и одинаковые характеристики непробиваемого металла с кинетической отдачей"
+              },
+              {
+                "author": "Andrew",
+                "text": "Снаряди 100 человек такими костюмами ничего не изменится"
+              },
+              {
+                "author": "Rustem",
+                "text": "вспомнил как мы году в 2020 с данилом в одной кровати в услоне лежали и перед сном 5 часов обсуждали какой супергерой сильнее"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "в январе нихуя не делал"
+              }
+            ],
+            "good_reply": "и ахуевали какой из героев какая имба",
+            "tags": [
+              "deadpan",
+              "absurd",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "5953485f264c",
+            "context": [
+              {
+                "author": "Andrew",
+                "text": "эро игра про тралалеро"
+              },
+              {
+                "author": "Mitya",
+                "text": "тебя забанят за порнографию"
+              },
+              {
+                "author": "Mitya",
+                "text": "зачем он так назвал лол"
+              },
+              {
+                "author": "Andrew",
+                "text": "ахуенное название"
+              },
+              {
+                "author": "kadyr",
+                "text": "оставить?"
+              },
+              {
+                "author": "Andrew",
+                "text": "да"
+              },
+              {
+                "author": "Mitya",
+                "text": "лол"
+              },
+              {
+                "author": "Andrew",
+                "text": "и рекламу по бокам еще"
+              }
+            ],
+            "good_reply": "и тиктоки с мылом",
+            "tags": [
+              "deadpan",
+              "absurd",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "cbacdc2c770c",
+            "context": [
+              {
+                "author": "kadyr",
+                "text": "оставить?"
+              },
+              {
+                "author": "Andrew",
+                "text": "да"
+              },
+              {
+                "author": "Mitya",
+                "text": "лол"
+              },
+              {
+                "author": "Andrew",
+                "text": "и рекламу по бокам еще"
+              },
+              {
+                "author": "Andrew",
+                "text": "и тиктоки с мылом"
+              },
+              {
+                "author": "Mitya",
+                "text": "контракта"
+              },
+              {
+                "author": "Mitya",
+                "text": "еба ну и хуйня"
+              },
+              {
+                "author": "Andrew",
+                "text": "лол"
+              }
+            ],
+            "good_reply": "интерфейс был довольно 3д но чат сук все испортил",
+            "tags": [
+              "deadpan",
+              "absurd",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "e7a762c440ec",
+            "context": [
+              {
+                "author": "сглыпа)",
+                "text": "Нет лол"
+              },
+              {
+                "author": "Andrew",
+                "text": "печатал слово «утешение», смотрю на экран, а напечатал entity"
+              },
+              {
+                "author": "Andrew",
+                "text": "оказывается так раскладка клавы устроена что такая хуйня получилась"
+              },
+              {
+                "author": "Rustem",
+                "text": "entitybt"
+              },
+              {
+                "author": "Rustem",
+                "text": "лол"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "@kadyr магазин обратно в распродажа переименовали?"
+              },
+              {
+                "author": "Rustem",
+                "text": "это как генсуха и путин"
+              },
+              {
+                "author": "Andrew",
+                "text": "я придумал задачку по ИИ или в целом для экзамена абрамского"
+              }
+            ],
+            "good_reply": "используя библиотеку со словарём русского и английского найти все слова на другом языке которые можно случайно получить если перепутать раскладку клавы",
+            "tags": [
+              "deadpan",
+              "absurd",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "c96848f69e92",
+            "context": [
+              {
+                "author": "Mitya",
+                "text": "сучка"
+              },
+              {
+                "author": "kadyr",
+                "text": "кстати мем"
+              },
+              {
+                "author": "kadyr",
+                "text": "меня не взяли в турцию"
+              },
+              {
+                "author": "Mitya",
+                "text": "ты норм"
+              },
+              {
+                "author": "Mitya",
+                "text": "не верю"
+              },
+              {
+                "author": "Misha",
+                "text": "Чеее"
+              },
+              {
+                "author": "Misha",
+                "text": "Рофлишь?"
+              },
+              {
+                "author": "kadyr",
+                "text": "тупо хуй знает кто мою анкету заблокали"
+              }
+            ],
+            "good_reply": "кого бл если не тебя",
+            "tags": [
+              "short",
+              "deadpan",
+              "roast_light",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "daf0dc2ac5d6",
+            "context": [
+              {
+                "author": "kadyr",
+                "text": "Бл, может права получить а"
+              },
+              {
+                "author": "kadyr",
+                "text": "Сук лень ток"
+              },
+              {
+                "author": "Mitya",
+                "text": "жиза"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "ХАХПАХАХПХАХАХАХ"
+              },
+              {
+                "author": "Mitya",
+                "text": "если сафа в мск получит тоже пойду"
+              },
+              {
+                "author": "Kyamal",
+                "text": "На нивасе на сбор приехал"
+              },
+              {
+                "author": "Rustem",
+                "text": "Тебе вообще кайф же"
+              },
+              {
+                "author": "Rustem",
+                "text": "И парковаться есть где"
+              }
+            ],
+            "good_reply": "купи уже",
+            "tags": [
+              "deadpan",
+              "absurd",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "6ca152d489c9",
+            "context": [
+              {
+                "author": "Kyamal",
+                "text": "Я не такой как все"
+              },
+              {
+                "author": "Rustem",
+                "text": "и когда объяснили он такой «и че такого это смешно что ли?»"
+              },
+              {
+                "author": "kadyr",
+                "text": "10 класс"
+              },
+              {
+                "author": "Andrew",
+                "text": "еще помните мы рофлили над 4(6)"
+              },
+              {
+                "author": "kadyr",
+                "text": "лол"
+              },
+              {
+                "author": "Andrew",
+                "text": "и данил обижался что мы дауны"
+              },
+              {
+                "author": "Misha",
+                "text": "17 год"
+              },
+              {
+                "author": "kadyr",
+                "text": "зря"
+              }
+            ],
+            "good_reply": "куплю за 3к",
+            "tags": [
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "df89b0813293",
+            "context": [
+              {
+                "author": "Rustem",
+                "text": "лан"
+              },
+              {
+                "author": "Rustem",
+                "text": "Рустем го вдвоём посмотрим ниндзю"
+              },
+              {
+                "author": "Rustem",
+                "text": "Интересно же"
+              },
+              {
+                "author": "Rustem",
+                "text": "сук вы ахуеете"
+              },
+              {
+                "author": "Rustem",
+                "text": "у проектора автофокус есть"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Давайте решим, потому что после 18 не так много времени"
+              },
+              {
+                "author": "Misha",
+                "text": "Я минус"
+              },
+              {
+                "author": "Mitya",
+                "text": "я освобожусь конечно после квиза, но хз"
+              }
+            ],
+            "good_reply": "ля ну а завтра?",
+            "tags": [
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "f416ef00890a",
+            "context": [
+              {
+                "author": "Mitya",
+                "text": "чел"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "В пизду, я заебался уже нахуй"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Сидишь копейку к копейке считаешь и стираешь наушники в тот же вечер"
+              },
+              {
+                "author": "Misha",
+                "text": "Новые наушники на др"
+              },
+              {
+                "author": "kadyr",
+                "text": "мем"
+              },
+              {
+                "author": "Мемезатор Алёшенька",
+                "text": "Идет мемезация..."
+              },
+              {
+                "author": "Rustem",
+                "text": "у тебя пятно на рубашке"
+              },
+              {
+                "author": "kadyr",
+                "text": "без нее пойду"
+              }
+            ],
+            "good_reply": "мачо",
+            "tags": [
+              "deadpan",
+              "roast_light",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "1e5f8e4266fb",
+            "context": [
+              {
+                "author": "kadyr",
+                "text": "думаю кровь отлила что ли"
+              },
+              {
+                "author": "kadyr",
+                "text": "умираю"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "Кямаль берём додо пиццу"
+              },
+              {
+                "author": "Andrew",
+                "text": "У вас по 4 ивента в день?"
+              },
+              {
+                "author": "kadyr",
+                "text": "ну это оно и есть"
+              },
+              {
+                "author": "Andrew",
+                "text": "Плакат к двери приставили чтобы выйти нельзя было"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "Ой"
+              },
+              {
+                "author": "kadyr",
+                "text": "лол"
+              }
+            ],
+            "good_reply": "мы решили короче сьебать с заднего входа",
+            "tags": [
+              "dry",
+              "local",
+              "absurd",
+              "punchy",
+              "callback"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "e0aa4c852cd7",
+            "context": [
+              {
+                "author": "Игната 💋 | 18+ нейросеть",
+                "text": "И так лыжи и там много големов"
+              },
+              {
+                "author": "Rustem",
+                "text": "Хочу аирподс макс"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "Интервью путина это чисто контент чтобы онлайн репетироры по истории подкаст выпустил чёт"
+              },
+              {
+                "author": "kadyr",
+                "text": "купи уже паль"
+              },
+              {
+                "author": "kadyr",
+                "text": "я потом может тоже себе"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "лан"
+              },
+              {
+                "author": "Rustem",
+                "text": "Бля или не страдать ерундой и купить нормальные соньки"
+              },
+              {
+                "author": "kadyr",
+                "text": "да сони для лохов"
+              }
+            ],
+            "good_reply": "на улице в них будешь как игорь камышев",
+            "tags": [
+              "short",
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "89d469e1ba09",
+            "context": [
+              {
+                "author": "kadyr",
+                "text": "и как потом в питон гифку закинуть"
+              },
+              {
+                "author": "kadyr",
+                "text": "или в формате видео"
+              },
+              {
+                "author": "kadyr",
+                "text": "лан пох у чата спрошу"
+              },
+              {
+                "author": "Andrew",
+                "text": "а ты куда постить потом будешь?"
+              },
+              {
+                "author": "kadyr",
+                "text": "янд"
+              },
+              {
+                "author": "Andrew",
+                "text": "ну в целом"
+              },
+              {
+                "author": "kadyr",
+                "text": "ну если нарезать на несколько кадров"
+              },
+              {
+                "author": "Andrew",
+                "text": "ты еще и прыжки будешь делать?"
+              }
+            ],
+            "good_reply": "не",
+            "tags": [
+              "dry",
+              "absurd",
+              "local",
+              "punchy"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "77f0a8c0c06d",
+            "context": [
+              {
+                "author": "kadyr",
+                "text": "устройся в этот"
+              },
+              {
+                "author": "Andrew",
+                "text": "Да уже анонсировали"
+              },
+              {
+                "author": "Misha",
+                "text": "В сбер"
+              },
+              {
+                "author": "Mitya",
+                "text": "в серф?"
+              },
+              {
+                "author": "kadyr",
+                "text": "не"
+              },
+              {
+                "author": "Misha",
+                "text": "Напомню"
+              },
+              {
+                "author": "kadyr",
+                "text": "в скур"
+              },
+              {
+                "author": "Misha",
+                "text": "Лучше в серф тогда"
+              }
+            ],
+            "good_reply": "не, в скуре пидоры",
+            "tags": [
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "097da9f67352",
+            "context": [
+              {
+                "author": "Rustem",
+                "text": "епт ты в планете фитнес что ли никогда не был"
+              },
+              {
+                "author": "Kyamal",
+                "text": "Нет"
+              },
+              {
+                "author": "Kyamal",
+                "text": "Я в тренажерный зал ходил только в униксе, когда в баскет играл"
+              },
+              {
+                "author": "kadyr",
+                "text": "бл такой ржачный город"
+              },
+              {
+                "author": "kadyr",
+                "text": "просто дефолт провинция"
+              },
+              {
+                "author": "kadyr",
+                "text": "я снял самый дорогой и крутой номер в городе"
+              },
+              {
+                "author": "kadyr",
+                "text": "йошка"
+              },
+              {
+                "author": "kadyr",
+                "text": "5 минут от центра лол"
+              }
+            ],
+            "good_reply": "не, тут гораздо стильнее",
+            "tags": [
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "1c7475b9cc1b",
+            "context": [
+              {
+                "author": "Mitya",
+                "text": "лол"
+              },
+              {
+                "author": "Andrew",
+                "text": "и рекламу по бокам еще"
+              },
+              {
+                "author": "Andrew",
+                "text": "и тиктоки с мылом"
+              },
+              {
+                "author": "Mitya",
+                "text": "контракта"
+              },
+              {
+                "author": "Mitya",
+                "text": "еба ну и хуйня"
+              },
+              {
+                "author": "Andrew",
+                "text": "лол"
+              },
+              {
+                "author": "kadyr",
+                "text": "интерфейс был довольно 3д но чат сук все испортил"
+              },
+              {
+                "author": "Andrew",
+                "text": "стоп, ты че это в фотошопе делаешь"
+              }
+            ],
+            "good_reply": "нет до",
+            "tags": [
+              "short",
+              "deadpan",
+              "absurd",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "3799d164af49",
+            "context": [
+              {
+                "author": "Misha",
+                "text": "Угу"
+              },
+              {
+                "author": "Andrew",
+                "text": "https://youtu.be/iId5WDsYxZ4?si=CG9BEQYK_xu7j7VQ"
+              },
+              {
+                "author": "Andrew",
+                "text": "В баззаре"
+              },
+              {
+                "author": "Andrew",
+                "text": "Лол"
+              },
+              {
+                "author": "Andrew",
+                "text": "лол"
+              },
+              {
+                "author": "Rustem",
+                "text": "лол"
+              },
+              {
+                "author": "Mitya",
+                "text": "лол"
+              },
+              {
+                "author": "Rustem",
+                "text": "эм"
+              }
+            ],
+            "good_reply": "норм поднимать можно",
+            "tags": [
+              "absurd",
+              "local",
+              "deadpan"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "13c792d84b72",
+            "context": [
+              {
+                "author": "Mitya",
+                "text": "пососать джойстики"
+              },
+              {
+                "author": "Rustem",
+                "text": "навести playstation camera на ступни"
+              },
+              {
+                "author": "Mitya",
+                "text": "у меня нет"
+              },
+              {
+                "author": "Rustem",
+                "text": "ты в такси помню ноги фоткал"
+              },
+              {
+                "author": "Rustem",
+                "text": "я пока тебя на делимобиле отвозил у меня 2 колеса лопнуло"
+              },
+              {
+                "author": "Rustem",
+                "text": "нормисы"
+              },
+              {
+                "author": "Mitya",
+                "text": "я бл сегодня иду по своей ебаной улице и ногу подвернул в яме бл"
+              },
+              {
+                "author": "Mitya",
+                "text": "я думал только водители страдают"
+              }
+            ],
+            "good_reply": "оказалось нет",
+            "tags": [
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "1dc8fff1e463",
+            "context": [
+              {
+                "author": "kadyr",
+                "text": "Новый жанр альтернативы"
+              },
+              {
+                "author": "kadyr",
+                "text": "спалил номинацию"
+              },
+              {
+                "author": "Misha",
+                "text": "@рустем"
+              },
+              {
+                "author": "Misha",
+                "text": "Еще есть время номинации выдвинуть?"
+              },
+              {
+                "author": "Misha",
+                "text": "Номинации уже нет, только варианты"
+              },
+              {
+                "author": "kadyr",
+                "text": "бл"
+              },
+              {
+                "author": "Rustem",
+                "text": "Хэ"
+              },
+              {
+                "author": "kadyr",
+                "text": "данил давай сюда"
+              }
+            ],
+            "good_reply": "он про тебя сегодня говорил",
+            "tags": [
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "bd0101dad83e",
+            "context": [
+              {
+                "author": "kadyr",
+                "text": "не"
+              },
+              {
+                "author": "Mitya",
+                "text": "в трусах как будто"
+              },
+              {
+                "author": "kadyr",
+                "text": "я не шарю так"
+              },
+              {
+                "author": "kadyr",
+                "text": "возбудился?"
+              },
+              {
+                "author": "Andrew",
+                "text": "эро игра про тралалеро"
+              },
+              {
+                "author": "Mitya",
+                "text": "тебя забанят за порнографию"
+              },
+              {
+                "author": "Mitya",
+                "text": "зачем он так назвал лол"
+              },
+              {
+                "author": "Andrew",
+                "text": "ахуенное название"
+              }
+            ],
+            "good_reply": "оставить?",
+            "tags": [
+              "short",
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "446a77c7d5bf",
+            "context": [
+              {
+                "author": "Rustem",
+                "text": "резонанс года"
+              },
+              {
+                "author": "Kyamal",
+                "text": "меня на стажу туда не взяли"
+              },
+              {
+                "author": "Kyamal",
+                "text": "это че за ивент?"
+              },
+              {
+                "author": "Andrew",
+                "text": "и че, когда они будут выпускать приложение то своё"
+              },
+              {
+                "author": "Rustem",
+                "text": "мы с андреем оттуда еле свалили"
+              },
+              {
+                "author": "Kyamal",
+                "text": "100 рублей подняли зато"
+              },
+              {
+                "author": "Andrew",
+                "text": "бляя"
+              },
+              {
+                "author": "Andrew",
+                "text": "мб это отмывание кстати"
+              }
+            ],
+            "good_reply": "отмывание 100 рублей",
+            "tags": [
+              "deadpan",
+              "absurd",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "b01b69e922ab",
+            "context": [
+              {
+                "author": "kadyr",
+                "text": "и добавить функцию доната"
+              },
+              {
+                "author": "Andrew",
+                "text": "можно не хомяка а типа с аниме девочками чтобы еще и раздевать их можно было за коины"
+              },
+              {
+                "author": "Mitya",
+                "text": "лол"
+              },
+              {
+                "author": "Andrew",
+                "text": "экономика №1"
+              },
+              {
+                "author": "kadyr",
+                "text": "дуров спалит и закроет бота прост"
+              },
+              {
+                "author": "kadyr",
+                "text": "лол"
+              },
+              {
+                "author": "kadyr",
+                "text": "бля"
+              },
+              {
+                "author": "Kyamal",
+                "text": "лол"
+              }
+            ],
+            "good_reply": "пиздец скам на дрочеров идеальный",
+            "tags": [
+              "absurd",
+              "local",
+              "deadpan"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "e51e659ba7a1",
+            "context": [
+              {
+                "author": "kadyr",
+                "text": "меня хотели каждую неделю в командировки отправлять"
+              },
+              {
+                "author": "kadyr",
+                "text": "а в командировках бл платят 500$ в день"
+              },
+              {
+                "author": "Rustem",
+                "text": "из-за трампа гроза чуть не закрылась"
+              },
+              {
+                "author": "Rustem",
+                "text": "моральный выбор, оставить как есть трамп сво закончит для всех нас но нет финансирования, или трампа не выбрали, сво идет но финансирование есть"
+              },
+              {
+                "author": "Rustem",
+                "text": "что выберешь"
+              },
+              {
+                "author": "kadyr",
+                "text": "пох пусть воюют"
+              },
+              {
+                "author": "Rustem",
+                "text": "у меня банковская карта не работает"
+              },
+              {
+                "author": "kadyr",
+                "text": "зато поеду в бангкок в командировку"
+              }
+            ],
+            "good_reply": "пока тебя в рф не было тут одичали все",
+            "tags": [
+              "local",
+              "absurd",
+              "deadpan"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "7aefce2962a1",
+            "context": [
+              {
+                "author": "Danka Manonin",
+                "text": "Мы у Миши соберёмся"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Так что соре Андрей, надо было думать"
+              },
+              {
+                "author": "Andrew",
+                "text": "Лан"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Надиру над написать"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "@fmwav во сколько прийти можно?"
+              },
+              {
+                "author": "Misha",
+                "text": "Давай в 5-6"
+              },
+              {
+                "author": "Misha",
+                "text": "Надиру тоже напиши"
+              },
+              {
+                "author": "kadyr",
+                "text": "бл мне искренне нравятся песни которые он делает"
+              }
+            ],
+            "good_reply": "попросил его на татарском написать рэп чет долго думает",
+            "tags": [
+              "short",
+              "absurd",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "3d85f8840333",
+            "context": [
+              {
+                "author": "Andrew",
+                "text": "лук-порей"
+              },
+              {
+                "author": "Andrew",
+                "text": "Ааа"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "Jb кстати тоже чтото наподобие делаю"
+              },
+              {
+                "author": "Misha",
+                "text": "Бл"
+              },
+              {
+                "author": "Misha",
+                "text": "Кямаль норм форма?"
+              },
+              {
+                "author": "Misha",
+                "text": "America fuck yeah"
+              },
+              {
+                "author": "Misha",
+                "text": "сзади мой апартамент комплекс"
+              },
+              {
+                "author": "Kyamal",
+                "text": "Намана"
+              }
+            ],
+            "good_reply": "последний рабочий день перед easter holidays",
+            "tags": [
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "58bc43a5d839",
+            "context": [
+              {
+                "author": "Kyamal",
+                "text": "Кто спиздил"
+              },
+              {
+                "author": "Rustem",
+                "text": "не слышал"
+              },
+              {
+                "author": "Andrew",
+                "text": "не думаю"
+              },
+              {
+                "author": "kadyr",
+                "text": "нихуя лол"
+              },
+              {
+                "author": "kadyr",
+                "text": "был мем"
+              },
+              {
+                "author": "kadyr",
+                "text": "а ты оттуда спиздил"
+              },
+              {
+                "author": "Kyamal",
+                "text": "Еще на первом курсе"
+              },
+              {
+                "author": "Rustem",
+                "text": "я помню этот мем на который данил то ли обиделся то ли что-то"
+              }
+            ],
+            "good_reply": "потому что не понял",
+            "tags": [
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "883f534e8cdb",
+            "context": [
+              {
+                "author": "Misha",
+                "text": "Ну ты же знаешь турецкий"
+              },
+              {
+                "author": "Mitya",
+                "text": "уфф"
+              },
+              {
+                "author": "kadyr",
+                "text": "я не хочу ей хуйню подсказать потому что я не знаю грамматики"
+              },
+              {
+                "author": "Misha",
+                "text": "Сучка"
+              },
+              {
+                "author": "Misha",
+                "text": "Лан"
+              },
+              {
+                "author": "Mitya",
+                "text": "лол, пранк, кадыр взял наушник, элина сиди на экзамене, а он всякую хуйню несет в наушник"
+              },
+              {
+                "author": "kadyr",
+                "text": "лол"
+              },
+              {
+                "author": "Andrew",
+                "text": "Лол"
+              }
+            ],
+            "good_reply": "пранк бл",
+            "tags": [
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "493e76e4f2ce",
+            "context": [
+              {
+                "author": "kadyr",
+                "text": "/v"
+              },
+              {
+                "author": "Rustem",
+                "text": "7v"
+              },
+              {
+                "author": "Kyamal",
+                "text": "/v"
+              },
+              {
+                "author": "Kyamal",
+                "text": "/v"
+              },
+              {
+                "author": "Rustem",
+                "text": "7vigvamcev media"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "Да ебать ага"
+              },
+              {
+                "author": "Kyamal",
+                "text": "/v"
+              },
+              {
+                "author": "Kyamal",
+                "text": "/v"
+              }
+            ],
+            "good_reply": "прост не выключать",
+            "tags": [
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "108bad42c9c4",
+            "context": [
+              {
+                "author": "Andrew",
+                "text": "Ну тогда на нг уже"
+              },
+              {
+                "author": "kadyr",
+                "text": "2 недели осталось"
+              },
+              {
+                "author": "Rustem",
+                "text": "год без связи будем"
+              },
+              {
+                "author": "Rustem",
+                "text": "го чтобы сильнее чувство удаленности ощущалось год общаться не будем"
+              },
+              {
+                "author": "kadyr",
+                "text": "согласен"
+              },
+              {
+                "author": "kadyr",
+                "text": "чтобы потом ценить когда я приеду"
+              },
+              {
+                "author": "Rustem",
+                "text": "да"
+              },
+              {
+                "author": "kadyr",
+                "text": "хорошая идея"
+              }
+            ],
+            "good_reply": "с родителями тоже связь оборвать",
+            "tags": [
+              "absurd",
+              "local",
+              "dry",
+              "deadpan"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "4125b10a554d",
+            "context": [
+              {
+                "author": "kadyr",
+                "text": "ок"
+              },
+              {
+                "author": "Mitya",
+                "text": "ok*"
+              },
+              {
+                "author": "Mitya",
+                "text": "рустем, можешь не отправлять это видео"
+              },
+              {
+                "author": "kadyr",
+                "text": "лан меня заебало"
+              },
+              {
+                "author": "kadyr",
+                "text": "надо просто кликер сделать"
+              },
+              {
+                "author": "Kyamal",
+                "text": "Мне за идею 50 процентов"
+              },
+              {
+                "author": "kadyr",
+                "text": "хуй"
+              },
+              {
+                "author": "kadyr",
+                "text": "зуммеры против миллениалов конкурс"
+              }
+            ],
+            "good_reply": "сука скам ебаный пхахахахха, это когда колесо начало в обратную сторону вращаться из-за грузика",
+            "tags": [
+              "deadpan",
+              "absurd",
+              "chat_roughness"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "9d8167c1a36f",
+            "context": [
+              {
+                "author": "Rustem",
+                "text": "даже грустно"
+              },
+              {
+                "author": "Mitya",
+                "text": "корди в глубоко есть?"
+              },
+              {
+                "author": "Rustem",
+                "text": "лол есть"
+              },
+              {
+                "author": "kadyr",
+                "text": "сука блять меня военкомат прижал и меня хотят в розыск федеральный объявить"
+              },
+              {
+                "author": "Mitya",
+                "text": "сча узнает, что мы с сашей подружились"
+              },
+              {
+                "author": "kadyr",
+                "text": "пидорасы ебучие гады"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "и без интервью с бомбардилло крокодило"
+              },
+              {
+                "author": "Mitya",
+                "text": "всм"
+              }
+            ],
+            "good_reply": "схуя",
+            "tags": [
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "d45cf490f3a8",
+            "context": [
+              {
+                "author": "kadyr",
+                "text": "сучка так и манит"
+              },
+              {
+                "author": "Rustem",
+                "text": "именно с таким термином"
+              },
+              {
+                "author": "Rustem",
+                "text": "можешь уже не рассчитывать на этот лот в целом"
+              },
+              {
+                "author": "Rustem",
+                "text": "а ну бля"
+              },
+              {
+                "author": "Andrew",
+                "text": "А, ну у нас отопление без воды"
+              },
+              {
+                "author": "Andrew",
+                "text": "Мб батареи дешевле"
+              },
+              {
+                "author": "Mitya",
+                "text": "за ремонты всякие я не плачу"
+              },
+              {
+                "author": "Rustem",
+                "text": "а лифт уборка двора содержание это бесплатно думаешь"
+              }
+            ],
+            "good_reply": "так а хули ты тогда",
+            "tags": [
+              "deadpan",
+              "roast_light",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "b9601801861b",
+            "context": [
+              {
+                "author": "Mitya",
+                "text": "да"
+              },
+              {
+                "author": "kadyr",
+                "text": "рил?"
+              },
+              {
+                "author": "Mitya",
+                "text": "но не с телефона"
+              },
+              {
+                "author": "kadyr",
+                "text": "а как бл"
+              },
+              {
+                "author": "Rustem",
+                "text": "лол"
+              },
+              {
+                "author": "kadyr",
+                "text": "с мака у меня тоже работает"
+              },
+              {
+                "author": "kadyr",
+                "text": "может пароль от нетфликса на его акк почты подойдет"
+              },
+              {
+                "author": "kadyr",
+                "text": "это не то"
+              }
+            ],
+            "good_reply": "так я давно писал что с телефона не работает",
+            "tags": [
+              "deadpan",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "6b9ec7a86d25",
+            "context": [
+              {
+                "author": "Andrew",
+                "text": "О да любимый дизайн персонажей когда перекрашиваешь одного и того же персонажа и получается несколько"
+              },
+              {
+                "author": "Rustem",
+                "text": "хорошо что самая известная в мире киновселенная так не делает"
+              },
+              {
+                "author": "Rustem",
+                "text": "вигвамцев и вольфрамцев"
+              },
+              {
+                "author": "Andrew",
+                "text": "В марвел теперь бля у каждого супергероя одинаковые костюмы из наночастиц из ваканды, которые мгновенно исчезают или появляются, и одинаковые характеристики непробиваемого металла с кинетической отдачей"
+              },
+              {
+                "author": "Andrew",
+                "text": "Снаряди 100 человек такими костюмами ничего не изменится"
+              },
+              {
+                "author": "Rustem",
+                "text": "вспомнил как мы году в 2020 с данилом в одной кровати в услоне лежали и перед сном 5 часов обсуждали какой супергерой сильнее"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "в январе нихуя не делал"
+              },
+              {
+                "author": "Rustem",
+                "text": "и ахуевали какой из героев какая имба"
+              }
+            ],
+            "good_reply": "типа призрачный гонщик которого еще в квм нет",
+            "tags": [
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "a3a2e2610860",
+            "context": [
+              {
+                "author": "kadyr",
+                "text": "спасибо за сбор пацанчики"
+              },
+              {
+                "author": "kadyr",
+                "text": "и за подарки"
+              },
+              {
+                "author": "Kyamal",
+                "text": "Тебе спасибо братан"
+              },
+              {
+                "author": "Kyamal",
+                "text": "Бабосы чуточку позже скину"
+              },
+              {
+                "author": "kadyr",
+                "text": "я чет ближе к утру ваще сдох"
+              },
+              {
+                "author": "kadyr",
+                "text": "пох"
+              },
+              {
+                "author": "kadyr",
+                "text": "бл пришел в мвд за заграном"
+              },
+              {
+                "author": "kadyr",
+                "text": "была запись ровно в 11:38, тут очередь на час сдвинулась"
+              }
+            ],
+            "good_reply": "типичный гос учреждения момент",
+            "tags": [
+              "deadpan",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "c342d5ff755e",
+            "context": [
+              {
+                "author": "kadyr",
+                "text": "да"
+              },
+              {
+                "author": "Mitya",
+                "text": "в автошколу пойду в этом году"
+              },
+              {
+                "author": "kadyr",
+                "text": "только типа через 30 минут"
+              },
+              {
+                "author": "kadyr",
+                "text": "Нах"
+              },
+              {
+                "author": "kadyr",
+                "text": "горизонт завален"
+              },
+              {
+                "author": "Rustem",
+                "text": "го в элита авто"
+              },
+              {
+                "author": "kadyr",
+                "text": "диляра тоже пойдёт идите вместе"
+              },
+              {
+                "author": "Mitya",
+                "text": "а нах мы нагнулись"
+              }
+            ],
+            "good_reply": "ты же говорил что тебя жена будет возить",
+            "tags": [
+              "deadpan",
+              "local",
+              "callback",
+              "dry"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "7a28c8f1a52f",
+            "context": [
+              {
+                "author": "Andrew",
+                "text": "в каком месте"
+              },
+              {
+                "author": "Kyamal",
+                "text": "Я не про форму"
+              },
+              {
+                "author": "Еду в Татарстан 10.05.2024 02:51:18",
+                "text": "Лидер протеста в Армении архиепископ Баграт дал Пашиняну час, чтобы тот ушел в отставку // РИА Новости"
+              },
+              {
+                "author": "Rustem",
+                "text": "вот бы снова че нибудь типа бунта пригожина"
+              },
+              {
+                "author": "Mitya",
+                "text": "@fmwaveee а ты вчера всю папку документов на тачку забрал???"
+              },
+              {
+                "author": "Rustem",
+                "text": "пригожин дал путину час чтобы уйти в отставку"
+              },
+              {
+                "author": "Mitya",
+                "text": "мы едем сча на достоевского, вся казань в ментах"
+              },
+              {
+                "author": "Rustem",
+                "text": "дакументов"
+              }
+            ],
+            "good_reply": "ты конченый?",
+            "tags": [
+              "deadpan",
+              "absurd",
+              "local",
+              "roast_light"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "c0e4be62268c",
+            "context": [
+              {
+                "author": "Rustem",
+                "text": "у меня есть сербский номер"
+              },
+              {
+                "author": "kadyr",
+                "text": "ну хз у меня больше нет"
+              },
+              {
+                "author": "Mitya",
+                "text": "у меня электробус"
+              },
+              {
+                "author": "Kyamal",
+                "text": "дашь?"
+              },
+              {
+                "author": "Kyamal",
+                "text": "офигеть"
+              },
+              {
+                "author": "Kyamal",
+                "text": "а че не на такси до каршера"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "У меня электрический тралик с подзарядкой"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "А твой 1 раз проедет и заряжается на станцию"
+              }
+            ],
+            "good_reply": "у меня дилдо в жопе",
+            "tags": [
+              "absurd",
+              "dry",
+              "local",
+              "punchy"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "b9026046fe2d",
+            "context": [
+              {
+                "author": "Mitya",
+                "text": "ладно я не против"
+              },
+              {
+                "author": "Rustem",
+                "text": "супер"
+              },
+              {
+                "author": "Kyamal",
+                "text": "я вышел за бюджет"
+              },
+              {
+                "author": "Kyamal",
+                "text": "давайте еще раз повысим"
+              },
+              {
+                "author": "Kyamal",
+                "text": "на 247 рублей"
+              },
+              {
+                "author": "kadyr",
+                "text": "бля аккаунт нетфликса слох"
+              },
+              {
+                "author": "kadyr",
+                "text": "сквидман"
+              },
+              {
+                "author": "kadyr",
+                "text": "о нет"
+              }
+            ],
+            "good_reply": "у меня работает",
+            "tags": [
+              "short",
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "01a2d6784c0e",
+            "context": [
+              {
+                "author": "Danka Manonin",
+                "text": "Да, он то мне нахуй не нужен"
+              },
+              {
+                "author": "Rustem",
+                "text": "бляяя финал суперниндзя на гигантском экране проектора"
+              },
+              {
+                "author": "Rustem",
+                "text": "хочу"
+              },
+              {
+                "author": "kadyr",
+                "text": "я не приду"
+              },
+              {
+                "author": "Rustem",
+                "text": "лан"
+              },
+              {
+                "author": "Rustem",
+                "text": "Рустем го вдвоём посмотрим ниндзю"
+              },
+              {
+                "author": "Rustem",
+                "text": "Интересно же"
+              },
+              {
+                "author": "Rustem",
+                "text": "сук вы ахуеете"
+              }
+            ],
+            "good_reply": "у проектора автофокус есть",
+            "tags": [
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "191d387ff242",
+            "context": [
+              {
+                "author": "Rustem",
+                "text": "ну а во сколько ты можешь"
+              },
+              {
+                "author": "Rustem",
+                "text": "ладно а в какой день тогда ты полностью свободен"
+              },
+              {
+                "author": "Rustem",
+                "text": "если ты работаешь"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Я заебался писать"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "лол"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "крутое развлечение"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Чёто оказывается нихуя я занят теперь"
+              },
+              {
+                "author": "Andrew",
+                "text": "опа пары закончились а я уже дома"
+              }
+            ],
+            "good_reply": "удобно, но всё равно буду иногда ходить в уник чисто рофлить",
+            "tags": [
+              "dry",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "a9f2b5bf1be8",
+            "context": [
+              {
+                "author": "Misha",
+                "text": "Мы арендовали наушник"
+              },
+              {
+                "author": "kadyr",
+                "text": "я не хочу подставлять ее"
+              },
+              {
+                "author": "Mitya",
+                "text": "салам"
+              },
+              {
+                "author": "Misha",
+                "text": "Спалился"
+              },
+              {
+                "author": "Misha",
+                "text": "Да бля 2500"
+              },
+              {
+                "author": "Misha",
+                "text": "За час работы"
+              },
+              {
+                "author": "kadyr",
+                "text": "да нах мне деньги"
+              },
+              {
+                "author": "Misha",
+                "text": "Ну ты же знаешь турецкий"
+              }
+            ],
+            "good_reply": "уфф",
+            "tags": [
+              "short",
+              "punchy_shape",
+              "laugh_response_after",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "8e367e4455e8",
+            "context": [
+              {
+                "author": "Misha",
+                "text": "Надо будет поговорить"
+              },
+              {
+                "author": "Andrew",
+                "text": "Я не думаю что она хотела этим что-то показать"
+              },
+              {
+                "author": "Misha",
+                "text": "Надеюсь нет"
+              },
+              {
+                "author": "Andrew",
+                "text": "Сук пришел домой тут красный шелк смотрим"
+              },
+              {
+                "author": "Andrew",
+                "text": "Ебать тут детективно закручено как будто, но я просто не воспринимаю сейчас информацию"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "ахуеют наверное"
+              },
+              {
+                "author": "Rustem",
+                "text": "я сначала думал ты опечатался и имел ввиду красный шрек, а в голове представил красного халка"
+              },
+              {
+                "author": "Andrew",
+                "text": "Че за красный шрек"
+              }
+            ],
+            "good_reply": "хз",
+            "tags": [
+              "deadpan",
+              "absurd",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "6a31a926c372",
+            "context": [
+              {
+                "author": "Misha",
+                "text": "Друг семьи приезжает"
+              },
+              {
+                "author": "Andrew",
+                "text": "Ну тогда на нг уже"
+              },
+              {
+                "author": "kadyr",
+                "text": "2 недели осталось"
+              },
+              {
+                "author": "Rustem",
+                "text": "год без связи будем"
+              },
+              {
+                "author": "Rustem",
+                "text": "го чтобы сильнее чувство удаленности ощущалось год общаться не будем"
+              },
+              {
+                "author": "kadyr",
+                "text": "согласен"
+              },
+              {
+                "author": "kadyr",
+                "text": "чтобы потом ценить когда я приеду"
+              },
+              {
+                "author": "Rustem",
+                "text": "да"
+              }
+            ],
+            "good_reply": "хорошая идея",
+            "tags": [
+              "deadpan",
+              "absurd",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "027cd040971a",
+            "context": [
+              {
+                "author": "Rustem",
+                "text": "почему в маникюре"
+              },
+              {
+                "author": "Rustem",
+                "text": "ещё и лгбт"
+              },
+              {
+                "author": "Andrew",
+                "text": "За год на 2% снизим алкоголизм в стране"
+              },
+              {
+                "author": "Rustem",
+                "text": "2 в 1 ролик"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "Лол"
+              },
+              {
+                "author": "Danka Manonin",
+                "text": "В саннине^"
+              },
+              {
+                "author": "Rustem",
+                "text": "против алкашей и геев"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "bro desperate af"
+              }
+            ],
+            "good_reply": "хочет сниматься",
+            "tags": [
+              "short",
+              "punchy_shape",
+              "laugh_response_after",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "508063fcb06a",
+            "context": [
+              {
+                "author": "Andrew",
+                "text": "Ого нихуя"
+              },
+              {
+                "author": "Andrew",
+                "text": "Всё еще достойны"
+              },
+              {
+                "author": "Andrew",
+                "text": "Не зря вигвамцев фан выпускали"
+              },
+              {
+                "author": "Andrew",
+                "text": "Лол у меня 43 доп балла"
+              },
+              {
+                "author": "Andrew",
+                "text": "А че я делал то в этом году"
+              },
+              {
+                "author": "Andrew",
+                "text": "Кроме ролика"
+              },
+              {
+                "author": "Misha",
+                "text": "вы просто хорошие ребята"
+              },
+              {
+                "author": "Andrew",
+                "text": "Лол у чела -4 балла и я бля сотрудник считай"
+              }
+            ],
+            "good_reply": "че у нас",
+            "tags": [
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "921fa7c04d42",
+            "context": [
+              {
+                "author": "Misha",
+                "text": "America fuck yeah"
+              },
+              {
+                "author": "Misha",
+                "text": "сзади мой апартамент комплекс"
+              },
+              {
+                "author": "Kyamal",
+                "text": "Намана"
+              },
+              {
+                "author": "kadyr",
+                "text": "последний рабочий день перед easter holidays"
+              },
+              {
+                "author": "Andrew",
+                "text": "лол"
+              },
+              {
+                "author": "Andrew",
+                "text": "а сколько вообще у нас в соре лимит интересно"
+              },
+              {
+                "author": "Andrew",
+                "text": "я уже 25 видео сгенерил"
+              },
+              {
+                "author": "Rustem",
+                "text": "сегодня у театра камала увидел"
+              }
+            ],
+            "good_reply": "четырехполосная велодорожка нахуй",
+            "tags": [
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "6599a073310d",
+            "context": [
+              {
+                "author": "Rustem",
+                "text": "лол"
+              },
+              {
+                "author": "Mitya",
+                "text": "лол"
+              },
+              {
+                "author": "Rustem",
+                "text": "эм"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "норм поднимать можно"
+              },
+              {
+                "author": "kadyr",
+                "text": "сук хахаха"
+              },
+              {
+                "author": "Rustem",
+                "text": "митя предложил везде это видео распространить"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "@andrewoch в 17:20?"
+              },
+              {
+                "author": "Rustem",
+                "text": "подслушано казань, еду в татарстан"
+              }
+            ],
+            "good_reply": "чтобы диджею жизнь испортить",
+            "tags": [
+              "short",
+              "deadpan",
+              "absurd",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "954865050ae0",
+            "context": [
+              {
+                "author": "Kyamal",
+                "text": "/v"
+              },
+              {
+                "author": "Kyamal",
+                "text": "/v"
+              },
+              {
+                "author": "Rustem",
+                "text": "7vigvamcev media"
+              },
+              {
+                "author": "сглыпа)",
+                "text": "Да ебать ага"
+              },
+              {
+                "author": "Kyamal",
+                "text": "/v"
+              },
+              {
+                "author": "Kyamal",
+                "text": "/v"
+              },
+              {
+                "author": "Andrew",
+                "text": "прост не выключать"
+              },
+              {
+                "author": "Mitya",
+                "text": "разобрал айфон и вставил интернет модуль в ноут"
+              }
+            ],
+            "good_reply": "это же счита мини сервер, зачем его выключать",
+            "tags": [
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "cbe98e20c948",
+            "context": [
+              {
+                "author": "Mitya",
+                "text": "@fmwaveee а ты вчера всю папку документов на тачку забрал???"
+              },
+              {
+                "author": "Rustem",
+                "text": "пригожин дал путину час чтобы уйти в отставку"
+              },
+              {
+                "author": "Mitya",
+                "text": "мы едем сча на достоевского, вся казань в ментах"
+              },
+              {
+                "author": "Rustem",
+                "text": "дакументов"
+              },
+              {
+                "author": "Rustem",
+                "text": "ты конченый?"
+              },
+              {
+                "author": "Mitya",
+                "text": "да"
+              },
+              {
+                "author": "Rustem",
+                "text": "без вопросов"
+              },
+              {
+                "author": "kadyr",
+                "text": "лол"
+              }
+            ],
+            "good_reply": "я думал он забрал типа мои доки только на всякий случай",
+            "tags": [
+              "deadpan",
+              "absurd",
+              "local",
+              "callback"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "fb17e51967f3",
+            "context": [
+              {
+                "author": "Rustem",
+                "text": "спасибо за её комментарий"
+              },
+              {
+                "author": "Mitya",
+                "text": "пососать джойстики"
+              },
+              {
+                "author": "Rustem",
+                "text": "навести playstation camera на ступни"
+              },
+              {
+                "author": "Mitya",
+                "text": "у меня нет"
+              },
+              {
+                "author": "Rustem",
+                "text": "ты в такси помню ноги фоткал"
+              },
+              {
+                "author": "Rustem",
+                "text": "я пока тебя на делимобиле отвозил у меня 2 колеса лопнуло"
+              },
+              {
+                "author": "Rustem",
+                "text": "нормисы"
+              },
+              {
+                "author": "Mitya",
+                "text": "я бл сегодня иду по своей ебаной улице и ногу подвернул в яме бл"
+              }
+            ],
+            "good_reply": "я думал только водители страдают",
+            "tags": [
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "c6f2f1325bea",
+            "context": [
+              {
+                "author": "kadyr",
+                "text": "ну я думал временно"
+              },
+              {
+                "author": "Mitya",
+                "text": "это он и есть"
+              },
+              {
+                "author": "kadyr",
+                "text": "сукаа лол"
+              },
+              {
+                "author": "kadyr",
+                "text": "подошел"
+              },
+              {
+                "author": "kadyr",
+                "text": "но там двухфакторка"
+              },
+              {
+                "author": "kadyr",
+                "text": "я скинул ему пуш чтобы он зашел и подтвердил вход"
+              },
+              {
+                "author": "Mitya",
+                "text": "лол"
+              },
+              {
+                "author": "Mitya",
+                "text": "ты зашёл с телефона?"
+              }
+            ],
+            "good_reply": "я зашел на его почту",
+            "tags": [
+              "deadpan",
+              "absurd",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "6dfeffa9a1ba",
+            "context": [
+              {
+                "author": "Andrew",
+                "text": "А, ну у нас отопление без воды"
+              },
+              {
+                "author": "Andrew",
+                "text": "Мб батареи дешевле"
+              },
+              {
+                "author": "Mitya",
+                "text": "за ремонты всякие я не плачу"
+              },
+              {
+                "author": "Rustem",
+                "text": "а лифт уборка двора содержание это бесплатно думаешь"
+              },
+              {
+                "author": "Rustem",
+                "text": "так а хули ты тогда"
+              },
+              {
+                "author": "Rustem",
+                "text": "бля дольоеб не могу"
+              },
+              {
+                "author": "Andrew",
+                "text": "Лол"
+              },
+              {
+                "author": "Mitya",
+                "text": "ты дебил"
+              }
+            ],
+            "good_reply": "я знаю, что не бесплатно",
+            "tags": [
+              "deadpan",
+              "roast_light",
+              "local"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          },
+          {
+            "id": "fa0d7eb5a108",
+            "context": [
+              {
+                "author": "Mitya",
+                "text": "трахнуть геймпад"
+              },
+              {
+                "author": "Rustem",
+                "text": "как в марио вандер"
+              },
+              {
+                "author": "Rustem",
+                "text": "тряхнуть"
+              },
+              {
+                "author": "Rustem",
+                "text": "спасибо за её комментарий"
+              },
+              {
+                "author": "Mitya",
+                "text": "пососать джойстики"
+              },
+              {
+                "author": "Rustem",
+                "text": "навести playstation camera на ступни"
+              },
+              {
+                "author": "Mitya",
+                "text": "у меня нет"
+              },
+              {
+                "author": "Rustem",
+                "text": "ты в такси помню ноги фоткал"
+              }
+            ],
+            "good_reply": "я пока тебя на делимобиле отвозил у меня 2 колеса лопнуло",
+            "tags": [
+              "short",
+              "deadpan",
+              "local",
+              "absurd"
+            ],
+            "source": "curated",
+            "weight": 4.0,
+            "uses": 0
+          }
+        ]
       }
     }
   },
