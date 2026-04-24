@@ -1,10 +1,3 @@
-memes:
-  - "https://i.imgur.com/your_meme1.jpg"
-  - "https://i.imgur.com/your_meme2.jpg"
-
-youtube_links:
-  - "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-
 rus_stopwords:
   - "это"
   - "как"

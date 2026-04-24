@@ -129,6 +129,27 @@ Owner-команды:
 - `/funny` — вручную засчитать reply как удачный ответ
 - `/unfunny` — вручную засчитать reply как неудачный ответ
 
+## Выборка смешных примеров
+
+Сгенерировать кандидаты `контекст -> удачный ответ` для ручной разметки или прогона через сильную модель:
+
+```bash
+python3 -m timur_bot.tools.export_funny_candidates \
+  --src "/Users/unterlantas/Documents/тимур/tg" \
+  --out "data/funny_candidates.jsonl" \
+  --limit 500
+```
+
+Файл пишется в `data/`, эта папка игнорируется git.
+
+После разметки (`"selected": true`) импортировать выбранные примеры обратно:
+
+```bash
+python3 -m timur_bot.tools.import_funny_examples \
+  --src "data/funny_candidates.jsonl" \
+  --chat-id 93135242
+```
+
 ## Документация
 
 - Архитектура: `ARCHITECTURE.MD`
