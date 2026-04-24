@@ -1,0 +1,23 @@
+owner_id: 428469927
+
+models:
+  text: "gpt-4o-mini"
+  vision: "gpt-4o-mini"
+
+limits:
+  max_history_per_chat: 100
+  max_log_per_chat: 1000
+  max_user_samples: 20
+  max_quotes_per_user: 6
+  max_keywords_per_user: 40
+  max_topic_edges: 300
+  max_user_relations: 300
+  global_daily_vision_limit: 50
+  chat_daily_vision_limit: 5
+  user_daily_vision_limit: 5
+
+probabilities:
+  base_reply_chance: 0.08
+  chain_reply_chance: 0.16
+  mem_reply_chance: 0.08
+  photo_random_reply_chance: 0.22
