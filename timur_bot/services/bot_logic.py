@@ -2,6 +2,7 @@
 import asyncio
 import base64
 import functools
+import io
 import json
 import logging
 import random
@@ -13,7 +14,7 @@ from typing import Any, Dict, List, Tuple
 
 from billing_system import BillingEngine, BillingError
 from openai import OpenAI
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Message, Update
 from telegram.ext import (
     ContextTypes,
 )
@@ -26,6 +27,7 @@ from timur_bot.services.text_processing import (
     split_into_chain as split_into_chain_service,
     top_items as top_items_service,
 )
+from timur_bot.services.voice_tts import synthesize_ogg_opus_from_text
 
 # =========================
 # БАЗОВАЯ НАСТРОЙКА
@@ -43,6 +45,7 @@ BILLING_PATH = APP_CONFIG.billing_path
 TELEGRAM_BOT_TOKEN = APP_CONFIG.telegram_bot_token
 OPENAI_API_KEY = APP_CONFIG.openai_api_key
 OPENAI_BASE_URL = APP_CONFIG.openai_base_url
+GEMINI_API_KEY = APP_CONFIG.gemini_api_key
 
 client = OpenAI(
     api_key=OPENAI_API_KEY,
@@ -52,6 +55,8 @@ client = OpenAI(
 OWNER_ID = APP_CONFIG.owner_id
 TEXT_MODEL = APP_CONFIG.text_model
 VISION_MODEL = APP_CONFIG.vision_model
+VOICE_MODEL = APP_CONFIG.voice_model
+VOICE_NAME = APP_CONFIG.voice_name
 MAX_HISTORY_PER_CHAT = APP_CONFIG.max_history_per_chat
 MAX_LOG_PER_CHAT = APP_CONFIG.max_log_per_chat
 MAX_USER_SAMPLES = APP_CONFIG.max_user_samples
@@ -62,10 +67,14 @@ MAX_USER_RELATIONS = APP_CONFIG.max_user_relations
 GLOBAL_DAILY_VISION_LIMIT = APP_CONFIG.global_daily_vision_limit
 CHAT_DAILY_VISION_LIMIT = APP_CONFIG.chat_daily_vision_limit
 USER_DAILY_VISION_LIMIT = APP_CONFIG.user_daily_vision_limit
+GLOBAL_DAILY_VOICE_LIMIT = APP_CONFIG.global_daily_voice_limit
+CHAT_DAILY_VOICE_LIMIT = APP_CONFIG.chat_daily_voice_limit
+MAX_VOICE_CHARS = APP_CONFIG.max_voice_chars
 BASE_REPLY_CHANCE = APP_CONFIG.base_reply_chance
 CHAIN_REPLY_CHANCE = APP_CONFIG.chain_reply_chance
 MEM_REPLY_CHANCE = APP_CONFIG.mem_reply_chance
 PHOTO_RANDOM_REPLY_CHANCE = APP_CONFIG.photo_random_reply_chance
+VOICE_REPLY_CHANCE = APP_CONFIG.voice_reply_chance
 MEMES = APP_CONFIG.memes
 YOUTUBE_LINKS = APP_CONFIG.youtube_links
 RUS_STOPWORDS = APP_CONFIG.rus_stopwords
@@ -110,6 +119,7 @@ def default_memory() -> Dict[str, Any]:
             "mode_overrides": {},
             "last_random_story_ts": None,
             "vision_usage": {},
+            "voice_usage": {},
         },
     }
 
@@ -143,6 +153,7 @@ def load_memory() -> Dict[str, Any]:
         cfg.setdefault("mode_overrides", {})
         cfg.setdefault("last_random_story_ts", None)
         cfg.setdefault("vision_usage", {})
+        cfg.setdefault("voice_usage", {})
 
         for _, chat in data["chats"].items():
             _ensure_chat_schema(chat)
@@ -455,6 +466,40 @@ def increase_vision_counters(memory: Dict[str, Any], chat_id: int, user_id: int)
     save_memory(memory)
 
 
+def can_send_voice(memory: Dict[str, Any], chat_id: int) -> bool:
+    cfg = memory.setdefault("config", {})
+    vu = cfg.setdefault("voice_usage", {})
+
+    today = _today_str()
+    stats = vu.setdefault(today, {
+        "global": 0,
+        "chats": {},
+    })
+
+    if stats["global"] >= GLOBAL_DAILY_VOICE_LIMIT:
+        return False
+
+    if stats["chats"].get(str(chat_id), 0) >= CHAT_DAILY_VOICE_LIMIT:
+        return False
+
+    return True
+
+
+def increase_voice_counters(memory: Dict[str, Any], chat_id: int) -> None:
+    cfg = memory.setdefault("config", {})
+    vu = cfg.setdefault("voice_usage", {})
+
+    today = _today_str()
+    stats = vu.setdefault(today, {
+        "global": 0,
+        "chats": {},
+    })
+
+    stats["global"] += 1
+    stats["chats"][str(chat_id)] = stats["chats"].get(str(chat_id), 0) + 1
+    save_memory(memory)
+
+
 # =========================
 # ЛОГИКА ОТВЕТОВ
 # =========================
@@ -488,6 +533,11 @@ def looks_like_address_to_bot(text: str) -> bool:
         "тимур",
     ]
     return any(p in text_low for p in phrases)
+
+
+def is_voice_codeword(text: str) -> bool:
+    norm = re.sub(r"\s+", " ", (text or "").strip().lower())
+    return "тимур отправь голосовое" in norm
 
 
 def should_reply(memory: Dict[str, Any], message: Message, bot_id: int) -> bool:
@@ -851,8 +901,9 @@ async def send_reply_with_style(
     context: ContextTypes.DEFAULT_TYPE,
     memory: Dict[str, Any],
     reply_text: str,
+    force_voice: bool = False,
 ) -> None:
-    del context, memory
+    del context
     message = update.effective_message
 
     if not message:
@@ -864,6 +915,8 @@ async def send_reply_with_style(
         logger.info("Empty reply after sanitizing, skipping")
         return
 
+    use_watermark = False
+    watermark_text = ""
     try:
         use_watermark, watermark_text = billing.should_apply_free_watermark(message.chat_id)
         if use_watermark and watermark_text:
@@ -884,6 +937,33 @@ async def send_reply_with_style(
             await message.reply_text(yt)
 
         return
+
+    can_try_voice = bool(GEMINI_API_KEY) and can_send_voice(memory, message.chat_id) and (
+        force_voice or (not use_watermark and random.random() < VOICE_REPLY_CHANCE)
+    )
+    if can_try_voice:
+        voice_text = re.sub(r"\s+", " ", re.sub(r"https?://\S+", "", reply_text)).strip()
+        if len(voice_text) > MAX_VOICE_CHARS:
+            voice_text = voice_text[:MAX_VOICE_CHARS].rsplit(" ", 1)[0].strip()
+        if voice_text:
+            try:
+                voice_ogg = await asyncio.to_thread(
+                    synthesize_ogg_opus_from_text,
+                    api_key=GEMINI_API_KEY,
+                    model=VOICE_MODEL,
+                    voice_name=VOICE_NAME,
+                    text=voice_text,
+                )
+                buf = io.BytesIO(voice_ogg)
+                buf.name = "timur_voice.ogg"
+                await message.reply_voice(voice=InputFile(buf))
+                if use_watermark and watermark_text:
+                    await message.reply_text(watermark_text)
+                increase_voice_counters(memory, message.chat_id)
+                logger.info("Voice reply sent in chat %s", message.chat_id)
+                return
+            except Exception as e:
+                logger.error("Voice generation failed, fallback to text: %s", e)
 
     if random.random() < CHAIN_REPLY_CHANCE:
         parts = split_into_chain(reply_text)
@@ -1398,7 +1478,8 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     messages = build_chat_messages(memory, message)
     reply_text = await call_openai_text(messages)
 
-    await send_reply_with_style(update, context, memory, reply_text)
+    force_voice = is_voice_codeword(_extract_message_text(message))
+    await send_reply_with_style(update, context, memory, reply_text, force_voice=force_voice)
 
 
 async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

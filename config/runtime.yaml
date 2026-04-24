@@ -3,6 +3,8 @@ owner_id: 428469927
 models:
   text: "gpt-4o-mini"
   vision: "gpt-4o-mini"
+  voice: "gemini-3.1-flash-tts-preview"
+  voice_name: "Kore"
 
 limits:
   max_history_per_chat: 100
@@ -15,9 +17,13 @@ limits:
   global_daily_vision_limit: 50
   chat_daily_vision_limit: 5
   user_daily_vision_limit: 5
+  global_daily_voice_limit: 3
+  chat_daily_voice_limit: 1
+  max_voice_chars: 140
 
 probabilities:
   base_reply_chance: 0.08
   chain_reply_chance: 0.16
   mem_reply_chance: 0.08
   photo_random_reply_chance: 0.22
+  voice_reply_chance: 0.015

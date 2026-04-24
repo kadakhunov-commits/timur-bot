@@ -1,5 +1,6 @@
 python-telegram-bot
 openai
+google-genai
 python-dotenv
 PyYAML
 pytest
