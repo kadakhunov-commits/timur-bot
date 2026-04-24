@@ -7,6 +7,7 @@ import logging
 import random
 import re
 import subprocess
+from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -98,7 +99,37 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger("timur-bot")
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 billing = BillingEngine(BILLING_PATH, logger=logger)
+
+
+@dataclass
+class ReplyDecision:
+    should_reply: bool
+    reason: str
+    threshold: float | None = None
+    roll: float | None = None
+
+
+def _log_reply_decision(kind: str, decision: ReplyDecision) -> None:
+    if decision.threshold is not None and decision.roll is not None:
+        logger.info(
+            "Решение по %s: %s | причина=%s | шанс=%.2f | бросок=%.2f",
+            kind,
+            "ОТВЕЧАЮ" if decision.should_reply else "ПРОПУСКАЮ",
+            decision.reason,
+            decision.threshold,
+            decision.roll,
+        )
+        return
+
+    logger.info(
+        "Решение по %s: %s | причина=%s",
+        kind,
+        "ОТВЕЧАЮ" if decision.should_reply else "ПРОПУСКАЮ",
+        decision.reason,
+    )
 
 
 # =========================
@@ -274,7 +305,7 @@ def load_memory() -> Dict[str, Any]:
         return data
 
     except Exception as e:
-        logger.error("Failed to load memory.json: %s", e)
+        logger.error("Не удалось загрузить memory.json: %s", e)
         return default_memory()
 
 
@@ -283,7 +314,7 @@ def save_memory(memory: Dict[str, Any]) -> None:
         with open(MEMORY_PATH, "w", encoding="utf-8") as f:
             json.dump(memory, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        logger.error("Failed to save memory.json: %s", e)
+        logger.error("Не удалось сохранить memory.json: %s", e)
 
 
 def get_chat_mem(memory: Dict[str, Any], chat_id: int) -> Dict[str, Any]:
@@ -529,7 +560,7 @@ def update_memory_with_message(memory: Dict[str, Any], message: Message) -> None
             is_bot=bool(tg_user.is_bot),
         )
     except Exception as e:
-        logger.error("Billing activity update failed: %s", e)
+        logger.error("Ошибка обновления активности в биллинге: %s", e)
 
 
 # =========================
@@ -616,35 +647,48 @@ def looks_like_address_to_bot(text: str) -> bool:
     return any(p in text_low for p in phrases)
 
 
-def should_reply(memory: Dict[str, Any], message: Message, bot_id: int) -> bool:
+def should_reply_decision(memory: Dict[str, Any], message: Message, bot_id: int) -> ReplyDecision:
+    del memory
     if not message.text and not message.caption:
-        return False
+        return ReplyDecision(False, "нет текста или подписи")
 
     text = _extract_message_text(message)
     tg_user = message.from_user
 
     if not tg_user:
-        return False
+        return ReplyDecision(False, "не удалось определить автора сообщения")
 
     if tg_user.id == bot_id:
-        return False
+        return ReplyDecision(False, "сообщение от самого бота")
 
     if message.reply_to_message and message.reply_to_message.from_user:
         if message.reply_to_message.from_user.id == bot_id:
-            return True
+            return ReplyDecision(True, "прямой ответ на сообщение Тимура")
 
     if is_name_mentioned(text):
-        return True
+        return ReplyDecision(True, "в тексте упомянуто имя Тимура")
 
     if looks_like_address_to_bot(text):
         chance = random.uniform(0.75, 1.0)
         roll = random.random()
-        logger.info("Address chance=%.2f roll=%.2f", chance, roll)
-        return roll < chance
+        return ReplyDecision(
+            roll < chance,
+            "сообщение похоже на обращение к Тимуру",
+            threshold=chance,
+            roll=roll,
+        )
 
     roll = random.random()
-    logger.info("Base chance=%.2f roll=%.2f", BASE_REPLY_CHANCE, roll)
-    return roll < BASE_REPLY_CHANCE
+    return ReplyDecision(
+        roll < BASE_REPLY_CHANCE,
+        "обычный случай, применён базовый шанс ответа",
+        threshold=BASE_REPLY_CHANCE,
+        roll=roll,
+    )
+
+
+def should_reply(memory: Dict[str, Any], message: Message, bot_id: int) -> bool:
+    return should_reply_decision(memory, message, bot_id).should_reply
 
 
 # =========================
@@ -945,7 +989,7 @@ async def call_openai_text(messages: List[Dict[str, Any]]) -> str:
         return (response.choices[0].message.content or "").strip()
 
     except Exception as e:
-        logger.error("OpenAI text error: %s", e)
+        logger.error("Ошибка OpenAI при генерации текста: %s", e)
         return ""
 
 
@@ -1000,7 +1044,7 @@ async def call_openai_vision(
         return (response.choices[0].message.content or "").strip()
 
     except Exception as e:
-        logger.error("OpenAI vision error: %s", e)
+        logger.error("Ошибка OpenAI при обработке изображения: %s", e)
         return ""
 
 
@@ -1086,7 +1130,7 @@ async def send_reply_with_style(
     reply_text = sanitize_reply_text(reply_text)
 
     if not reply_text:
-        logger.info("Empty reply after sanitizing, skipping")
+        logger.info("Ответ после очистки пустой, пропускаю отправку")
         return
 
     try:
@@ -1094,12 +1138,12 @@ async def send_reply_with_style(
         if use_watermark and watermark_text:
             reply_text = f"{reply_text}\n\n{watermark_text}"
     except Exception as e:
-        logger.error("Billing watermark check failed: %s", e)
+        logger.error("Ошибка проверки водяного знака биллинга: %s", e)
 
     use_meme = random.random() < MEM_REPLY_CHANCE and (MEMES or YOUTUBE_LINKS)
 
     if use_meme:
-        logger.info("Using meme/video instead of text")
+        logger.info("Формат ответа: мем/видео вместо текста")
 
         if MEMES and (not YOUTUBE_LINKS or random.random() < 0.5):
             meme_url = random.choice(MEMES)
@@ -1617,7 +1661,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
 
     logger.info(
-        "Text from %s (%s) in chat %s: %s",
+        "Входящее текстовое сообщение: user_id=%s username=%s chat_id=%s текст=%s",
         message.from_user.id,
         message.from_user.username,
         message.chat_id,
@@ -1628,11 +1672,17 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     bot_id = (await context.bot.get_me()).id
 
-    if not should_reply(memory, message, bot_id):
-        logger.info("Decided not to reply")
+    decision = should_reply_decision(memory, message, bot_id)
+    _log_reply_decision("тексту", decision)
+    if not decision.should_reply:
         return
 
     humor_plan = build_humor_plan(memory, message)
+    logger.info(
+        "Готовлю текстовый ответ: режим=%s токсичность=%s источник=LLM",
+        get_active_mode(memory),
+        get_toxicity_level(memory),
+    )
     messages = build_chat_messages(memory, message, humor_plan=humor_plan)
     reply_text = await call_openai_text(messages)
 
@@ -1650,7 +1700,7 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     chat_id = message.chat_id
 
     logger.info(
-        "Photo from %s (%s) in chat %s",
+        "Входящее фото: user_id=%s username=%s chat_id=%s",
         user.id,
         user.username,
         chat_id,
@@ -1660,24 +1710,30 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     bot_id = (await context.bot.get_me()).id
 
-    must_reply = False
+    decision = ReplyDecision(False, "нет триггера для ответа на фото")
 
     if message.reply_to_message and message.reply_to_message.from_user:
         if message.reply_to_message.from_user.id == bot_id:
-            must_reply = True
+            decision = ReplyDecision(True, "фото отправлено в ответ на сообщение Тимура")
 
-    if (message.caption or "") and is_name_mentioned(message.caption):
-        must_reply = True
+    if not decision.should_reply and (message.caption or "") and is_name_mentioned(message.caption):
+        decision = ReplyDecision(True, "в подписи к фото упомянуто имя Тимура")
 
-    if not must_reply and random.random() < PHOTO_RANDOM_REPLY_CHANCE:
-        must_reply = True
+    if not decision.should_reply:
+        roll = random.random()
+        decision = ReplyDecision(
+            roll < PHOTO_RANDOM_REPLY_CHANCE,
+            "случайный ответ на фото по вероятности",
+            threshold=PHOTO_RANDOM_REPLY_CHANCE,
+            roll=roll,
+        )
 
-    if not must_reply:
-        logger.info("Decided not to reply to photo")
+    _log_reply_decision("фото", decision)
+    if not decision.should_reply:
         return
 
     if not can_use_vision(memory, chat_id, user.id):
-        logger.info("Vision limit exceeded, skipping vision")
+        logger.info("Лимит vision исчерпан, фото пропускаю")
         return
 
     photo = message.photo[-1]
@@ -1692,7 +1748,7 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     reply_text = sanitize_reply_text(reply_text)
 
     if not reply_text:
-        logger.info("Empty vision reply")
+        logger.info("Vision-ответ получился пустым, пропускаю отправку")
         return
 
     await send_reply_with_style(update, context, memory, reply_text, humor_plan=humor_plan)
@@ -1708,7 +1764,7 @@ def owner_only(func):
         user = update.effective_user
 
         if not user or user.id != OWNER_ID:
-            logger.warning("Unauthorized admin command from %s", user.id if user else "unknown")
+            logger.warning("Неавторизованная admin-команда от user_id=%s", user.id if user else "unknown")
             return
 
         return await func(update, context)
