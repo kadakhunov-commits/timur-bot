@@ -21,9 +21,14 @@ class AppConfig:
     telegram_bot_token: str
     openai_api_key: str
     openai_base_url: str
+    gemini_api_key: str
+    miniapp_url: str
     owner_id: int
     text_model: str
     vision_model: str
+    voice_model: str
+    voice_name: str
+    voice_style_prompt: str
     max_history_per_chat: int
     max_log_per_chat: int
     max_user_samples: int
@@ -34,10 +39,14 @@ class AppConfig:
     global_daily_vision_limit: int
     chat_daily_vision_limit: int
     user_daily_vision_limit: int
+    global_daily_voice_limit: int
+    chat_daily_voice_limit: int
+    max_voice_chars: int
     base_reply_chance: float
     chain_reply_chance: float
     mem_reply_chance: float
     photo_random_reply_chance: float
+    voice_reply_chance: float
     memes: List[str]
     youtube_links: List[str]
     rus_stopwords: Set[str]
@@ -84,6 +93,8 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
     telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
     openai_base_url = os.getenv("OPENAI_BASE_URL", "").strip()
+    gemini_api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    miniapp_url = os.getenv("MINIAPP_URL", "").strip()
     openai_text_model = os.getenv("OPENAI_TEXT_MODEL", "").strip()
     openai_vision_model = os.getenv("OPENAI_VISION_MODEL", "").strip()
     if not telegram_bot_token:
@@ -111,9 +122,6 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
     if active_mode not in modes:
         active_mode = "default" if "default" in modes else next(iter(modes.keys()))
 
-    memory_path_env = os.getenv("MEMORY_PATH", "").strip()
-    billing_path_env = os.getenv("BILLING_PATH", "").strip()
-
     return AppConfig(
         base_dir=root,
         memory_path=Path(memory_path_env) if memory_path_env else root / "memory.json",
@@ -121,9 +129,19 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
         telegram_bot_token=telegram_bot_token,
         openai_api_key=openai_api_key,
         openai_base_url=openai_base_url,
+        gemini_api_key=gemini_api_key,
+        miniapp_url=miniapp_url,
         owner_id=int(runtime.get("owner_id", 428469927)),
         text_model=openai_text_model or str(models.get("text", "gpt-4o-mini")),
         vision_model=openai_vision_model or str(models.get("vision", "gpt-4o-mini")),
+        voice_model=str(models.get("voice", "gemini-3.1-flash-tts-preview")),
+        voice_name=str(models.get("voice_name", "Kore")),
+        voice_style_prompt=str(
+            models.get(
+                "voice_style_prompt",
+                "[slightly raspy] [casual, confident, warm] [light caucasian accent]",
+            )
+        ).strip(),
         max_history_per_chat=int(limits.get("max_history_per_chat", 100)),
         max_log_per_chat=int(limits.get("max_log_per_chat", 1000)),
         max_user_samples=int(limits.get("max_user_samples", 20)),
@@ -134,10 +152,14 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
         global_daily_vision_limit=int(limits.get("global_daily_vision_limit", 50)),
         chat_daily_vision_limit=int(limits.get("chat_daily_vision_limit", 5)),
         user_daily_vision_limit=int(limits.get("user_daily_vision_limit", 5)),
+        global_daily_voice_limit=int(limits.get("global_daily_voice_limit", 3)),
+        chat_daily_voice_limit=int(limits.get("chat_daily_voice_limit", 1)),
+        max_voice_chars=int(limits.get("max_voice_chars", 140)),
         base_reply_chance=float(probs.get("base_reply_chance", 0.08)),
         chain_reply_chance=float(probs.get("chain_reply_chance", 0.16)),
         mem_reply_chance=float(probs.get("mem_reply_chance", 0.08)),
         photo_random_reply_chance=float(probs.get("photo_random_reply_chance", 0.22)),
+        voice_reply_chance=float(probs.get("voice_reply_chance", 0.015)),
         memes=[str(x) for x in (lexicon.get("memes") or [])],
         youtube_links=[str(x) for x in (lexicon.get("youtube_links") or [])],
         rus_stopwords=_coerce_set(lexicon.get("rus_stopwords"), "rus_stopwords"),

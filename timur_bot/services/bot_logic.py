@@ -2,11 +2,13 @@
 import asyncio
 import base64
 import functools
+import io
 import json
 import logging
 import random
 import re
 import subprocess
+from urllib.parse import urlencode, urlsplit, urlunsplit, parse_qsl
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -15,7 +17,17 @@ from zoneinfo import ZoneInfo
 
 from billing_system import BillingEngine, BillingError
 from openai import OpenAI
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
+from telegram import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InputFile,
+    KeyboardButton,
+    Message,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
+    Update,
+    WebAppInfo,
+)
 from telegram.constants import ChatAction
 from telegram.ext import (
     ContextTypes,
@@ -29,6 +41,7 @@ from timur_bot.services.text_processing import (
     split_into_chain as split_into_chain_service,
     top_items as top_items_service,
 )
+from timur_bot.services.voice_tts import synthesize_ogg_opus_from_text
 from timur_bot.services.humor import (
     add_joke_bit,
     apply_feedback,
@@ -55,6 +68,8 @@ BILLING_PATH = APP_CONFIG.billing_path
 TELEGRAM_BOT_TOKEN = APP_CONFIG.telegram_bot_token
 OPENAI_API_KEY = APP_CONFIG.openai_api_key
 OPENAI_BASE_URL = APP_CONFIG.openai_base_url
+GEMINI_API_KEY = APP_CONFIG.gemini_api_key
+MINIAPP_URL = APP_CONFIG.miniapp_url
 
 client = OpenAI(
     api_key=OPENAI_API_KEY,
@@ -64,6 +79,9 @@ client = OpenAI(
 OWNER_ID = APP_CONFIG.owner_id
 TEXT_MODEL = APP_CONFIG.text_model
 VISION_MODEL = APP_CONFIG.vision_model
+VOICE_MODEL = APP_CONFIG.voice_model
+VOICE_NAME = APP_CONFIG.voice_name
+VOICE_STYLE_PROMPT = APP_CONFIG.voice_style_prompt
 MAX_HISTORY_PER_CHAT = APP_CONFIG.max_history_per_chat
 MAX_LOG_PER_CHAT = APP_CONFIG.max_log_per_chat
 MAX_USER_SAMPLES = APP_CONFIG.max_user_samples
@@ -74,10 +92,14 @@ MAX_USER_RELATIONS = APP_CONFIG.max_user_relations
 GLOBAL_DAILY_VISION_LIMIT = APP_CONFIG.global_daily_vision_limit
 CHAT_DAILY_VISION_LIMIT = APP_CONFIG.chat_daily_vision_limit
 USER_DAILY_VISION_LIMIT = APP_CONFIG.user_daily_vision_limit
+GLOBAL_DAILY_VOICE_LIMIT = APP_CONFIG.global_daily_voice_limit
+CHAT_DAILY_VOICE_LIMIT = APP_CONFIG.chat_daily_voice_limit
+MAX_VOICE_CHARS = APP_CONFIG.max_voice_chars
 BASE_REPLY_CHANCE = APP_CONFIG.base_reply_chance
 CHAIN_REPLY_CHANCE = APP_CONFIG.chain_reply_chance
 MEM_REPLY_CHANCE = APP_CONFIG.mem_reply_chance
 PHOTO_RANDOM_REPLY_CHANCE = APP_CONFIG.photo_random_reply_chance
+VOICE_REPLY_CHANCE = APP_CONFIG.voice_reply_chance
 MEMES = APP_CONFIG.memes
 YOUTUBE_LINKS = APP_CONFIG.youtube_links
 RUS_STOPWORDS = APP_CONFIG.rus_stopwords
@@ -209,7 +231,9 @@ def default_memory() -> Dict[str, Any]:
             "mode_overrides": {},
             "last_random_story_ts": None,
             "vision_usage": {},
+            "voice_usage": {},
             "life": default_life,
+            "voice_usage": {},
         },
     }
 
@@ -353,7 +377,9 @@ def load_memory() -> Dict[str, Any]:
         cfg.setdefault("mode_overrides", {})
         cfg.setdefault("last_random_story_ts", None)
         cfg.setdefault("vision_usage", {})
+        cfg.setdefault("voice_usage", {})
         _ensure_life_config(cfg)
+        cfg.setdefault("voice_usage", {})
 
         for _, chat in data["chats"].items():
             _ensure_chat_schema(chat)
@@ -849,6 +875,40 @@ def increase_vision_counters(memory: Dict[str, Any], chat_id: int, user_id: int)
     save_memory(memory)
 
 
+def can_send_voice(memory: Dict[str, Any], chat_id: int) -> bool:
+    cfg = memory.setdefault("config", {})
+    vu = cfg.setdefault("voice_usage", {})
+
+    today = _today_str()
+    stats = vu.setdefault(today, {
+        "global": 0,
+        "chats": {},
+    })
+
+    if stats["global"] >= GLOBAL_DAILY_VOICE_LIMIT:
+        return False
+
+    if stats["chats"].get(str(chat_id), 0) >= CHAT_DAILY_VOICE_LIMIT:
+        return False
+
+    return True
+
+
+def increase_voice_counters(memory: Dict[str, Any], chat_id: int) -> None:
+    cfg = memory.setdefault("config", {})
+    vu = cfg.setdefault("voice_usage", {})
+
+    today = _today_str()
+    stats = vu.setdefault(today, {
+        "global": 0,
+        "chats": {},
+    })
+
+    stats["global"] += 1
+    stats["chats"][str(chat_id)] = stats["chats"].get(str(chat_id), 0) + 1
+    save_memory(memory)
+
+
 # =========================
 # ЛОГИКА ОТВЕТОВ
 # =========================
@@ -882,6 +942,11 @@ def looks_like_address_to_bot(text: str) -> bool:
         "тимур",
     ]
     return any(p in text_low for p in phrases)
+
+
+def is_voice_codeword(text: str) -> bool:
+    norm = re.sub(r"\s+", " ", (text or "").strip().lower())
+    return "тимур отправь голосовое" in norm
 
 
 def should_reply_decision(memory: Dict[str, Any], message: Message, bot_id: int) -> ReplyDecision:
@@ -1541,6 +1606,14 @@ def split_into_chain(text: str) -> List[str]:
     return split_into_chain_service(text)
 
 
+def build_tts_input(reply_text: str, style_prompt: str) -> str:
+    directives = re.findall(r"\[[^\]]+\]", style_prompt or "")
+    prefix = " ".join(part.strip() for part in directives if part.strip()).strip()
+    if prefix:
+        return f"{prefix}\n{reply_text}"
+    return reply_text
+
+
 def _apply_feedback_to_reply(memory: Dict[str, Any], message: Message, rating: str, source: str) -> bool:
     if not message.reply_to_message:
         return False
@@ -1616,6 +1689,7 @@ async def send_reply_with_style(
     context: ContextTypes.DEFAULT_TYPE,
     memory: Dict[str, Any],
     reply_text: str,
+    force_voice: bool = False,
     humor_plan: Dict[str, Any] | None = None,
 ) -> None:
     del context
@@ -1630,6 +1704,8 @@ async def send_reply_with_style(
         logger.info("Ответ после очистки пустой, пропускаю отправку")
         return
 
+    use_watermark = False
+    watermark_text = ""
     try:
         use_watermark, watermark_text = billing.should_apply_free_watermark(message.chat_id)
         if use_watermark and watermark_text:
@@ -1642,6 +1718,34 @@ async def send_reply_with_style(
     if not reply_text:
         logger.info("Ответ после post-watermark очистки пустой, пропускаю отправку")
         return
+
+    can_try_voice = bool(GEMINI_API_KEY) and can_send_voice(memory, message.chat_id) and (
+        force_voice or (not use_watermark and random.random() < VOICE_REPLY_CHANCE)
+    )
+    if can_try_voice:
+        voice_text = re.sub(r"\s+", " ", re.sub(r"https?://\S+", "", reply_text)).strip()
+        if len(voice_text) > MAX_VOICE_CHARS:
+            voice_text = voice_text[:MAX_VOICE_CHARS].rsplit(" ", 1)[0].strip()
+        if voice_text:
+            tts_text = build_tts_input(voice_text, VOICE_STYLE_PROMPT)
+            try:
+                voice_ogg = await asyncio.to_thread(
+                    synthesize_ogg_opus_from_text,
+                    api_key=GEMINI_API_KEY,
+                    model=VOICE_MODEL,
+                    voice_name=VOICE_NAME,
+                    text=tts_text,
+                )
+                buf = io.BytesIO(voice_ogg)
+                buf.name = "timur_voice.ogg"
+                await message.reply_voice(voice=InputFile(buf))
+                if use_watermark and watermark_text:
+                    await message.reply_text(watermark_text)
+                increase_voice_counters(memory, message.chat_id)
+                logger.info("Voice reply sent in chat %s", message.chat_id)
+                return
+            except Exception as e:
+                logger.error("Voice generation failed, fallback to text: %s", e)
     if random.random() < CHAIN_REPLY_CHANCE:
         parts = split_into_chain(reply_text)
 
@@ -1844,6 +1948,184 @@ def _format_cloud_for_user(memory: Dict[str, Any], chat_id: int, user_id: int) -
     return "\n".join(lines)
 
 
+def _upsert_query_params(url: str, params: Dict[str, str]) -> str:
+    parts = urlsplit(url)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query.update(params)
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+
+
+def _miniapp_persona_cards() -> List[Dict[str, str]]:
+    cards: List[Dict[str, str]] = []
+    for mode, prompt in PERSONA_MODES.items():
+        title = mode.replace("_", " ").upper()
+        cards.append({"id": mode, "title": title, "description": prompt[:120]})
+    return cards
+
+
+def _miniapp_members(memory: Dict[str, Any], chat_id: int) -> List[Dict[str, Any]]:
+    chat_mem = get_chat_mem(memory, chat_id)
+    participants = chat_mem.get("participants", {})
+    p_sorted = sorted(
+        participants.values(),
+        key=lambda p: int(p.get("message_count", 0)),
+        reverse=True,
+    )[:8]
+    members: List[Dict[str, Any]] = []
+    for p in p_sorted:
+        uid = int(p.get("user_id", 0))
+        if not uid:
+            continue
+        name = p.get("name") or p.get("username") or f"user {uid}"
+        username = p.get("username") or ""
+        label = f"@{username}" if username else name
+        archetypes = [name for name, _ in _top_items(p.get("archetypes", {}), n=3)] or ["хаотик"]
+        tags = [name for name, _ in _top_items(p.get("keywords", {}), n=6)] or ["пока пусто"]
+        rel_names: List[str] = []
+        for key, _ in sorted(
+            chat_mem.get("user_relations", {}).items(),
+            key=lambda item: (-float(item[1]), item[0]),
+        ):
+            if "|" not in key:
+                continue
+            a_str, b_str = key.split("|", 1)
+            a, b = int(a_str), int(b_str)
+            if uid not in (a, b):
+                continue
+            other = b if a == uid else a
+            other_data = participants.get(str(other), {})
+            other_name = other_data.get("username") or other_data.get("name") or str(other)
+            rel_names.append(f"@{other_name}" if other_data.get("username") else other_name)
+            if len(rel_names) >= 4:
+                break
+        members.append(
+            {
+                "id": str(uid),
+                "title": label,
+                "tags": tags,
+                "archetypes": archetypes,
+                "links": rel_names or ["пока без связей"],
+            }
+        )
+    return members
+
+
+def _miniapp_billing_state(chat_id: int) -> Dict[str, Any]:
+    summary = billing.get_chat_activity_summary(chat_id)
+    active_count = int(summary.get("active_count", 0))
+    active_users = summary.get("active_users", [])
+    payer_count = 1 if active_count else 0
+    quote_owner = billing.get_quote(
+        chat_id=chat_id,
+        mode="owner",
+        provider="stars",
+        payer_count=1 if payer_count else None,
+    )
+    split_payers = min(max(1, len(active_users)), 10) if active_users else 0
+    return {
+        "activeUsers30d": active_count,
+        "payerCountOwner": payer_count,
+        "payerCountSplit": split_payers,
+        "pricePerRub": int(quote_owner.price_per_active_rub),
+        "minRub": int(quote_owner.min_price_rub),
+        "maxRub": int(quote_owner.max_price_rub),
+        "activationRatio": float(quote_owner.activation_ratio),
+        "provider": "stars",
+    }
+
+
+def build_miniapp_launch_url(memory: Dict[str, Any], chat_id: int) -> str:
+    if not MINIAPP_URL:
+        return ""
+    cfg = memory.setdefault("config", {})
+    members = _miniapp_members(memory, chat_id)
+    payload = {
+        "chatId": chat_id,
+        "settings": {
+            "activeMode": get_active_mode(memory),
+            "heat": get_toxicity_level(memory),
+            "previewText": PERSONA_MODES.get(get_active_mode(memory), ""),
+            "personas": _miniapp_persona_cards(),
+        },
+        "memory": {
+            "members": members,
+            "selectedMember": members[0]["id"] if members else "",
+        },
+        "billing": _miniapp_billing_state(chat_id),
+        "meta": {
+            "systemPromptSet": bool(str(cfg.get("system_prompt") or "").strip()),
+            "styleSet": bool(str(cfg.get("style_settings") or "").strip()),
+            "bioSet": bool(str(cfg.get("bio") or "").strip()),
+        },
+    }
+    encoded = base64.urlsafe_b64encode(
+        json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    ).decode("ascii")
+    return _upsert_query_params(MINIAPP_URL, {"state": encoded})
+
+
+def _miniapp_reply_keyboard(url: str) -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [[KeyboardButton("открыть mini app", web_app=WebAppInfo(url=url))]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+        selective=True,
+        input_field_placeholder="нажми чтобы открыть панель",
+    )
+
+
+def _parse_miniapp_chat_id(message: Message) -> int:
+    parts = ((message.text or "").strip().split(maxsplit=1))
+    if len(parts) < 2:
+        return int(message.chat_id)
+    try:
+        return int(parts[1].strip())
+    except Exception:
+        return int(message.chat_id)
+
+
+def apply_miniapp_admin_config(memory: Dict[str, Any], chat_id: int, payload: Dict[str, Any]) -> str:
+    if int(payload.get("chat_id", chat_id)) != int(chat_id):
+        raise ValueError("chat mismatch")
+    mode = str(payload.get("active_mode") or "").strip().lower()
+    heat = payload.get("heat")
+    cfg = memory.setdefault("config", {})
+    if mode:
+        if mode not in PERSONA_MODES:
+            raise ValueError("unknown mode")
+        cfg["active_mode"] = mode
+    if heat is not None:
+        cfg["toxicity_level"] = max(0, min(100, int(heat)))
+    save_memory(memory)
+    return (
+        "mini app конфиг применен\n"
+        f"режим: {get_active_mode(memory)}\n"
+        f"вредность: {get_toxicity_level(memory)}/100"
+    )
+
+
+def build_miniapp_quote_text(chat_id: int, mode: str) -> str:
+    normalized_mode = mode if mode in {"owner", "split"} else "owner"
+    payer_count = 1 if normalized_mode == "owner" else None
+    quote = billing.get_quote(
+        chat_id=chat_id,
+        mode=normalized_mode,
+        provider="stars",
+        payer_count=payer_count,
+    )
+    payer_ids = ", ".join(str(x) for x in quote.payer_ids[:10]) or "-"
+    return "\n".join(
+        [
+            f"mini app квота chat={quote.chat_id}",
+            f"mode={quote.mode}, provider={quote.provider}",
+            f"active={len(quote.active_users)}, payers={len(quote.payer_ids)}",
+            f"total={_fmt_rub(quote.total_rub)}",
+            f"payer ids: {payer_ids}",
+            "реальная оплата пока идет через billing-команды бота",
+        ]
+    )
+
+
 def _set_admin_pending(context: ContextTypes.DEFAULT_TYPE, payload: Dict[str, Any]) -> None:
     context.user_data["admin_pending"] = payload
 
@@ -1887,6 +2169,37 @@ async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await message.reply_text(
         _format_admin_status(memory, chat_id),
         reply_markup=_admin_main_keyboard(chat_id),
+    )
+    miniapp_url = build_miniapp_launch_url(memory, chat_id)
+    if miniapp_url and message.chat.type == "private":
+        await message.reply_text(
+            "открой mini app кнопкой снизу чтобы изменения пришли в этот чат как web_app_data",
+            reply_markup=_miniapp_reply_keyboard(miniapp_url),
+        )
+    elif miniapp_url:
+        await message.reply_text(
+            f"mini app для этого чата открывай в личке с ботом командой:\n/miniapp {chat_id}"
+        )
+    else:
+        await message.reply_text("mini app не настроен: добавь MINIAPP_URL в .env")
+
+
+async def miniapp_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    del context
+    if not _is_owner(update):
+        return
+    message = update.message
+    if not message:
+        return
+    memory = load_memory()
+    target_chat_id = _parse_miniapp_chat_id(message)
+    miniapp_url = build_miniapp_launch_url(memory, target_chat_id)
+    if not miniapp_url:
+        await message.reply_text("mini app не настроен: добавь MINIAPP_URL в .env")
+        return
+    await message.reply_text(
+        f"панель для чата {target_chat_id} готова. запускай mini app через кнопку ниже.",
+        reply_markup=_miniapp_reply_keyboard(miniapp_url),
     )
 
 
@@ -2122,6 +2435,45 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
     await query.answer("непонятная команда панели", show_alert=True)
 
 
+async def web_app_data_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    del context
+    message = update.effective_message
+    if not message or not message.from_user:
+        return
+    if message.from_user.id != OWNER_ID:
+        logger.warning("Unauthorized web_app_data from %s", message.from_user.id)
+        return
+    web_app_data = getattr(message, "web_app_data", None)
+    if not web_app_data or not getattr(web_app_data, "data", ""):
+        return
+
+    try:
+        raw = json.loads(web_app_data.data)
+    except Exception:
+        await message.reply_text("mini app прислал битый payload", reply_markup=ReplyKeyboardRemove())
+        return
+
+    action_type = str(raw.get("type") or "").strip().lower()
+    payload = raw.get("payload") or {}
+    target_chat_id = int(payload.get("chat_id") or message.chat_id)
+    memory = load_memory()
+
+    try:
+        if action_type == "admin_config":
+            reply_text = apply_miniapp_admin_config(memory, target_chat_id, payload)
+        elif action_type == "billing_quote_request":
+            reply_text = build_miniapp_quote_text(target_chat_id, str(payload.get("mode") or "owner"))
+        else:
+            reply_text = "mini app прислал неизвестное действие"
+    except BillingError as e:
+        reply_text = f"billing error: {e}"
+    except Exception as e:
+        logger.error("Mini app payload processing failed: %s", e)
+        reply_text = f"mini app ошибка: {e}"
+
+    await message.reply_text(reply_text, reply_markup=ReplyKeyboardRemove())
+
+
 # =========================
 # TELEGRAM HANDLERS
 # =========================
@@ -2224,7 +2576,15 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         messages = build_chat_messages(memory, message)
         reply_text = await _run_with_typing(context, message.chat_id, call_openai_text(messages))
 
-        await send_reply_with_style(update, context, memory, reply_text, humor_plan=None)
+        force_voice = is_voice_codeword(user_text)
+        await send_reply_with_style(
+            update,
+            context,
+            memory,
+            reply_text,
+            force_voice=force_voice,
+            humor_plan=None,
+        )
     finally:
         _release_inflight_event(event_key)
 
