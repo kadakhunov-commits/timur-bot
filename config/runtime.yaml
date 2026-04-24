@@ -5,6 +5,7 @@ models:
   vision: "gpt-4o-mini"
   voice: "gemini-3.1-flash-tts-preview"
   voice_name: "Kore"
+  voice_style_prompt: "[slightly raspy] [casual, confident, warm] [light caucasian accent]"
 
 limits:
   max_history_per_chat: 320
