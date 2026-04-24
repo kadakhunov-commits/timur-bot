@@ -1147,8 +1147,21 @@ async def reaction_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     reaction = update.message_reaction
     if not reaction:
         return
+    reaction_emoji = []
+    for item in reaction.new_reaction or []:
+        emoji = getattr(item, "emoji", None)
+        if emoji:
+            reaction_emoji.append(str(emoji))
+    logger.info(
+        "Получена reaction: chat_id=%s message_id=%s user_id=%s emoji=%s",
+        reaction.chat.id,
+        reaction.message_id,
+        reaction.user.id if reaction.user else None,
+        ",".join(reaction_emoji) if reaction_emoji else "<non-emoji>",
+    )
     rating = classify_reactions(reaction.new_reaction)
     if not rating:
+        logger.info("Reaction проигнорирована: не funny/unfunny по правилам")
         return
     memory = load_memory()
     chat_mem = get_chat_mem(memory, reaction.chat.id)
@@ -1162,6 +1175,9 @@ async def reaction_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     )
     if ok:
         save_memory(memory)
+        logger.info("Reaction feedback применен: rating=%s message_id=%s", rating, reaction.message_id)
+    else:
+        logger.info("Reaction feedback пропущен: message_id=%s не найден в bot_outputs", reaction.message_id)
 
 
 # =========================
