@@ -27,6 +27,7 @@ class AppConfig:
     vision_model: str
     voice_model: str
     voice_name: str
+    voice_style_prompt: str
     max_history_per_chat: int
     max_log_per_chat: int
     max_user_samples: int
@@ -130,6 +131,12 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
         vision_model=str(models.get("vision", "gpt-4o-mini")),
         voice_model=str(models.get("voice", "gemini-3.1-flash-tts-preview")),
         voice_name=str(models.get("voice_name", "Kore")),
+        voice_style_prompt=str(
+            models.get(
+                "voice_style_prompt",
+                "[slightly raspy] [casual, confident, warm] говори с легким кавказским акцентом, дружелюбно и с подколом",
+            )
+        ).strip(),
         max_history_per_chat=int(limits.get("max_history_per_chat", 100)),
         max_log_per_chat=int(limits.get("max_log_per_chat", 1000)),
         max_user_samples=int(limits.get("max_user_samples", 20)),

@@ -57,6 +57,7 @@ TEXT_MODEL = APP_CONFIG.text_model
 VISION_MODEL = APP_CONFIG.vision_model
 VOICE_MODEL = APP_CONFIG.voice_model
 VOICE_NAME = APP_CONFIG.voice_name
+VOICE_STYLE_PROMPT = APP_CONFIG.voice_style_prompt
 MAX_HISTORY_PER_CHAT = APP_CONFIG.max_history_per_chat
 MAX_LOG_PER_CHAT = APP_CONFIG.max_log_per_chat
 MAX_USER_SAMPLES = APP_CONFIG.max_user_samples
@@ -946,13 +947,16 @@ async def send_reply_with_style(
         if len(voice_text) > MAX_VOICE_CHARS:
             voice_text = voice_text[:MAX_VOICE_CHARS].rsplit(" ", 1)[0].strip()
         if voice_text:
+            tts_text = voice_text
+            if VOICE_STYLE_PROMPT:
+                tts_text = f"{VOICE_STYLE_PROMPT}\n{voice_text}"
             try:
                 voice_ogg = await asyncio.to_thread(
                     synthesize_ogg_opus_from_text,
                     api_key=GEMINI_API_KEY,
                     model=VOICE_MODEL,
                     voice_name=VOICE_NAME,
-                    text=voice_text,
+                    text=tts_text,
                 )
                 buf = io.BytesIO(voice_ogg)
                 buf.name = "timur_voice.ogg"
