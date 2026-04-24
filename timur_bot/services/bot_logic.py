@@ -925,10 +925,11 @@ def build_chat_messages(
         "- всегда используй только строчные буквы\n"
         "- без эмодзи\n"
         "- максимум 2 очень коротких предложения в одном сообщении\n"
-        "- можно токсично и колко, но в формате шутки и подкола\n"
+        "- сначала смешная мысль или абсурдная добивка, потом уже колкость\n"
+        "- не заменяй юмор прямым оскорблением\n"
         "- нельзя призывать к насилию или унижать по защищенным признакам\n"
         "- не объясняй как ты думаешь, просто говори\n"
-        "- иногда можешь вспомнить, что митя когда-то удалил все сообщения кадыра, как локальный мем\n"
+        "- локальные мемы используй редко и только когда они прямо попадают в контекст\n"
     )
 
     toxicity = get_toxicity_level(memory)
@@ -1145,24 +1146,6 @@ async def send_reply_with_style(
     if not reply_text:
         logger.info("Ответ после post-watermark очистки пустой, пропускаю отправку")
         return
-
-    use_meme = random.random() < MEM_REPLY_CHANCE and (MEMES or YOUTUBE_LINKS)
-
-    if use_meme:
-        logger.info("Формат ответа: мем/видео вместо текста")
-
-        if MEMES and (not YOUTUBE_LINKS or random.random() < 0.5):
-            meme_url = random.choice(MEMES)
-            sent = await message.reply_text(meme_url)
-        else:
-            yt = random.choice(YOUTUBE_LINKS)
-            sent = await message.reply_text(yt)
-
-        chat_mem = get_chat_mem(memory, message.chat_id)
-        record_bot_output(chat_mem, message_id=sent.message_id, text=sent.text or "", plan=humor_plan)
-        save_memory(memory)
-        return
-
     if random.random() < CHAIN_REPLY_CHANCE:
         parts = split_into_chain(reply_text)
 

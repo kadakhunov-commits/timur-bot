@@ -30,13 +30,16 @@ SERIOUS_MARKERS = {
     "тревог",
 }
 MAX_JOKE_BANK = 180
+MAX_FUNNY_EXAMPLES = 240
 MAX_BOT_OUTPUTS = 80
 MAX_FEEDBACK_LOG = 120
+CALLBACK_COOLDOWN_USES = 3
 
 
 def ensure_humor_schema(chat_mem: Dict[str, Any]) -> Dict[str, Any]:
     layers = chat_mem.setdefault("memory_layers", {})
     layers.setdefault("joke_bank", [])
+    layers.setdefault("funny_examples", [])
     layers.setdefault("overused_bits", {})
     layers.setdefault("bot_outputs", [])
     stats = layers.setdefault("humor_stats", {})
@@ -89,6 +92,50 @@ def add_joke_bit(
     if len(bank) > MAX_JOKE_BANK:
         del bank[MAX_JOKE_BANK:]
     return bit
+
+
+def add_funny_example(
+    chat_mem: Dict[str, Any],
+    *,
+    context: List[Dict[str, str]],
+    good_reply: str,
+    tags: Optional[List[str]] = None,
+    source: str = "curated",
+    weight: float = 2.0,
+) -> Optional[Dict[str, Any]]:
+    layers = ensure_humor_schema(chat_mem)
+    clean_reply = re.sub(r"\s+", " ", (good_reply or "").strip())
+    if not clean_reply:
+        return None
+    clean_context = [
+        {
+            "author": str(item.get("author", ""))[:80],
+            "text": re.sub(r"\s+", " ", str(item.get("text", ""))).strip()[:220],
+        }
+        for item in context[-8:]
+        if str(item.get("text", "")).strip()
+    ]
+    payload = clean_reply + "|" + "|".join(x["text"] for x in clean_context)
+    example_id = sha1(payload.encode("utf-8")).hexdigest()[:12]
+    examples = layers.setdefault("funny_examples", [])
+    for example in examples:
+        if example.get("id") == example_id:
+            example["weight"] = float(example.get("weight", 1.0)) + weight
+            return example
+    example = {
+        "id": example_id,
+        "context": clean_context,
+        "good_reply": clean_reply,
+        "tags": tags or [],
+        "source": source,
+        "weight": float(weight),
+        "uses": 0,
+    }
+    examples.append(example)
+    examples.sort(key=lambda x: (-float(x.get("weight", 0.0)), str(x.get("good_reply", ""))))
+    if len(examples) > MAX_FUNNY_EXAMPLES:
+        del examples[MAX_FUNNY_EXAMPLES:]
+    return example
 
 
 def classify_text_feedback(text: str) -> Optional[str]:
@@ -150,7 +197,7 @@ def select_joke_bit(chat_mem: Dict[str, Any], text: str) -> Optional[Dict[str, A
         bit_tokens = _tokens(str(bit.get("text", "")))
         overlap = len(query.intersection(bit_tokens))
         feedback = float(bit.get("funny", 0)) - float(bit.get("unfunny", 0)) * 1.5
-        penalty = float(overused.get(str(bit.get("id")), 0)) * 0.8
+        penalty = float(overused.get(str(bit.get("id")), 0)) * 1.8
         return (float(bit.get("weight", 1.0)) + overlap * 2.0 + feedback - penalty, str(bit.get("text", "")))
 
     ranked = sorted(bank, key=score, reverse=True)
@@ -158,6 +205,24 @@ def select_joke_bit(chat_mem: Dict[str, Any], text: str) -> Optional[Dict[str, A
     if score(best)[0] <= -1:
         return None
     return best
+
+
+def select_funny_examples(chat_mem: Dict[str, Any], text: str, limit: int = 2) -> List[Dict[str, Any]]:
+    layers = ensure_humor_schema(chat_mem)
+    examples = layers.get("funny_examples", [])
+    if not examples:
+        return []
+    query = _tokens(text)
+
+    def score(example: Dict[str, Any]) -> tuple[float, str]:
+        payload = str(example.get("good_reply", "")) + " " + " ".join(
+            str(item.get("text", "")) for item in example.get("context", [])
+        )
+        overlap = len(query.intersection(_tokens(payload)))
+        return (float(example.get("weight", 1.0)) + overlap * 2.0 - int(example.get("uses", 0)) * 0.2, str(example.get("id", "")))
+
+    ranked = sorted(examples, key=score, reverse=True)
+    return ranked[:limit]
 
 
 def choose_humor_plan(
@@ -175,23 +240,26 @@ def choose_humor_plan(
     else:
         bit = select_joke_bit(chat_mem, text)
         candidates = {
-            "deadpan": 1.0 + _mode_score(stats, "deadpan"),
-            "absurd_literal": 0.7 + _mode_score(stats, "absurd_literal"),
-            "roast_user": 0.9 + _mode_score(stats, "roast_user"),
+            "deadpan": 1.2 + _mode_score(stats, "deadpan"),
+            "absurd_literal": 0.9 + _mode_score(stats, "absurd_literal"),
+            "roast_user": 0.35 + _mode_score(stats, "roast_user"),
             "parody": 0.4 + _mode_score(stats, "parody"),
-            "callback": (1.3 if bit else 0.2) + _mode_score(stats, "callback"),
+            "callback": (0.75 if bit else 0.1) + _mode_score(stats, "callback"),
         }
         if "?" in text:
             candidates["deadpan"] += 0.4
         if len(text or "") < 35:
             candidates["absurd_literal"] += 0.25
+        if bit and _tokens(text).intersection(_tokens(str(bit.get("text", "")))):
+            candidates["callback"] += 0.6
         mode = max(candidates.items(), key=lambda x: (x[1], x[0]))[0]
 
     bit = None if mode == "serious" else select_joke_bit(chat_mem, text)
+    examples = [] if mode == "serious" else select_funny_examples(chat_mem, text, limit=2)
     instruction_by_mode = {
         "deadpan": "сухая короткая добивка, будто это очевидный провал собеседника",
         "callback": "локальная отсылка к выбранному bit/fact, без объяснения шутки",
-        "roast_user": "дружеская прожарка автора без жесткой травли",
+        "roast_user": "дружеская прожарка автора через ситуацию, а не прямое оскорбление",
         "absurd_literal": "абсурдно-буквальная трактовка сообщения",
         "parody": "легко передразни вайб автора, не копируя длинно",
         "serious": "без прожарки, ответь по-человечески коротко",
@@ -202,6 +270,7 @@ def choose_humor_plan(
         "target_user_name": user_name,
         "bit": bit,
         "bit_ids": [bit["id"]] if bit else [],
+        "examples": examples,
         "instruction": instruction_by_mode[mode],
     }
 
@@ -216,7 +285,17 @@ def format_humor_prompt(plan: Dict[str, Any]) -> str:
     bit = plan.get("bit")
     if bit:
         lines.append(f"- локальный bit: {bit.get('text')}")
+    examples = plan.get("examples") or []
+    if examples:
+        lines.append("- похожие удачные примеры из чата:")
+        for example in examples[:2]:
+            ctx = " / ".join(
+                f"{item.get('author')}: {item.get('text')}" for item in example.get("context", [])[-3:]
+            )
+            lines.append(f"  контекст: {ctx}")
+            lines.append(f"  удачный ответ: {example.get('good_reply')}")
     lines.append("- не объясняй шутку и не делай стендап-монолог")
+    lines.append("- не называй человека тупым/дебилом/ничтожным, смеши через ситуацию")
     return "\n".join(lines)
 
 
@@ -251,9 +330,16 @@ def record_bot_output(
     overused = layers.setdefault("overused_bits", {})
     for bit_id in plan.get("bit_ids", []):
         overused[str(bit_id)] = int(overused.get(str(bit_id), 0)) + 1
+        if overused[str(bit_id)] > CALLBACK_COOLDOWN_USES:
+            overused[str(bit_id)] = CALLBACK_COOLDOWN_USES
         for bit in layers.get("joke_bank", []):
             if bit.get("id") == bit_id:
                 bit["uses"] = int(bit.get("uses", 0)) + 1
+    for example in plan.get("examples", []) or []:
+        example_id = str(example.get("id", ""))
+        for saved in layers.get("funny_examples", []):
+            if str(saved.get("id", "")) == example_id:
+                saved["uses"] = int(saved.get("uses", 0)) + 1
 
 
 def apply_feedback(

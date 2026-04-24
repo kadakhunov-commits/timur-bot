@@ -1,5 +1,6 @@
 from timur_bot.services.humor import (
     add_joke_bit,
+    add_funny_example,
     apply_feedback,
     choose_humor_plan,
     classify_reactions,
@@ -52,3 +53,19 @@ def test_feedback_classifiers() -> None:
     assert classify_text_feedback("просто сообщение") is None
     assert classify_reactions([DummyReaction("❤️")]) == "funny"
     assert classify_reactions([DummyReaction("💩")]) == "unfunny"
+
+
+def test_humor_plan_includes_relevant_funny_example() -> None:
+    chat = {}
+    add_funny_example(
+        chat,
+        context=[{"author": "A", "text": "кадыр опять спорит"}],
+        good_reply="бля у него спор на автопилоте",
+        tags=["deadpan"],
+        weight=5,
+    )
+
+    plan = choose_humor_plan(chat, text="кадыр спорит", user_id=1, user_name="A")
+
+    assert plan["examples"]
+    assert plan["examples"][0]["good_reply"] == "бля у него спор на автопилоте"
