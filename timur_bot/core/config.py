@@ -108,11 +108,13 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
     active_mode = str(defaults.get("active_mode", "default"))
     if active_mode not in modes:
         active_mode = "default" if "default" in modes else next(iter(modes.keys()))
+    memory_path_env = os.getenv("MEMORY_PATH", "").strip()
+    billing_path_env = os.getenv("BILLING_PATH", "").strip()
 
     return AppConfig(
         base_dir=root,
-        memory_path=root / "memory.json",
-        billing_path=root / "billing_state.json",
+        memory_path=Path(memory_path_env) if memory_path_env else root / "memory.json",
+        billing_path=Path(billing_path_env) if billing_path_env else root / "billing_state.json",
         telegram_bot_token=telegram_bot_token,
         openai_api_key=openai_api_key,
         openai_base_url=openai_base_url,

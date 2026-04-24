@@ -1,0 +1,14 @@
+meta:
+  environment: python
+  toolchain:
+    name: pip
+    version: "3.11"
+
+build:
+  requirementsPath: requirements.txt
+  useCache: true
+
+run:
+  command: python3 -m timur_bot
+  persistenceMount: /data
+  containerPort: 80
