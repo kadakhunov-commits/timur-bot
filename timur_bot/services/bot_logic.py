@@ -89,6 +89,11 @@ RECENT_FACT_WINDOW_DAYS = 14
 MAX_RECENT_MESSAGES = 24
 MAX_RECENT_FACTS = 120
 MAX_LONG_FACTS = 400
+BLOCKED_MEMORY_PATTERNS = (
+    re.compile(r"мит[яи].*(сн[её]с|удал[ие]).*сообщ", re.IGNORECASE),
+    re.compile(r"сообщени[яй].*(сн[её]с|удал[ие]).*кадыр", re.IGNORECASE),
+    re.compile(r"(сн[её]с|удал[ие]).*сообщени[яй].*кадыр", re.IGNORECASE),
+)
 
 # =========================
 # ЛОГИ
@@ -712,12 +717,30 @@ def get_bio_settings(memory: Dict[str, Any]) -> str:
 
 def get_toxicity_level(memory: Dict[str, Any]) -> int:
     cfg = memory.setdefault("config", {})
-    raw = cfg.get("toxicity_level", 82)
+    default_heat = int(APP_CONFIG.default_toxicity_level)
+    raw = cfg.get("toxicity_level", default_heat)
     try:
         val = int(raw)
     except Exception:
-        val = 82
+        val = default_heat
     return max(0, min(100, val))
+
+
+def is_blocked_memory_text(text: str) -> bool:
+    clean = re.sub(r"\s+", " ", str(text or "")).strip().lower()
+    if not clean:
+        return False
+    return any(pattern.search(clean) for pattern in BLOCKED_MEMORY_PATTERNS)
+
+
+def enforce_reply_guardrails(reply_text: str) -> str:
+    clean = sanitize_reply_text(reply_text)
+    if not clean:
+        return ""
+    if is_blocked_memory_text(clean):
+        logger.warning("Блокирую заезженный мем в ответе LLM")
+        return "этот старый мем уже помер давай свежак"
+    return clean
 
 
 def get_active_mode(memory: Dict[str, Any]) -> str:
@@ -786,7 +809,12 @@ def select_recent_facts_for_context(memory: Dict[str, Any], chat_id: int) -> Lis
         recency_bonus = max(0.0, (RECENT_FACT_WINDOW_DAYS - age_days) / RECENT_FACT_WINDOW_DAYS)
         return (float(fact.get("weight", 1.0)) + recency_bonus, str(fact.get("text", "")))
 
-    ranked = sorted(recent_facts, key=_score, reverse=True)
+    filtered_facts = [
+        fact
+        for fact in recent_facts
+        if not is_blocked_memory_text(str(fact.get("text", "")))
+    ]
+    ranked = sorted(filtered_facts, key=_score, reverse=True)
     return [str(x.get("text", "")) for x in ranked[:4] if str(x.get("text", "")).strip()]
 
 
@@ -797,8 +825,13 @@ def select_old_random_memories(memory: Dict[str, Any], chat_id: int) -> List[str
     if not isinstance(long_facts, list) or not long_facts:
         return []
 
+    filtered_facts = [
+        fact
+        for fact in long_facts
+        if not is_blocked_memory_text(str(fact.get("text", "")))
+    ]
     top = sorted(
-        long_facts,
+        filtered_facts,
         key=lambda x: (-float(x.get("strength", 0.0)), str(x.get("text", ""))),
     )[:3]
     return [str(f.get("text", "")).strip() for f in top if str(f.get("text", "")).strip()]
@@ -930,6 +963,7 @@ def build_chat_messages(
         "- нельзя призывать к насилию или унижать по защищенным признакам\n"
         "- не объясняй как ты думаешь, просто говори\n"
         "- локальные мемы используй редко и только когда они прямо попадают в контекст\n"
+        "- запрещено повторять старый мем про удаленные сообщения кадыра\n"
     )
 
     toxicity = get_toxicity_level(memory)
@@ -1128,7 +1162,7 @@ async def send_reply_with_style(
     if not message:
         return
 
-    reply_text = sanitize_reply_text(reply_text)
+    reply_text = enforce_reply_guardrails(reply_text)
 
     if not reply_text:
         logger.info("Ответ после очистки пустой, пропускаю отправку")
@@ -1142,7 +1176,7 @@ async def send_reply_with_style(
         logger.error("Ошибка проверки водяного знака биллинга: %s", e)
 
     # Вторая очистка после возможной инъекции watermark-текста.
-    reply_text = sanitize_reply_text(reply_text)
+    reply_text = enforce_reply_guardrails(reply_text)
     if not reply_text:
         logger.info("Ответ после post-watermark очистки пустой, пропускаю отправку")
         return
