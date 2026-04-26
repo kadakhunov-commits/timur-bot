@@ -8,6 +8,7 @@ import logging
 import random
 import re
 import subprocess
+import weakref
 from urllib.parse import urlencode, urlsplit, urlunsplit, parse_qsl
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -42,6 +43,39 @@ from timur_bot.services.text_processing import (
     top_items as top_items_service,
 )
 from timur_bot.services.voice_tts import synthesize_ogg_opus_from_text
+from timur_bot.services.funny_scan_admin import (
+    format_funny_candidate_preview,
+    format_funny_candidates_list,
+    format_funny_sources,
+    format_funny_status,
+)
+from timur_bot.services.funny_scan_llm import evaluate_candidate_with_llm
+from timur_bot.services.funny_scan_pipeline import build_stage1_candidates, extract_period_messages
+from timur_bot.services.funny_scan_storage import (
+    STATUS_APPROVED,
+    STATUS_NEW,
+    STATUS_REJECTED,
+    STATUS_SENT,
+    add_candidate,
+    apply_intensity_profile,
+    apply_reaction_delta,
+    ensure_budget_day,
+    ensure_funny_scan_config,
+    get_candidate,
+    hard_budget_reached,
+    has_candidate_signature,
+    list_candidates,
+    load_state,
+    register_forward_usage,
+    register_token_usage,
+    save_state,
+    set_candidate_status,
+    set_preview_sent,
+    soft_budget_ratio,
+    toggle_source,
+    update_last_scan,
+    upsert_source,
+)
 from timur_bot.services.humor import (
     add_joke_bit,
     apply_feedback,
@@ -107,6 +141,8 @@ EN_STOPWORDS = APP_CONFIG.en_stopwords
 PROFANITY_MARKERS = APP_CONFIG.profanity_markers
 ARCHETYPE_LEXICON = APP_CONFIG.archetype_lexicon
 PERSONA_MODES = APP_CONFIG.persona_modes
+FUNNY_SCAN_RUNTIME_DEFAULTS = APP_CONFIG.funny_scan_defaults
+FUNNY_SCAN_LEXICON = APP_CONFIG.funny_scan_lexicon
 RECENT_FACT_WINDOW_DAYS = 14
 MAX_RECENT_MESSAGES = 24
 MAX_RECENT_FACTS = 120
@@ -120,8 +156,14 @@ LIFE_STORY_LOG_LIMIT = 80
 LIFE_LOOP_INTERVAL_SECONDS = 60
 DEFAULT_LIFE_TIMEZONE = "Europe/Moscow"
 LONG_FACT_USAGE_TRACK_LIMIT = 600
+FUNNY_SCAN_STATE_PATH = ROOT_DIR / "data" / "funny_scan_state.json"
+FUNNY_SCAN_LOOP_INTERVAL_SECONDS = 60
 _INFLIGHT_EVENT_KEYS: set[str] = set()
 _LIFE_TASK: asyncio.Task[Any] | None = None
+_FUNNY_SCAN_TASK: asyncio.Task[Any] | None = None
+_FUNNY_SCAN_LOCK = asyncio.Lock()
+_FUNNY_SCAN_STATE_LOCK = asyncio.Lock()
+_FUNNY_FORWARD_LOCKS: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
 
 # =========================
 # ЛОГИ
@@ -217,6 +259,15 @@ def _ensure_life_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
         life.setdefault(key, value)
     return life
 
+
+def _ensure_funny_scan_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    return ensure_funny_scan_config(
+        cfg,
+        owner_id=OWNER_ID,
+        runtime_defaults=FUNNY_SCAN_RUNTIME_DEFAULTS,
+    )
+
+
 def default_memory() -> Dict[str, Any]:
     default_life = _default_life_config()
     return {
@@ -233,7 +284,7 @@ def default_memory() -> Dict[str, Any]:
             "vision_usage": {},
             "voice_usage": {},
             "life": default_life,
-            "voice_usage": {},
+            "funny_scan": _ensure_funny_scan_config({}).copy(),
         },
     }
 
@@ -261,7 +312,7 @@ def _parse_iso_ts(ts: str) -> datetime | None:
     if not raw:
         return None
     try:
-        return datetime.fromisoformat(raw)
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).replace(tzinfo=None)
     except ValueError:
         return None
 
@@ -379,7 +430,7 @@ def load_memory() -> Dict[str, Any]:
         cfg.setdefault("vision_usage", {})
         cfg.setdefault("voice_usage", {})
         _ensure_life_config(cfg)
-        cfg.setdefault("voice_usage", {})
+        _ensure_funny_scan_config(cfg)
 
         for _, chat in data["chats"].items():
             _ensure_chat_schema(chat)
@@ -415,6 +466,46 @@ def get_user_mem(memory: Dict[str, Any], user_id: int) -> Dict[str, Any]:
     user.setdefault("events", [])
     user.setdefault("bio", "")
     return user
+
+
+def _get_funny_scan_settings(memory: Dict[str, Any]) -> Dict[str, Any]:
+    cfg = memory.setdefault("config", {})
+    return _ensure_funny_scan_config(cfg)
+
+
+def _load_funny_scan_state() -> Dict[str, Any]:
+    state = load_state(FUNNY_SCAN_STATE_PATH)
+    ensure_budget_day(state)
+    return state
+
+
+def _save_funny_scan_state(state: Dict[str, Any]) -> None:
+    save_state(FUNNY_SCAN_STATE_PATH, state)
+
+
+def _known_scan_sources(memory: Dict[str, Any], settings: Dict[str, Any]) -> List[Dict[str, Any]]:
+    by_id: Dict[int, Dict[str, Any]] = {}
+    chats = memory.get("chats", {})
+    if isinstance(chats, dict):
+        for chat_id_raw, chat_mem in chats.items():
+            try:
+                chat_id = int(chat_id_raw)
+            except Exception:
+                continue
+            history = chat_mem.get("history", []) if isinstance(chat_mem, dict) else []
+            if not isinstance(history, list) or not history:
+                continue
+            by_id[chat_id] = {"chat_id": chat_id, "title": f"chat {chat_id}"}
+    for source in settings.get("sources", []) if isinstance(settings.get("sources"), list) else []:
+        if not isinstance(source, dict):
+            continue
+        chat_id = int(source.get("chat_id", 0))
+        if not chat_id:
+            continue
+        by_id.setdefault(chat_id, {"chat_id": chat_id, "title": str(source.get("title") or f"chat {chat_id}")})
+        if source.get("title"):
+            by_id[chat_id]["title"] = str(source.get("title"))
+    return sorted(by_id.values(), key=lambda x: x["chat_id"])
 
 
 def normalize_token(token: str) -> str:
@@ -1595,6 +1686,292 @@ async def stop_life_loop() -> None:
 
 
 # =========================
+# FUNNY SCAN LOOP
+# =========================
+
+def _adapt_funny_scan_settings(settings: Dict[str, Any], state: Dict[str, Any]) -> Dict[str, Any]:
+    adapted = dict(settings)
+    ratio = soft_budget_ratio(settings, state)
+    if ratio < 0.8:
+        return adapted
+    adapted["stage1_min_score"] = min(100, int(adapted.get("stage1_min_score", 42)) + 8)
+    adapted["max_llm_candidates_per_scan"] = max(1, int(adapted.get("max_llm_candidates_per_scan", 12)) // 2)
+    adapted["llm_max_context_messages"] = max(4, int(adapted.get("llm_max_context_messages", 12)) - 4)
+    return adapted
+
+
+def _apply_boundary_to_candidate(candidate: Dict[str, Any], boundary: Dict[str, Any]) -> None:
+    start_id = int(boundary.get("start_message_id", 0))
+    end_id = int(boundary.get("end_message_id", 0))
+    message_ids = [int(x) for x in (candidate.get("message_ids") or []) if int(x) > 0]
+    if not message_ids or start_id <= 0 or end_id <= 0:
+        return
+    if start_id not in message_ids or end_id not in message_ids:
+        return
+    left = message_ids.index(start_id)
+    right = message_ids.index(end_id)
+    if left > right:
+        left, right = right, left
+    selected = message_ids[left : right + 1]
+    if not selected:
+        return
+    candidate["message_ids"] = selected
+    cluster_messages = [x for x in (candidate.get("cluster_messages") or []) if int(x.get("message_id", 0)) in set(selected)]
+    if cluster_messages:
+        candidate["cluster_messages"] = cluster_messages
+        candidate["time_start"] = str(cluster_messages[0].get("ts", candidate.get("time_start", "")))
+        candidate["time_end"] = str(cluster_messages[-1].get("ts", candidate.get("time_end", "")))
+
+
+async def _send_funny_candidate_preview(
+    application: Any,
+    *,
+    settings: Dict[str, Any],
+    candidate_id: str,
+) -> bool:
+    async with _FUNNY_SCAN_STATE_LOCK:
+        state = _load_funny_scan_state()
+        candidate = get_candidate(state, candidate_id)
+        if not candidate or candidate.get("preview_sent_at"):
+            return False
+        text = format_funny_candidate_preview(candidate)
+
+    owner_chat_id = int(settings.get("owner_dm_chat_id", OWNER_ID))
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("Одобрить", callback_data=f"adm:funny:approve:{candidate_id}"),
+                InlineKeyboardButton("Отклонить", callback_data=f"adm:funny:reject:{candidate_id}"),
+            ],
+            [InlineKeyboardButton("Открыть", callback_data=f"adm:funny:open:{candidate_id}")],
+        ]
+    )
+    try:
+        sent = await application.bot.send_message(
+            chat_id=owner_chat_id,
+            text=text[:3900],
+            reply_markup=keyboard,
+        )
+    except Exception as e:
+        logger.error("Не удалось отправить funny preview %s: %s", candidate_id, e)
+        async with _FUNNY_SCAN_STATE_LOCK:
+            state = _load_funny_scan_state()
+            candidate = get_candidate(state, candidate_id)
+            if candidate:
+                candidate.setdefault("meta", {})["preview_error"] = str(e)
+                _save_funny_scan_state(state)
+        return False
+
+    async with _FUNNY_SCAN_STATE_LOCK:
+        state = _load_funny_scan_state()
+        if not set_preview_sent(state, candidate_id, preview_message_id=sent.message_id):
+            return False
+        _save_funny_scan_state(state)
+    return True
+
+
+def _candidate_from_stage2(
+    *,
+    draft: Dict[str, Any],
+    llm_result: Dict[str, Any],
+    settings: Dict[str, Any],
+    trigger: str,
+) -> Dict[str, Any]:
+    merged = dict(draft)
+    merged["score"] = int(llm_result.get("score", 0))
+    merged["show_to_owner"] = bool(llm_result.get("show_to_owner", False))
+    merged["llm_reason_short"] = str(llm_result.get("reason_short", ""))[:240]
+    merged["llm_boundary"] = dict(llm_result.get("boundary") or {})
+    merged["signals_pos"] = sorted(set(list(merged.get("signals_pos") or []) + list(llm_result.get("positive_signals") or [])))
+    merged["signals_neg"] = sorted(set(list(merged.get("signals_neg") or []) + list(llm_result.get("negative_signals") or [])))
+    _apply_boundary_to_candidate(merged, merged["llm_boundary"])
+    merged["status"] = STATUS_NEW
+    merged["meta"] = {
+        **dict(merged.get("meta") or {}),
+        "intensity": str(settings.get("intensity", "balanced")),
+        "trigger": trigger,
+    }
+    return merged
+
+
+async def _run_funny_scan_once(application: Any, *, trigger: str) -> Dict[str, Any]:
+    if _FUNNY_SCAN_LOCK.locked():
+        return {"busy": True}
+    async with _FUNNY_SCAN_LOCK:
+        memory = load_memory()
+        settings = _get_funny_scan_settings(memory)
+        async with _FUNNY_SCAN_STATE_LOCK:
+            state = _load_funny_scan_state()
+            ensure_budget_day(state)
+            if trigger == "scheduled" and not bool(settings.get("enabled", False)):
+                return {"skipped": "disabled"}
+            adapted_settings = _adapt_funny_scan_settings(settings, state)
+            reaction_index_snapshot = dict(state.get("reaction_index", {}))
+
+        sources = [src for src in settings.get("sources", []) if isinstance(src, dict) and bool(src.get("enabled", True))]
+        summary = {
+            "sources": 0,
+            "stage1_candidates": 0,
+            "llm_calls": 0,
+            "created": 0,
+            "previewed": 0,
+            "skipped_budget": False,
+            "deduped": 0,
+        }
+        chats = memory.get("chats", {}) if isinstance(memory.get("chats"), dict) else {}
+
+        for source in sources:
+            chat_id = int(source.get("chat_id", 0))
+            if not chat_id:
+                continue
+            chat_mem = chats.get(str(chat_id))
+            if not isinstance(chat_mem, dict):
+                continue
+            history = chat_mem.get("history", [])
+            if not isinstance(history, list) or not history:
+                continue
+
+            scoped_messages = extract_period_messages(
+                history,
+                period_hours=int(adapted_settings.get("scan_period_hours", 24)),
+            )
+            if not scoped_messages:
+                continue
+
+            stage1_candidates = build_stage1_candidates(
+                scoped_messages,
+                source_chat_id=chat_id,
+                source_chat_title=str(source.get("title") or f"chat {chat_id}"),
+                reaction_index=reaction_index_snapshot,
+                settings=adapted_settings,
+                lexicon=FUNNY_SCAN_LEXICON,
+            )
+            summary["sources"] += 1
+            summary["stage1_candidates"] += len(stage1_candidates)
+
+            llm_limit = max(1, int(adapted_settings.get("max_llm_candidates_per_scan", 12)))
+            for draft in stage1_candidates[:llm_limit]:
+                async with _FUNNY_SCAN_STATE_LOCK:
+                    state = _load_funny_scan_state()
+                    ensure_budget_day(state)
+                    if hard_budget_reached(adapted_settings, state):
+                        summary["skipped_budget"] = True
+                        break
+                    if has_candidate_signature(state, draft):
+                        summary["deduped"] += 1
+                        continue
+
+                try:
+                    llm_result, tokens_used = await asyncio.to_thread(
+                        evaluate_candidate_with_llm,
+                        client,
+                        model=str(adapted_settings.get("llm_model", TEXT_MODEL)),
+                        candidate=draft,
+                        max_context_messages=int(adapted_settings.get("llm_max_context_messages", 12)),
+                        max_chars_per_message=int(adapted_settings.get("llm_max_chars_per_message", 220)),
+                        review_threshold=int(adapted_settings.get("review_threshold", 70)),
+                    )
+                except Exception as e:
+                    logger.error("funny scan LLM failed (chat=%s): %s", chat_id, e)
+                    continue
+
+                candidate = _candidate_from_stage2(
+                    draft=draft,
+                    llm_result=llm_result,
+                    settings=adapted_settings,
+                    trigger=trigger,
+                )
+                candidate_id = ""
+                added = False
+                async with _FUNNY_SCAN_STATE_LOCK:
+                    state = _load_funny_scan_state()
+                    ensure_budget_day(state)
+                    if hard_budget_reached(adapted_settings, state):
+                        summary["skipped_budget"] = True
+                        break
+                    if has_candidate_signature(state, draft):
+                        summary["deduped"] += 1
+                        continue
+                    register_token_usage(state, int(tokens_used))
+                    summary["llm_calls"] += 1
+                    candidate_id, added = add_candidate(state, candidate)
+                    if added:
+                        summary["created"] += 1
+                    _save_funny_scan_state(state)
+
+                if (
+                    added
+                    and bool(candidate.get("show_to_owner"))
+                    and int(candidate.get("score", 0)) >= int(adapted_settings.get("review_threshold", 70))
+                ):
+                    if await _send_funny_candidate_preview(
+                        application,
+                        settings=settings,
+                        candidate_id=candidate_id,
+                    ):
+                        summary["previewed"] += 1
+
+            async with _FUNNY_SCAN_STATE_LOCK:
+                state = _load_funny_scan_state()
+                update_last_scan(state, chat_id)
+                _save_funny_scan_state(state)
+
+            if summary["skipped_budget"]:
+                break
+
+        return summary
+
+
+async def _funny_scan_loop(application: Any) -> None:
+    logger.info("Запускаю funny scan loop")
+    try:
+        while True:
+            try:
+                memory = load_memory()
+                settings = _get_funny_scan_settings(memory)
+                if settings.get("enabled"):
+                    async with _FUNNY_SCAN_STATE_LOCK:
+                        state = _load_funny_scan_state()
+                        ensure_budget_day(state)
+                    last_scan_ts = str((state.get("state") or {}).get("last_scan_ts") or "")
+                    last_dt = _parse_iso_ts(last_scan_ts)
+                    due = False
+                    if not last_dt:
+                        due = True
+                    else:
+                        elapsed = (datetime.utcnow() - last_dt).total_seconds()
+                        due = elapsed >= max(60, int(settings.get("scan_schedule_minutes", 60)) * 60)
+                    if due:
+                        await _run_funny_scan_once(application, trigger="scheduled")
+            except Exception as e:
+                logger.error("Ошибка funny scan loop: %s", e)
+            await asyncio.sleep(FUNNY_SCAN_LOOP_INTERVAL_SECONDS)
+    except asyncio.CancelledError:
+        logger.info("Funny scan loop остановлен")
+        raise
+
+
+async def start_funny_scan_loop(application: Any) -> None:
+    global _FUNNY_SCAN_TASK
+    if _FUNNY_SCAN_TASK and not _FUNNY_SCAN_TASK.done():
+        return
+    _FUNNY_SCAN_TASK = application.create_task(_funny_scan_loop(application))
+
+
+async def stop_funny_scan_loop() -> None:
+    global _FUNNY_SCAN_TASK
+    if not _FUNNY_SCAN_TASK:
+        return
+    _FUNNY_SCAN_TASK.cancel()
+    try:
+        await _FUNNY_SCAN_TASK
+    except asyncio.CancelledError:
+        pass
+    finally:
+        _FUNNY_SCAN_TASK = None
+
+
+# =========================
 # ОБРАБОТКА ТЕКСТА
 # =========================
 
@@ -1647,11 +2024,16 @@ async def reaction_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     reaction = update.message_reaction
     if not reaction:
         return
-    reaction_emoji = []
+    reaction_emoji: List[str] = []
+    old_reaction_emoji: List[str] = []
     for item in reaction.new_reaction or []:
         emoji = getattr(item, "emoji", None)
         if emoji:
             reaction_emoji.append(str(emoji))
+    for item in reaction.old_reaction or []:
+        emoji = getattr(item, "emoji", None)
+        if emoji:
+            old_reaction_emoji.append(str(emoji))
     logger.info(
         "Получена reaction: chat_id=%s message_id=%s user_id=%s emoji=%s",
         reaction.chat.id,
@@ -1659,6 +2041,19 @@ async def reaction_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         reaction.user.id if reaction.user else None,
         ",".join(reaction_emoji) if reaction_emoji else "<non-emoji>",
     )
+    async with _FUNNY_SCAN_STATE_LOCK:
+        state = _load_funny_scan_state()
+        apply_reaction_delta(
+            state,
+            chat_id=reaction.chat.id,
+            message_id=reaction.message_id,
+            old_emojis=old_reaction_emoji,
+            new_emojis=reaction_emoji,
+            heart_emojis=FUNNY_SCAN_LEXICON.get("heart_emojis", []),
+            laugh_emojis=FUNNY_SCAN_LEXICON.get("laugh_emojis", []),
+        )
+        _save_funny_scan_state(state)
+
     rating = classify_reactions(reaction.new_reaction)
     if not rating:
         logger.info("Reaction проигнорирована: не funny/unfunny по правилам")
@@ -1783,6 +2178,7 @@ def _admin_main_keyboard(chat_id: int) -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton("облака ассоциаций", callback_data=f"adm:cloud_menu:{chat_id}"),
+                InlineKeyboardButton("смешные моменты", callback_data=f"adm:funny:menu:{chat_id}"),
             ],
             [
                 InlineKeyboardButton("редактировать промпт", callback_data=f"adm:input:system_prompt:{chat_id}"),
@@ -1794,6 +2190,165 @@ def _admin_main_keyboard(chat_id: int) -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton("обновить экран", callback_data=f"adm:root:{chat_id}"),
+            ],
+        ]
+    )
+
+
+def _funny_menu_keyboard(chat_id: int, settings: Dict[str, Any]) -> InlineKeyboardMarkup:
+    on_off_label = "выкл сканер" if settings.get("enabled") else "вкл сканер"
+    intensity = str(settings.get("intensity", "balanced"))
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(on_off_label, callback_data=f"adm:funny:toggle:{chat_id}"),
+                InlineKeyboardButton("сканировать сейчас", callback_data=f"adm:funny:scan_now:{chat_id}"),
+            ],
+            [
+                InlineKeyboardButton("источники", callback_data=f"adm:funny:sources:{chat_id}"),
+                InlineKeyboardButton("период", callback_data=f"adm:funny:period:{chat_id}"),
+            ],
+            [
+                InlineKeyboardButton(f"intensity: {intensity}", callback_data=f"adm:funny:intensity:{chat_id}"),
+                InlineKeyboardButton("порог", callback_data=f"adm:funny:threshold:{chat_id}"),
+            ],
+            [
+                InlineKeyboardButton("лимиты", callback_data=f"adm:funny:limits:{chat_id}"),
+                InlineKeyboardButton("бюджет", callback_data=f"adm:funny:budget:{chat_id}"),
+            ],
+            [
+                InlineKeyboardButton("кандидаты new", callback_data=f"adm:funny:list:{chat_id}"),
+                InlineKeyboardButton("назад", callback_data=f"adm:root:{chat_id}"),
+            ],
+        ]
+    )
+
+
+def _funny_sources_keyboard(chat_id: int, known_sources: List[Dict[str, Any]]) -> InlineKeyboardMarkup:
+    rows: List[List[InlineKeyboardButton]] = []
+    for source in known_sources[:24]:
+        cid = int(source.get("chat_id", 0))
+        title = str(source.get("title") or f"chat {cid}")
+        rows.append([InlineKeyboardButton(title[:32], callback_data=f"adm:funny:source_toggle:{cid}:{chat_id}")])
+    rows.append([InlineKeyboardButton("назад", callback_data=f"adm:funny:menu:{chat_id}")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _funny_candidates_keyboard(chat_id: int, candidates: List[Dict[str, Any]]) -> InlineKeyboardMarkup:
+    rows: List[List[InlineKeyboardButton]] = []
+    for item in candidates[:12]:
+        candidate_id = str(item.get("id") or "")
+        if not candidate_id:
+            continue
+        score = item.get("score")
+        if score is None:
+            score = item.get("pre_score")
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    f"{candidate_id} ({score})",
+                    callback_data=f"adm:funny:open:{candidate_id}",
+                )
+            ]
+        )
+    rows.append([InlineKeyboardButton("назад", callback_data=f"adm:funny:menu:{chat_id}")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _funny_preview_keyboard(chat_id: int, candidate_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("Одобрить", callback_data=f"adm:funny:approve:{candidate_id}"),
+                InlineKeyboardButton("Отклонить", callback_data=f"adm:funny:reject:{candidate_id}"),
+            ],
+            [
+                InlineKeyboardButton("Повторить forward", callback_data=f"adm:funny:retry:{candidate_id}"),
+                InlineKeyboardButton("кандидаты", callback_data=f"adm:funny:list:{chat_id}"),
+            ],
+            [InlineKeyboardButton("назад", callback_data=f"adm:funny:menu:{chat_id}")],
+        ]
+    )
+
+
+def _funny_period_keyboard(chat_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("6ч", callback_data=f"adm:funny:period_set:6:{chat_id}"),
+                InlineKeyboardButton("24ч", callback_data=f"adm:funny:period_set:24:{chat_id}"),
+                InlineKeyboardButton("3д", callback_data=f"adm:funny:period_set:72:{chat_id}"),
+                InlineKeyboardButton("7д", callback_data=f"adm:funny:period_set:168:{chat_id}"),
+            ],
+            [
+                InlineKeyboardButton("ввести вручную", callback_data=f"adm:input:funny_period:{chat_id}"),
+                InlineKeyboardButton("назад", callback_data=f"adm:funny:menu:{chat_id}"),
+            ],
+        ]
+    )
+
+
+def _funny_intensity_keyboard(chat_id: int, active: str) -> InlineKeyboardMarkup:
+    rows: List[List[InlineKeyboardButton]] = []
+    line: List[InlineKeyboardButton] = []
+    for mode in ("cheap", "balanced", "deep"):
+        marker = "● " if mode == active else ""
+        line.append(InlineKeyboardButton(f"{marker}{mode}", callback_data=f"adm:funny:intensity_set:{mode}:{chat_id}"))
+    rows.append(line)
+    rows.append([InlineKeyboardButton("назад", callback_data=f"adm:funny:menu:{chat_id}")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _funny_threshold_keyboard(chat_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("60", callback_data=f"adm:funny:threshold_set:60:{chat_id}"),
+                InlineKeyboardButton("70", callback_data=f"adm:funny:threshold_set:70:{chat_id}"),
+                InlineKeyboardButton("80", callback_data=f"adm:funny:threshold_set:80:{chat_id}"),
+            ],
+            [
+                InlineKeyboardButton("ввести вручную", callback_data=f"adm:input:funny_threshold:{chat_id}"),
+                InlineKeyboardButton("назад", callback_data=f"adm:funny:menu:{chat_id}"),
+            ],
+        ]
+    )
+
+
+def _funny_limits_keyboard(chat_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("cand=20", callback_data=f"adm:funny:limit_set:max_candidates_per_scan:20:{chat_id}"),
+                InlineKeyboardButton("cand=30", callback_data=f"adm:funny:limit_set:max_candidates_per_scan:30:{chat_id}"),
+                InlineKeyboardButton("cand=45", callback_data=f"adm:funny:limit_set:max_candidates_per_scan:45:{chat_id}"),
+            ],
+            [
+                InlineKeyboardButton("llm=6", callback_data=f"adm:funny:limit_set:max_llm_candidates_per_scan:6:{chat_id}"),
+                InlineKeyboardButton("llm=12", callback_data=f"adm:funny:limit_set:max_llm_candidates_per_scan:12:{chat_id}"),
+                InlineKeyboardButton("llm=18", callback_data=f"adm:funny:limit_set:max_llm_candidates_per_scan:18:{chat_id}"),
+            ],
+            [
+                InlineKeyboardButton("fwd/day=10", callback_data=f"adm:funny:limit_set:daily_forward_limit:10:{chat_id}"),
+                InlineKeyboardButton("fwd/day=20", callback_data=f"adm:funny:limit_set:daily_forward_limit:20:{chat_id}"),
+                InlineKeyboardButton("fwd/day=40", callback_data=f"adm:funny:limit_set:daily_forward_limit:40:{chat_id}"),
+            ],
+            [InlineKeyboardButton("назад", callback_data=f"adm:funny:menu:{chat_id}")],
+        ]
+    )
+
+
+def _funny_budget_keyboard(chat_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("30k", callback_data=f"adm:funny:budget_set:30000:{chat_id}"),
+                InlineKeyboardButton("50k", callback_data=f"adm:funny:budget_set:50000:{chat_id}"),
+                InlineKeyboardButton("80k", callback_data=f"adm:funny:budget_set:80000:{chat_id}"),
+            ],
+            [
+                InlineKeyboardButton("ввести вручную", callback_data=f"adm:input:funny_budget:{chat_id}"),
+                InlineKeyboardButton("назад", callback_data=f"adm:funny:menu:{chat_id}"),
             ],
         ]
     )
@@ -1890,11 +2445,15 @@ def _format_admin_status(memory: Dict[str, Any], chat_id: int) -> str:
     participants_cnt = len(chat_mem.get("participants", {}))
     relations_cnt = len(chat_mem.get("user_relations", {}))
     topic_edges_cnt = len(chat_mem.get("topic_edges", {}))
+    funny_settings = _get_funny_scan_settings(memory)
+    funny_state = _load_funny_scan_state()
+    funny_new = len(list_candidates(funny_state, status=STATUS_NEW, limit=9999))
     return (
         "админ панель тимура\n"
         f"чат: {chat_id}\n"
         f"режим: {get_active_mode(memory)}\n"
         f"вредность: {get_toxicity_level(memory)}/100\n"
+        f"scanner: {'on' if funny_settings.get('enabled') else 'off'} | new={funny_new}\n"
         f"персонажей в памяти: {participants_cnt}\n"
         f"связей user-user: {relations_cnt}\n"
         f"ребер облака тем: {topic_edges_cnt}"
@@ -2157,6 +2716,117 @@ async def _run_git_pull() -> str:
         return f"ошибка обновления: {e}"
 
 
+def _resolve_funny_chat_id_from_candidate(candidate: Dict[str, Any], fallback_chat_id: int) -> int:
+    source_chat_id = int(candidate.get("source_chat_id", 0))
+    if source_chat_id:
+        return source_chat_id
+    return int(fallback_chat_id)
+
+
+def _safe_int(raw: Any) -> int | None:
+    try:
+        return int(raw)
+    except Exception:
+        return None
+
+
+def _forward_lock_for(candidate_id: str) -> asyncio.Lock:
+    key = str(candidate_id or "")
+    lock = _FUNNY_FORWARD_LOCKS.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _FUNNY_FORWARD_LOCKS[key] = lock
+    return lock
+
+
+async def _forward_funny_candidate(
+    *,
+    bot: Any,
+    settings: Dict[str, Any],
+    candidate_id: str,
+    action: str = "approve",
+) -> Tuple[bool, str]:
+    async with _forward_lock_for(candidate_id):
+        async with _FUNNY_SCAN_STATE_LOCK:
+            state = _load_funny_scan_state()
+            candidate = get_candidate(state, candidate_id)
+            if not candidate:
+                return False, "кандидат не найден"
+
+            status = str(candidate.get("status"))
+            if status == STATUS_SENT:
+                return False, "кандидат уже отправлен"
+            if action == "retry" and status != STATUS_APPROVED:
+                return False, "retry доступен только для approved кандидатов после ошибки forward"
+
+            ensure_budget_day(state)
+            budget = state.get("budget", {})
+            forward_limit = int(settings.get("daily_forward_limit", 20))
+            sent = int(budget.get("forwards_sent", 0))
+            pending = int(budget.get("pending_forwards", 0))
+            if sent + pending >= forward_limit:
+                return False, f"достигнут дневной лимит forward ({forward_limit})"
+
+            source_chat_id = int(candidate.get("source_chat_id", 0))
+            owner_chat_id = int(settings.get("owner_dm_chat_id", OWNER_ID))
+            message_ids = [int(x) for x in (candidate.get("message_ids") or []) if int(x) > 0]
+            if not source_chat_id or not message_ids:
+                return False, "в кандидате нет source_chat_id/message_ids"
+            budget["pending_forwards"] = max(0, pending + 1)
+            set_candidate_status(state, candidate_id, STATUS_APPROVED, forward_error=None)
+            _save_funny_scan_state(state)
+
+        try:
+            await bot.forward_messages(
+                chat_id=owner_chat_id,
+                from_chat_id=source_chat_id,
+                message_ids=message_ids,
+            )
+        except Exception as e:
+            async with _FUNNY_SCAN_STATE_LOCK:
+                state = _load_funny_scan_state()
+                ensure_budget_day(state)
+                budget = state.get("budget", {})
+                budget["pending_forwards"] = max(0, int(budget.get("pending_forwards", 0)) - 1)
+                set_candidate_status(state, candidate_id, STATUS_APPROVED, forward_error=str(e))
+                _save_funny_scan_state(state)
+            return False, f"forward failed: {e}"
+
+        async with _FUNNY_SCAN_STATE_LOCK:
+            state = _load_funny_scan_state()
+            ensure_budget_day(state)
+            budget = state.get("budget", {})
+            budget["pending_forwards"] = max(0, int(budget.get("pending_forwards", 0)) - 1)
+            candidate = get_candidate(state, candidate_id)
+            if not candidate:
+                _save_funny_scan_state(state)
+                return False, "кандидат не найден после forward"
+            if str(candidate.get("status")) == STATUS_SENT:
+                _save_funny_scan_state(state)
+                return True, "forward уже был отправлен"
+            set_candidate_status(state, candidate_id, STATUS_SENT, forward_error=None)
+            register_forward_usage(state)
+            _save_funny_scan_state(state)
+        return True, "forward выполнен"
+
+
+async def _reject_funny_candidate(candidate_id: str) -> Tuple[bool, str]:
+    async with _forward_lock_for(candidate_id):
+        async with _FUNNY_SCAN_STATE_LOCK:
+            state = _load_funny_scan_state()
+            candidate = get_candidate(state, candidate_id)
+            if not candidate:
+                return False, "кандидат не найден"
+            status = str(candidate.get("status"))
+            if status == STATUS_SENT:
+                return False, "кандидат уже отправлен"
+            if status == STATUS_REJECTED:
+                return True, "кандидат уже отклонен"
+            set_candidate_status(state, candidate_id, STATUS_REJECTED, forward_error=None)
+            _save_funny_scan_state(state)
+        return True, "кандидат отклонен"
+
+
 async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     del context
     if not _is_owner(update):
@@ -2166,6 +2836,10 @@ async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     memory = load_memory()
     chat_id = message.chat_id
+    settings = _get_funny_scan_settings(memory)
+    if not any(int(item.get("chat_id", 0)) == int(chat_id) for item in settings.get("sources", []) if isinstance(item, dict)):
+        upsert_source(settings, chat_id, title=f"chat {chat_id}", enabled=False)
+        save_memory(memory)
     await message.reply_text(
         _format_admin_status(memory, chat_id),
         reply_markup=_admin_main_keyboard(chat_id),
@@ -2272,6 +2946,34 @@ async def _handle_admin_pending_text(
         await message.reply_text(f"кастомный текст для режима {mode} обновлен")
         return True
 
+    if action in {"funny_period", "funny_threshold", "funny_budget"}:
+        try:
+            value = int(text.strip())
+        except ValueError:
+            await message.reply_text("нужно целое число или /cancel")
+            return True
+        settings = _get_funny_scan_settings(memory)
+        if action == "funny_period":
+            settings["scan_period_hours"] = max(1, min(24 * 30, value))
+            reply = f"scan period обновлен: {settings['scan_period_hours']}h"
+        elif action == "funny_threshold":
+            settings["review_threshold"] = max(0, min(100, value))
+            reply = f"review threshold обновлен: {settings['review_threshold']}"
+        else:
+            settings["daily_token_budget"] = max(1000, min(10_000_000, value))
+            settings["daily_token_hard_stop"] = max(
+                settings["daily_token_budget"],
+                int(settings.get("daily_token_hard_stop", settings["daily_token_budget"])),
+            )
+            reply = (
+                f"token budget обновлен: {settings['daily_token_budget']} "
+                f"(hard stop={settings['daily_token_hard_stop']})"
+            )
+        save_memory(memory)
+        _clear_admin_pending(context)
+        await message.reply_text(reply)
+        return True
+
     _clear_admin_pending(context)
     await message.reply_text("неизвестное действие, сбросил ожидание")
     return True
@@ -2294,6 +2996,297 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
 
     action = parts[1]
     await query.answer()
+
+    if action == "funny":
+        sub = parts[2] if len(parts) >= 3 else "menu"
+        settings = _get_funny_scan_settings(memory)
+        state = _load_funny_scan_state()
+
+        def _chat_id_fallback() -> int:
+            if query.message:
+                return int(query.message.chat_id)
+            return int(update.effective_chat.id if update.effective_chat else OWNER_ID)
+
+        def _part_int(index: int) -> int | None:
+            if len(parts) <= index:
+                return None
+            return _safe_int(parts[index])
+
+        if sub == "menu":
+            parsed_chat_id = _part_int(3)
+            chat_id = parsed_chat_id if parsed_chat_id is not None else _chat_id_fallback()
+            await query.edit_message_text(
+                format_funny_status(settings, state),
+                reply_markup=_funny_menu_keyboard(chat_id, settings),
+            )
+            return
+
+        if sub == "toggle":
+            parsed_chat_id = _part_int(3)
+            chat_id = parsed_chat_id if parsed_chat_id is not None else _chat_id_fallback()
+            settings["enabled"] = not bool(settings.get("enabled", False))
+            save_memory(memory)
+            await query.edit_message_text(
+                format_funny_status(settings, state),
+                reply_markup=_funny_menu_keyboard(chat_id, settings),
+            )
+            return
+
+        if sub == "sources":
+            parsed_chat_id = _part_int(3)
+            chat_id = parsed_chat_id if parsed_chat_id is not None else _chat_id_fallback()
+            known_sources = _known_scan_sources(memory, settings)
+            await query.edit_message_text(
+                format_funny_sources(settings, known_sources=known_sources),
+                reply_markup=_funny_sources_keyboard(chat_id, known_sources),
+            )
+            return
+
+        if sub == "source_toggle" and len(parts) >= 5:
+            source_chat_id = _part_int(3)
+            chat_id = _part_int(4)
+            if source_chat_id is None or chat_id is None:
+                await query.answer("битый callback", show_alert=True)
+                return
+            known_by_id = {int(item["chat_id"]): item for item in _known_scan_sources(memory, settings)}
+            if source_chat_id not in {int(s.get("chat_id", 0)) for s in settings.get("sources", []) if isinstance(s, dict)}:
+                title = str(known_by_id.get(source_chat_id, {}).get("title") or f"chat {source_chat_id}")
+                upsert_source(settings, source_chat_id, title=title, enabled=True)
+            else:
+                toggle_source(settings, source_chat_id)
+            save_memory(memory)
+            known_sources = _known_scan_sources(memory, settings)
+            await query.edit_message_text(
+                format_funny_sources(settings, known_sources=known_sources),
+                reply_markup=_funny_sources_keyboard(chat_id, known_sources),
+            )
+            return
+
+        if sub == "period":
+            parsed_chat_id = _part_int(3)
+            chat_id = parsed_chat_id if parsed_chat_id is not None else _chat_id_fallback()
+            await query.edit_message_text(
+                f"период анализа сейчас: {settings.get('scan_period_hours', 24)}h",
+                reply_markup=_funny_period_keyboard(chat_id),
+            )
+            return
+
+        if sub == "period_set" and len(parts) >= 5:
+            parsed_hours = _part_int(3)
+            chat_id = _part_int(4)
+            if parsed_hours is None or chat_id is None:
+                await query.answer("битый callback", show_alert=True)
+                return
+            hours = max(1, min(24 * 30, parsed_hours))
+            settings["scan_period_hours"] = hours
+            save_memory(memory)
+            await query.edit_message_text(
+                f"период анализа обновлен: {hours}h",
+                reply_markup=_funny_period_keyboard(chat_id),
+            )
+            return
+
+        if sub == "intensity":
+            parsed_chat_id = _part_int(3)
+            chat_id = parsed_chat_id if parsed_chat_id is not None else _chat_id_fallback()
+            await query.edit_message_text(
+                f"intensity сейчас: {settings.get('intensity', 'balanced')}",
+                reply_markup=_funny_intensity_keyboard(chat_id, str(settings.get("intensity", "balanced"))),
+            )
+            return
+
+        if sub == "intensity_set" and len(parts) >= 5:
+            intensity = str(parts[3])
+            chat_id = _part_int(4)
+            if chat_id is None:
+                await query.answer("битый callback", show_alert=True)
+                return
+            if intensity not in {"cheap", "balanced", "deep"}:
+                await query.answer("неизвестный intensity", show_alert=True)
+                return
+            apply_intensity_profile(settings, intensity)
+            save_memory(memory)
+            await query.edit_message_text(
+                format_funny_status(settings, state),
+                reply_markup=_funny_menu_keyboard(chat_id, settings),
+            )
+            return
+
+        if sub == "threshold":
+            parsed_chat_id = _part_int(3)
+            chat_id = parsed_chat_id if parsed_chat_id is not None else _chat_id_fallback()
+            await query.edit_message_text(
+                f"review threshold сейчас: {settings.get('review_threshold', 70)}",
+                reply_markup=_funny_threshold_keyboard(chat_id),
+            )
+            return
+
+        if sub == "threshold_set" and len(parts) >= 5:
+            parsed_value = _part_int(3)
+            chat_id = _part_int(4)
+            if parsed_value is None or chat_id is None:
+                await query.answer("битый callback", show_alert=True)
+                return
+            value = max(0, min(100, parsed_value))
+            settings["review_threshold"] = value
+            save_memory(memory)
+            await query.edit_message_text(
+                f"review threshold обновлен: {value}",
+                reply_markup=_funny_threshold_keyboard(chat_id),
+            )
+            return
+
+        if sub == "limits":
+            parsed_chat_id = _part_int(3)
+            chat_id = parsed_chat_id if parsed_chat_id is not None else _chat_id_fallback()
+            await query.edit_message_text(
+                (
+                    "текущие лимиты:\n"
+                    f"- max_candidates_per_scan={settings.get('max_candidates_per_scan', 30)}\n"
+                    f"- max_llm_candidates_per_scan={settings.get('max_llm_candidates_per_scan', 12)}\n"
+                    f"- daily_forward_limit={settings.get('daily_forward_limit', 20)}"
+                ),
+                reply_markup=_funny_limits_keyboard(chat_id),
+            )
+            return
+
+        if sub == "limit_set" and len(parts) >= 6:
+            field = str(parts[3])
+            value = _part_int(4)
+            chat_id = _part_int(5)
+            if value is None or chat_id is None:
+                await query.answer("битый callback", show_alert=True)
+                return
+            if field not in {"max_candidates_per_scan", "max_llm_candidates_per_scan", "daily_forward_limit"}:
+                await query.answer("неизвестный лимит", show_alert=True)
+                return
+            if field == "max_candidates_per_scan":
+                settings[field] = max(1, min(300, value))
+            elif field == "max_llm_candidates_per_scan":
+                settings[field] = max(1, min(100, value))
+            else:
+                settings[field] = max(1, min(500, value))
+            save_memory(memory)
+            await query.edit_message_text(
+                (
+                    "лимиты обновлены:\n"
+                    f"- max_candidates_per_scan={settings.get('max_candidates_per_scan')}\n"
+                    f"- max_llm_candidates_per_scan={settings.get('max_llm_candidates_per_scan')}\n"
+                    f"- daily_forward_limit={settings.get('daily_forward_limit')}"
+                ),
+                reply_markup=_funny_limits_keyboard(chat_id),
+            )
+            return
+
+        if sub == "budget":
+            parsed_chat_id = _part_int(3)
+            chat_id = parsed_chat_id if parsed_chat_id is not None else _chat_id_fallback()
+            await query.edit_message_text(
+                (
+                    "токен-бюджет:\n"
+                    f"- daily_token_budget={settings.get('daily_token_budget', 50000)}\n"
+                    f"- daily_token_hard_stop={settings.get('daily_token_hard_stop', 55000)}\n"
+                    f"- today used={state.get('budget', {}).get('tokens_used', 0)}"
+                ),
+                reply_markup=_funny_budget_keyboard(chat_id),
+            )
+            return
+
+        if sub == "budget_set" and len(parts) >= 5:
+            parsed_value = _part_int(3)
+            chat_id = _part_int(4)
+            if parsed_value is None or chat_id is None:
+                await query.answer("битый callback", show_alert=True)
+                return
+            value = max(1000, min(10_000_000, parsed_value))
+            settings["daily_token_budget"] = value
+            settings["daily_token_hard_stop"] = max(int(settings.get("daily_token_hard_stop", value)), value)
+            save_memory(memory)
+            await query.edit_message_text(
+                f"daily_token_budget обновлен: {value}",
+                reply_markup=_funny_budget_keyboard(chat_id),
+            )
+            return
+
+        if sub == "scan_now":
+            parsed_chat_id = _part_int(3)
+            chat_id = parsed_chat_id if parsed_chat_id is not None else _chat_id_fallback()
+            await query.edit_message_text("сканирую сейчас, подожди пару секунд...")
+            summary = await _run_funny_scan_once(context.application, trigger="manual")
+            async with _FUNNY_SCAN_STATE_LOCK:
+                state = _load_funny_scan_state()
+            text = format_funny_status(settings, state) + "\n\n" + (
+                f"scan result: sources={summary.get('sources', 0)}, stage1={summary.get('stage1_candidates', 0)}, "
+                f"llm={summary.get('llm_calls', 0)}, created={summary.get('created', 0)}, previewed={summary.get('previewed', 0)}"
+            )
+            await query.edit_message_text(text, reply_markup=_funny_menu_keyboard(chat_id, settings))
+            return
+
+        if sub == "list":
+            parsed_chat_id = _part_int(3)
+            chat_id = parsed_chat_id if parsed_chat_id is not None else _chat_id_fallback()
+            items = list_candidates(state, status=STATUS_NEW, limit=20)
+            await query.edit_message_text(
+                format_funny_candidates_list(items),
+                reply_markup=_funny_candidates_keyboard(chat_id, items),
+            )
+            return
+
+        if sub == "open" and len(parts) >= 4:
+            candidate_id = str(parts[3])
+            candidate = get_candidate(state, candidate_id)
+            if not candidate:
+                await query.answer("кандидат не найден", show_alert=True)
+                return
+            chat_id = _resolve_funny_chat_id_from_candidate(candidate, _chat_id_fallback())
+            await query.edit_message_text(
+                format_funny_candidate_preview(candidate),
+                reply_markup=_funny_preview_keyboard(chat_id, candidate_id),
+            )
+            return
+
+        if sub in {"approve", "reject", "retry"} and len(parts) >= 4:
+            candidate_id = str(parts[3])
+            async with _FUNNY_SCAN_STATE_LOCK:
+                state = _load_funny_scan_state()
+                candidate = get_candidate(state, candidate_id)
+            if not candidate:
+                await query.answer("кандидат не найден", show_alert=True)
+                return
+            chat_id = _resolve_funny_chat_id_from_candidate(candidate, _chat_id_fallback())
+            if sub == "reject":
+                ok, message_text = await _reject_funny_candidate(candidate_id)
+                async with _FUNNY_SCAN_STATE_LOCK:
+                    state = _load_funny_scan_state()
+                    candidate = get_candidate(state, candidate_id) or candidate
+                await query.edit_message_text(
+                    (format_funny_candidate_preview(candidate) + "\n\n" + message_text)[:3900],
+                    reply_markup=_funny_preview_keyboard(chat_id, candidate_id),
+                )
+                if not ok:
+                    await query.answer(message_text, show_alert=True)
+                return
+
+            ok, message_text = await _forward_funny_candidate(
+                bot=context.bot,
+                settings=settings,
+                candidate_id=candidate_id,
+                action=sub,
+            )
+            async with _FUNNY_SCAN_STATE_LOCK:
+                state = _load_funny_scan_state()
+                candidate = get_candidate(state, candidate_id) or candidate
+            text = format_funny_candidate_preview(candidate) + "\n\n" + message_text
+            await query.edit_message_text(
+                text[:3900],
+                reply_markup=_funny_preview_keyboard(chat_id, candidate_id),
+            )
+            if ok:
+                await query.answer("отправил форвард в личку")
+            return
+
+        await query.answer("непонятная funny-команда", show_alert=True)
+        return
 
     if action == "root":
         chat_id = int(parts[2])
@@ -2404,18 +3397,22 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
             return
 
         chat_id = int(parts[3]) if len(parts) >= 4 else query.message.chat_id
-        if input_kind in {"system_prompt", "style", "bio", "heat"}:
+        if input_kind in {"system_prompt", "style", "bio", "heat", "funny_period", "funny_threshold", "funny_budget"}:
             _set_admin_pending(context, {"action": input_kind})
             hints = {
                 "system_prompt": "пришли новый system prompt одним сообщением",
                 "style": "пришли новый style settings одним сообщением",
                 "bio": "пришли новое био тимура одним сообщением",
                 "heat": "пришли число 0..100",
+                "funny_period": "пришли период сканирования в часах (например 24)",
+                "funny_threshold": "пришли review threshold 0..100",
+                "funny_budget": "пришли daily token budget (например 50000)",
             }
+            back_target = f"adm:funny:menu:{chat_id}" if input_kind.startswith("funny_") else f"adm:root:{chat_id}"
             await query.edit_message_text(
                 hints[input_kind] + "\n/cancel чтобы отменить",
                 reply_markup=InlineKeyboardMarkup(
-                    [[InlineKeyboardButton("назад", callback_data=f"adm:root:{chat_id}")]]
+                    [[InlineKeyboardButton("назад", callback_data=back_target)]]
                 ),
             )
             return

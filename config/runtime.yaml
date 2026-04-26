@@ -28,3 +28,38 @@ probabilities:
   mem_reply_chance: 0.08
   photo_random_reply_chance: 0.22
   voice_reply_chance: 0.015
+
+funny_scan:
+  enabled: false
+  scan_period_hours: 24
+  scan_schedule_minutes: 60
+  intensity: "balanced"
+  stage1_min_score: 42
+  review_threshold: 70
+  max_candidates_per_scan: 30
+  max_llm_candidates_per_scan: 12
+  daily_token_budget: 50000
+  daily_token_hard_stop: 55000
+  daily_forward_limit: 20
+  llm_model: "gpt-4o-mini"
+  llm_max_context_messages: 12
+  llm_max_chars_per_message: 220
+  intensity_profiles:
+    cheap:
+      stage1_min_score: 50
+      review_threshold: 78
+      max_candidates_per_scan: 20
+      max_llm_candidates_per_scan: 6
+      llm_max_context_messages: 8
+    balanced:
+      stage1_min_score: 42
+      review_threshold: 70
+      max_candidates_per_scan: 30
+      max_llm_candidates_per_scan: 12
+      llm_max_context_messages: 12
+    deep:
+      stage1_min_score: 35
+      review_threshold: 64
+      max_candidates_per_scan: 45
+      max_llm_candidates_per_scan: 18
+      llm_max_context_messages: 14

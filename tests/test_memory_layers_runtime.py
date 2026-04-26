@@ -72,6 +72,11 @@ def test_default_memory_contains_life_config() -> None:
     assert life["daily_target"] == 3
     assert life["timezone"] == "Europe/Moscow"
 
+    funny_scan = memory["config"]["funny_scan"]
+    assert funny_scan["enabled"] is False
+    assert funny_scan["intensity"] == "balanced"
+    assert funny_scan["scan_period_hours"] == 24
+
 
 def test_toxicity_fallback_uses_persona_default() -> None:
     memory = runtime.default_memory()

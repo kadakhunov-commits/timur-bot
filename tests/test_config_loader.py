@@ -33,6 +33,8 @@ defaults:
     assert cfg.default_active_mode == "default"
     assert cfg.text_model == "gpt-4o-mini"
     assert cfg.openai_base_url == ""
+    assert cfg.funny_scan_defaults["review_threshold"] == 70
+    assert "laugh_markers" in cfg.funny_scan_lexicon
 
 
 def test_load_config_fail_fast_on_broken_yaml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
