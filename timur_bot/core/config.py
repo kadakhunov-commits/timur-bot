@@ -59,6 +59,8 @@ class AppConfig:
     default_bio: str
     default_toxicity_level: int
     default_active_mode: str
+    funny_scan_defaults: Dict[str, Any]
+    funny_scan_lexicon: Dict[str, Any]
 
 
 def _read_yaml(path: Path) -> Dict[str, Any]:
@@ -82,6 +84,100 @@ def _coerce_set(items: Any, key: str) -> Set[str]:
     return {str(x).strip() for x in items if str(x).strip()}
 
 
+def _coerce_str_list(items: Any) -> List[str]:
+    if not isinstance(items, list):
+        return []
+    return [str(x).strip() for x in items if str(x).strip()]
+
+
+def _normalize_funny_scan_defaults(raw: Any) -> Dict[str, Any]:
+    data = raw if isinstance(raw, dict) else {}
+    intensity_profiles_raw = data.get("intensity_profiles") if isinstance(data.get("intensity_profiles"), dict) else {}
+    default_profiles = {
+        "cheap": {
+            "stage1_min_score": 50,
+            "review_threshold": 78,
+            "max_candidates_per_scan": 20,
+            "max_llm_candidates_per_scan": 6,
+            "llm_max_context_messages": 8,
+        },
+        "balanced": {
+            "stage1_min_score": 42,
+            "review_threshold": 70,
+            "max_candidates_per_scan": 30,
+            "max_llm_candidates_per_scan": 12,
+            "llm_max_context_messages": 12,
+        },
+        "deep": {
+            "stage1_min_score": 35,
+            "review_threshold": 64,
+            "max_candidates_per_scan": 45,
+            "max_llm_candidates_per_scan": 18,
+            "llm_max_context_messages": 14,
+        },
+    }
+    profiles: Dict[str, Dict[str, int]] = {}
+    for mode, mode_defaults in default_profiles.items():
+        source = intensity_profiles_raw.get(mode) if isinstance(intensity_profiles_raw.get(mode), dict) else {}
+        profiles[mode] = {
+            "stage1_min_score": int(source.get("stage1_min_score", mode_defaults["stage1_min_score"])),
+            "review_threshold": int(source.get("review_threshold", mode_defaults["review_threshold"])),
+            "max_candidates_per_scan": int(source.get("max_candidates_per_scan", mode_defaults["max_candidates_per_scan"])),
+            "max_llm_candidates_per_scan": int(
+                source.get("max_llm_candidates_per_scan", mode_defaults["max_llm_candidates_per_scan"])
+            ),
+            "llm_max_context_messages": int(
+                source.get("llm_max_context_messages", mode_defaults["llm_max_context_messages"])
+            ),
+        }
+    return {
+        "enabled": bool(data.get("enabled", False)),
+        "scan_period_hours": int(data.get("scan_period_hours", 24)),
+        "scan_schedule_minutes": int(data.get("scan_schedule_minutes", 60)),
+        "intensity": str(data.get("intensity", "balanced")),
+        "stage1_min_score": int(data.get("stage1_min_score", 42)),
+        "review_threshold": int(data.get("review_threshold", 70)),
+        "max_candidates_per_scan": int(data.get("max_candidates_per_scan", 30)),
+        "max_llm_candidates_per_scan": int(data.get("max_llm_candidates_per_scan", 12)),
+        "daily_token_budget": int(data.get("daily_token_budget", 50000)),
+        "daily_token_hard_stop": int(data.get("daily_token_hard_stop", 55000)),
+        "daily_forward_limit": int(data.get("daily_forward_limit", 20)),
+        "llm_model": str(data.get("llm_model", "gpt-4o-mini")),
+        "llm_max_context_messages": int(data.get("llm_max_context_messages", 12)),
+        "llm_max_chars_per_message": int(data.get("llm_max_chars_per_message", 220)),
+        "intensity_profiles": profiles,
+    }
+
+
+def _normalize_funny_scan_lexicon(raw: Any) -> Dict[str, Any]:
+    data = raw if isinstance(raw, dict) else {}
+    reaction_weights_raw = data.get("reaction_weights") if isinstance(data.get("reaction_weights"), dict) else {}
+    return {
+        "laugh_markers": _coerce_str_list(data.get("laugh_markers"))
+        or ["лол", "ахах", "ахаха", "хаха", "пхаха", "ор", "ору", "ржака", "вынесло", "угар"],
+        "habitual_laugh_markers": _coerce_str_list(data.get("habitual_laugh_markers"))
+        or ["ахах", "ахаха", "хаха", "лол"],
+        "sarcasm_markers": _coerce_str_list(data.get("sarcasm_markers"))
+        or ["ага", "ну да", "конечно", "смешно", "ирония", "сарказм"],
+        "toxicity_markers": _coerce_str_list(data.get("toxicity_markers"))
+        or ["сук", "бля", "хуй", "пизд", "еб", "идиот", "дебил"],
+        "noise_markers": _coerce_str_list(data.get("noise_markers")) or ["кринж", "жесть", "мда"],
+        "heart_emojis": _coerce_str_list(data.get("heart_emojis")) or ["❤", "❤️", "💘", "💖", "💗", "💓", "💞", "💕"],
+        "laugh_emojis": _coerce_str_list(data.get("laugh_emojis")) or ["😂", "🤣", "😹", "😆"],
+        "reaction_weights": {
+            "total": float(reaction_weights_raw.get("total", 0.35)),
+            "heart": float(reaction_weights_raw.get("heart", 1.4)),
+            "laugh": float(reaction_weights_raw.get("laugh", 1.2)),
+        },
+        "pure_laugh_pattern": str(
+            data.get(
+                "pure_laugh_pattern",
+                r"^(?:[!?.\s,;:()\-]*)(?:л+о+л+|а?ха(?:ха)+|пхаха+|ору+|кек+)(?:[!?.\s,;:()\-]*)$",
+            )
+        ),
+    }
+
+
 def load_app_config(base_dir: Path | None = None) -> AppConfig:
     root = (base_dir or Path(__file__).resolve().parents[2]).resolve()
     load_dotenv(root / ".env")
@@ -97,6 +193,8 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
     miniapp_url = os.getenv("MINIAPP_URL", "").strip()
     openai_text_model = os.getenv("OPENAI_TEXT_MODEL", "").strip()
     openai_vision_model = os.getenv("OPENAI_VISION_MODEL", "").strip()
+    memory_path_env = os.getenv("MEMORY_PATH", "").strip()
+    billing_path_env = os.getenv("BILLING_PATH", "").strip()
     if not telegram_bot_token:
         raise ConfigError("TELEGRAM_BOT_TOKEN not set in .env")
     if not openai_api_key:
@@ -117,6 +215,8 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
     limits = runtime.get("limits") or {}
     probs = runtime.get("probabilities") or {}
     models = runtime.get("models") or {}
+    funny_scan_defaults = _normalize_funny_scan_defaults(runtime.get("funny_scan"))
+    funny_scan_lexicon = _normalize_funny_scan_lexicon(lexicon.get("funny_scan_lexicon"))
 
     active_mode = str(defaults.get("active_mode", "default"))
     if active_mode not in modes:
@@ -174,4 +274,6 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
         default_bio=str(defaults.get("bio", "")),
         default_toxicity_level=int(defaults.get("toxicity_level", 45)),
         default_active_mode=active_mode,
+        funny_scan_defaults=funny_scan_defaults,
+        funny_scan_lexicon=funny_scan_lexicon,
     )
