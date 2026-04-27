@@ -1,5 +1,6 @@
 import asyncio
 import os
+from datetime import datetime
 from types import SimpleNamespace
 
 os.environ.setdefault("TELEGRAM_BOT_TOKEN", "test-token")
@@ -43,11 +44,12 @@ def test_adaptive_settings_tighten_after_80_percent_budget() -> None:
 
 
 def test_scan_dedupes_before_llm_call(monkeypatch) -> None:
+    now_ts = datetime.utcnow().isoformat()
     memory = runtime.default_memory()
     settings = runtime._get_funny_scan_settings(memory)
     settings["sources"] = [{"chat_id": -1001, "title": "chat", "enabled": True}]
     memory["chats"]["-1001"] = {
-        "history": [{"message_id": 42, "user_id": 1, "name": "u1", "text": "x", "ts": "2026-04-26T10:00:00"}]
+        "history": [{"message_id": 42, "user_id": 1, "name": "u1", "text": "x", "ts": now_ts}]
     }
     state = default_funny_scan_state()
     existing = {
@@ -67,8 +69,8 @@ def test_scan_dedupes_before_llm_call(monkeypatch) -> None:
         "source_chat_id": -1001,
         "source_chat_title": "chat",
         "anchor_message_id": 42,
-        "time_start": "2026-04-26T10:00:00",
-        "time_end": "2026-04-26T10:00:00",
+        "time_start": now_ts,
+        "time_end": now_ts,
         "message_ids": [42],
         "cluster_messages": [],
         "pre_score": 55,
@@ -122,19 +124,20 @@ def test_candidate_signature_stays_stable_after_boundary_change() -> None:
 
 
 def test_scan_does_not_hold_state_lock_during_llm_call(monkeypatch) -> None:
+    now_ts = datetime.utcnow().isoformat()
     memory = runtime.default_memory()
     settings = runtime._get_funny_scan_settings(memory)
     settings["sources"] = [{"chat_id": -1001, "title": "chat", "enabled": True}]
     memory["chats"]["-1001"] = {
-        "history": [{"message_id": 42, "user_id": 1, "name": "u1", "text": "x", "ts": "2026-04-26T10:00:00"}]
+        "history": [{"message_id": 42, "user_id": 1, "name": "u1", "text": "x", "ts": now_ts}]
     }
     state = default_funny_scan_state()
     stage1 = {
         "source_chat_id": -1001,
         "source_chat_title": "chat",
         "anchor_message_id": 42,
-        "time_start": "2026-04-26T10:00:00",
-        "time_end": "2026-04-26T10:00:00",
+        "time_start": now_ts,
+        "time_end": now_ts,
         "message_ids": [42],
         "cluster_messages": [],
         "pre_score": 55,
