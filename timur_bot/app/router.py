@@ -1,6 +1,12 @@
 from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler, MessageReactionHandler, filters
 
-from timur_bot.handlers.admin import admin_callback_handler, admin_cmd, miniapp_cmd, web_app_data_handler
+from timur_bot.handlers.admin import (
+    admin_callback_handler,
+    admin_cmd,
+    miniapp_cmd,
+    miniappdebug_cmd,
+    web_app_data_handler,
+)
 from timur_bot.handlers.billing import (
     billabuse_cmd,
     billhelp_cmd,
@@ -40,6 +46,7 @@ def register_handlers(application) -> None:
     application.add_handler(CommandHandler("admin", admin_cmd))
     application.add_handler(CommandHandler("panel", admin_cmd))
     application.add_handler(CommandHandler("miniapp", miniapp_cmd))
+    application.add_handler(CommandHandler("miniappdebug", miniappdebug_cmd))
     application.add_handler(CommandHandler("billhelp", billhelp_cmd))
     application.add_handler(CommandHandler("billquote", billquote_cmd))
     application.add_handler(CommandHandler("billsetup", billsetup_cmd))

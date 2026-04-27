@@ -8,9 +8,19 @@ from typing import Any, Dict, List, Set
 import yaml
 from dotenv import load_dotenv
 
+DEFAULT_MINIAPP_URL = "https://timur-bot-91825649.web.app"
+DEAD_MINIAPP_HOSTS = ("albasty-5ba44.web.app",)
+
 
 class ConfigError(RuntimeError):
     pass
+
+
+def _resolve_miniapp_url() -> str:
+    raw_url = os.getenv("MINIAPP_URL", "").strip()
+    if raw_url and any(host in raw_url for host in DEAD_MINIAPP_HOSTS):
+        return DEFAULT_MINIAPP_URL
+    return raw_url or DEFAULT_MINIAPP_URL
 
 
 @dataclass(frozen=True)
@@ -190,7 +200,7 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
     openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
     openai_base_url = os.getenv("OPENAI_BASE_URL", "").strip()
     gemini_api_key = os.getenv("GEMINI_API_KEY", "").strip()
-    miniapp_url = os.getenv("MINIAPP_URL", "").strip()
+    miniapp_url = _resolve_miniapp_url()
     openai_text_model = os.getenv("OPENAI_TEXT_MODEL", "").strip()
     openai_vision_model = os.getenv("OPENAI_VISION_MODEL", "").strip()
     memory_path_env = os.getenv("MEMORY_PATH", "").strip()

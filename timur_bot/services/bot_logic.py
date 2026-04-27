@@ -79,10 +79,12 @@ from timur_bot.services.funny_scan_storage import (
 from timur_bot.services.humor import (
     add_joke_bit,
     apply_feedback,
+    choose_humor_plan,
     classify_reactions,
     classify_text_feedback,
     ensure_humor_schema,
     format_bits,
+    format_humor_prompt,
     record_bot_output,
 )
 
@@ -1384,8 +1386,18 @@ def build_association_context(memory: Dict[str, Any], chat_id: int, focus_user_i
 
 
 def build_humor_plan(memory: Dict[str, Any], message: Message) -> Dict[str, Any]:
-    del memory, message
-    return {"mode": "default", "bit_ids": []}
+    chat_mem = get_chat_mem(memory, message.chat_id)
+    user = message.from_user
+    user_id = int(user.id) if user else 0
+    user_name = ""
+    if user:
+        user_name = user.first_name or user.username or str(user.id)
+    return choose_humor_plan(
+        chat_mem,
+        text=_extract_message_text(message),
+        user_id=user_id,
+        user_name=user_name,
+    )
 
 
 def build_chat_messages(
@@ -1420,6 +1432,9 @@ def build_chat_messages(
         "- максимум 2 очень коротких предложения в одном сообщении\n"
         "- говори естественно и живо, как человек в чате\n"
         "- юмор дружеский и по ситуации, без агрессивных наездов\n"
+        "- хорошая шутка = точное наблюдение + неожиданный образ + короткий добив\n"
+        "- не используй заезженные шаблоны типа iq комнатной температуры или мои нейроны плавятся\n"
+        "- если нет нормальной шутки, выбери сухую реакцию вместо натянутой прожарки\n"
         "- не зацикливайся на одном и том же старом факте, чаще меняй тему\n"
         "- не делай длинные объяснения, лучше коротко и по делу\n"
     )
@@ -1430,6 +1445,9 @@ def build_chat_messages(
     full_system += f"\nуровень прожарки: {toxicity}/100\n"
     full_system += f"активный режим личности: {get_active_mode(memory)}\n"
     full_system += "инструкция режима: " + get_mode_prompt(memory) + "\n"
+
+    if humor_plan:
+        full_system += "\n" + format_humor_prompt(humor_plan) + "\n"
 
     style_settings = get_style_settings(memory)
     if style_settings:
@@ -2847,7 +2865,8 @@ async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     miniapp_url = build_miniapp_launch_url(memory, chat_id)
     if miniapp_url and message.chat.type == "private":
         await message.reply_text(
-            "открой mini app кнопкой снизу чтобы изменения пришли в этот чат как web_app_data",
+            "открой mini app кнопкой снизу чтобы изменения пришли в этот чат как web_app_data\n"
+            f"raw url:\n{miniapp_url}",
             reply_markup=_miniapp_reply_keyboard(miniapp_url),
         )
     elif miniapp_url:
@@ -2872,8 +2891,36 @@ async def miniapp_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await message.reply_text("mini app не настроен: добавь MINIAPP_URL в .env")
         return
     await message.reply_text(
-        f"панель для чата {target_chat_id} готова. запускай mini app через кнопку ниже.",
+        f"панель для чата {target_chat_id} готова. запускай mini app через кнопку ниже.\n"
+        f"raw url:\n{miniapp_url}",
         reply_markup=_miniapp_reply_keyboard(miniapp_url),
+    )
+
+
+async def miniappdebug_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    del context
+    if not _is_owner(update):
+        return
+    message = update.message
+    if not message:
+        return
+    memory = load_memory()
+    target_chat_id = _parse_miniapp_chat_id(message)
+    miniapp_url = build_miniapp_launch_url(memory, target_chat_id)
+    parsed_base = urlsplit(MINIAPP_URL)
+    parsed_launch = urlsplit(miniapp_url) if miniapp_url else urlsplit("")
+    await message.reply_text(
+        "\n".join(
+            [
+                "miniapp debug",
+                f"base url: {MINIAPP_URL or '-'}",
+                f"base host: {parsed_base.netloc or '-'}",
+                f"target chat: {target_chat_id}",
+                f"launch host: {parsed_launch.netloc or '-'}",
+                f"launch url: {miniapp_url or '-'}",
+                "если telegram открывает другой host, значит нажата старая кнопка или старый menu button в botfather",
+            ]
+        )
     )
 
 
@@ -3570,7 +3617,8 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             get_active_mode(memory),
             get_effective_toxicity_level(memory),
         )
-        messages = build_chat_messages(memory, message)
+        humor_plan = build_humor_plan(memory, message)
+        messages = build_chat_messages(memory, message, humor_plan=humor_plan)
         reply_text = await _run_with_typing(context, message.chat_id, call_openai_text(messages))
 
         force_voice = is_voice_codeword(user_text)
@@ -3580,7 +3628,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             memory,
             reply_text,
             force_voice=force_voice,
-            humor_plan=None,
+            humor_plan=humor_plan,
         )
     finally:
         _release_inflight_event(event_key)
