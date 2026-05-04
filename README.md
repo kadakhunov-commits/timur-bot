@@ -36,6 +36,23 @@ python3 -m timur_bot
 python3 timur_bot.py
 ```
 
+## Динамическая Mini App на Amvera
+
+Для админ-панели добавлен отдельный динамический web-runtime (не static hosting):
+
+- Entry point: `python3 -m timur_bot.web.admin_panel`
+- Amvera-конфиг: `amvera-miniapp.yaml`
+- Основная страница: `/miniapp`
+- Healthcheck: `/healthz`
+
+Этот runtime отдает `miniapp/public/index.html` через Flask и отключает кеш HTML (`Cache-Control: no-store`), чтобы state для разных чатов не залипал.
+
+После деплоя на Amvera укажи домен в боте:
+
+```env
+MINIAPP_URL=https://<your-amvera-domain>/miniapp
+```
+
 ## Конфигурация
 
 Основные конфиги лежат в `config/`:
