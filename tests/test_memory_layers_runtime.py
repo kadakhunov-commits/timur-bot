@@ -158,3 +158,27 @@ def test_run_with_typing_sends_chat_action() -> None:
     result = asyncio.run(runtime._run_with_typing(context, 1, _task()))
     assert result == "ok"
     assert context.bot.calls >= 1
+
+
+def test_store_bot_claim_memory_writes_fact_graph_and_long_fact() -> None:
+    memory = runtime.default_memory()
+    chat_mem = runtime.get_chat_mem(memory, 77)
+
+    class DummyMessage:
+        chat_id = 77
+
+        @staticmethod
+        def text() -> str:
+            return ""
+
+    message = DummyMessage()
+    message.text = "тимур какая у тебя фамилия"
+    message.caption = None
+
+    runtime._store_bot_claim_memory(memory, message, "ахметов")
+
+    graph = chat_mem["memory_layers"]["fact_graph"]
+    assert graph["facts"]
+    assert graph["facts"][0]["attribute"] == "surname"
+    assert graph["facts"][0]["value"] == "ахметов"
+    assert any("surname" in str(item.get("text", "")) for item in chat_mem["memory_layers"]["long_facts"])

@@ -5,13 +5,14 @@ import functools
 import io
 import json
 import logging
+import os
 import random
 import re
 import subprocess
 import weakref
 from urllib.parse import urlencode, urlsplit, urlunsplit, parse_qsl
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 from zoneinfo import ZoneInfo
@@ -87,6 +88,16 @@ from timur_bot.services.humor import (
     format_humor_prompt,
     record_bot_output,
 )
+from timur_bot.services.fact_memory import (
+    ensure_entity,
+    ensure_fact_graph,
+    extract_claim_facts,
+    upsert_claim_facts,
+)
+from timur_bot.services.fact_recall import (
+    build_fact_recall_bundle,
+    build_miniapp_fact_map,
+)
 
 # =========================
 # БАЗОВАЯ НАСТРОЙКА
@@ -138,6 +149,7 @@ PHOTO_RANDOM_REPLY_CHANCE = APP_CONFIG.photo_random_reply_chance
 VOICE_REPLY_CHANCE = APP_CONFIG.voice_reply_chance
 MEMES = APP_CONFIG.memes
 YOUTUBE_LINKS = APP_CONFIG.youtube_links
+_BUILD_VERSION_CACHE: str | None = None
 RUS_STOPWORDS = APP_CONFIG.rus_stopwords
 EN_STOPWORDS = APP_CONFIG.en_stopwords
 PROFANITY_MARKERS = APP_CONFIG.profanity_markers
@@ -306,7 +318,45 @@ def _ensure_chat_schema(chat: Dict[str, Any]) -> Dict[str, Any]:
     layers.setdefault("imported_message_keys", [])
     layers.setdefault("processed_event_keys", [])
     ensure_humor_schema(chat)
+    ensure_fact_graph(chat)
+    ensure_entity(chat, entity_id="bot:self", title="тимур", kind="bot", aliases=["тимур"])
     return chat
+
+
+def get_build_version() -> str:
+    global _BUILD_VERSION_CACHE
+    if _BUILD_VERSION_CACHE:
+        return _BUILD_VERSION_CACHE
+
+    candidates = (
+        os.getenv("TIMUR_VERSION", "").strip(),
+        os.getenv("TIMUR_BUILD_VERSION", "").strip(),
+        os.getenv("AMVERA_GIT_SHA", "").strip(),
+        os.getenv("GITHUB_SHA", "").strip()[:8],
+        os.getenv("VERCEL_GIT_COMMIT_SHA", "").strip()[:8],
+    )
+    for value in candidates:
+        if value:
+            _BUILD_VERSION_CACHE = value
+            return value
+
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=ROOT_DIR,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        value = result.stdout.strip()
+        if value:
+            _BUILD_VERSION_CACHE = value
+            return value
+    except Exception:
+        pass
+
+    _BUILD_VERSION_CACHE = "dev"
+    return _BUILD_VERSION_CACHE
 
 
 def _parse_iso_ts(ts: str) -> datetime | None:
@@ -551,7 +601,7 @@ def _prune_counter_dict(counter: Dict[str, Any], limit: int) -> Dict[str, Any]:
 
 
 def _extract_message_text(message: Message) -> str:
-    return (message.text or message.caption or "").strip()
+    return (getattr(message, "text", None) or getattr(message, "caption", None) or "").strip()
 
 
 def _make_event_key(kind: str, chat_id: int, message_id: int) -> str:
@@ -1147,6 +1197,22 @@ def looks_like_memory_request(text: str) -> bool:
     return any(h in clean for h in hints)
 
 
+def _should_include_association_context(
+    user_text: str,
+    *,
+    memory_requested: bool,
+    fact_bundle: Dict[str, Any],
+    recent_facts: List[str],
+) -> bool:
+    if memory_requested:
+        return True
+    if is_name_mentioned(user_text) or looks_like_address_to_bot(user_text):
+        return True
+    if fact_bundle.get("facts"):
+        return True
+    return bool(recent_facts)
+
+
 def enforce_reply_guardrails(reply_text: str) -> str:
     clean = sanitize_reply_text(reply_text)
     if not clean:
@@ -1412,10 +1478,12 @@ def build_chat_messages(
     user_profile = select_user_profile(memory, tg_user.id)
     user_text = _extract_message_text(message)
     memory_requested = looks_like_memory_request(user_text)
+    chat_mem = get_chat_mem(memory, message.chat_id)
     chat_history = select_chat_history_for_context(memory, message.chat_id)
     recent_facts = select_recent_facts_for_context(memory, message.chat_id)
     random_memories = select_old_random_memories(memory, message.chat_id)
     association_context = build_association_context(memory, message.chat_id, tg_user.id)
+    fact_bundle = build_fact_recall_bundle(chat_mem, user_text)
 
     hist_lines = []
     for rec in chat_history:
@@ -1460,8 +1528,16 @@ def build_chat_messages(
     if user_profile and random.random() < 0.6:
         full_system += "\nинфа о собеседнике:\n" + user_profile
 
-    if association_context and (memory_requested or random.random() < 0.4):
+    if association_context and _should_include_association_context(
+        user_text,
+        memory_requested=memory_requested,
+        fact_bundle=fact_bundle,
+        recent_facts=recent_facts,
+    ):
         full_system += "\n\nкарта персонажей и ассоциаций:\n" + association_context
+
+    if fact_bundle.get("prompt"):
+        full_system += "\n\nбыстрые факты из долгой памяти:\n" + str(fact_bundle["prompt"]) + "\n"
 
     if hist_lines:
         full_system += "\n\nпоследние сообщения в чате:\n" + "\n".join(hist_lines)
@@ -2026,6 +2102,28 @@ def _apply_feedback_to_reply(memory: Dict[str, Any], message: Message, rating: s
     return ok
 
 
+def _store_bot_claim_memory(memory: Dict[str, Any], message: Message, reply_text: str) -> None:
+    question_text = _extract_message_text(message)
+    if not question_text or not reply_text:
+        return
+
+    chat_mem = get_chat_mem(memory, message.chat_id)
+    facts = extract_claim_facts(chat_mem, question_text, reply_text)
+    if not facts:
+        return
+
+    touched = upsert_claim_facts(chat_mem, facts)
+    for fact in touched:
+        fact_text = str(fact.get("text", "")).strip()
+        if fact_text:
+            _upsert_long_fact(
+                chat_mem,
+                fact_text=fact_text,
+                ts=datetime.now(timezone.utc).isoformat(),
+                boost=max(1.0, float(fact.get("confidence", 0.5))),
+            )
+
+
 async def _handle_text_feedback(update: Update, memory: Dict[str, Any]) -> bool:
     message = update.effective_message
     if not message or not message.reply_to_message:
@@ -2105,7 +2203,6 @@ async def send_reply_with_style(
     force_voice: bool = False,
     humor_plan: Dict[str, Any] | None = None,
 ) -> None:
-    del context
     message = update.effective_message
 
     if not message:
@@ -2116,6 +2213,8 @@ async def send_reply_with_style(
     if not reply_text:
         logger.info("Ответ после очистки пустой, пропускаю отправку")
         return
+
+    fact_memory_text = reply_text
 
     use_watermark = False
     watermark_text = ""
@@ -2155,6 +2254,8 @@ async def send_reply_with_style(
                 if use_watermark and watermark_text:
                     await message.reply_text(watermark_text)
                 increase_voice_counters(memory, message.chat_id)
+                _store_bot_claim_memory(memory, message, fact_memory_text)
+                save_memory(memory)
                 logger.info("Voice reply sent in chat %s", message.chat_id)
                 return
             except Exception as e:
@@ -2165,8 +2266,23 @@ async def send_reply_with_style(
         if not parts:
             parts = [reply_text]
 
-        for part in parts:
-            sent = await message.reply_text(part)
+        for index, part in enumerate(parts):
+            if index == 0:
+                sent = await message.reply_text(part)
+            else:
+                bot = None
+                get_bot = getattr(message, "get_bot", None)
+                if callable(get_bot):
+                    try:
+                        bot = get_bot()
+                    except TypeError:
+                        bot = None
+
+                if bot is not None and hasattr(bot, "send_message"):
+                    sent = await bot.send_message(chat_id=message.chat_id, text=part)
+                else:
+                    # Fallback keeps the second message in the same chat without re-quoting.
+                    sent = await message.reply_text(part, do_quote=False)
             chat_mem = get_chat_mem(memory, message.chat_id)
             record_bot_output(chat_mem, message_id=sent.message_id, text=part, plan=humor_plan)
             await asyncio.sleep(random.uniform(0.2, 0.6))
@@ -2175,6 +2291,7 @@ async def send_reply_with_style(
         chat_mem = get_chat_mem(memory, message.chat_id)
         record_bot_output(chat_mem, message_id=sent.message_id, text=reply_text, plan=humor_plan)
 
+    _store_bot_claim_memory(memory, message, fact_memory_text)
     save_memory(memory)
 
 
@@ -2542,13 +2659,32 @@ def _miniapp_persona_cards() -> List[Dict[str, str]]:
 
 def _miniapp_members(memory: Dict[str, Any], chat_id: int) -> List[Dict[str, Any]]:
     chat_mem = get_chat_mem(memory, chat_id)
+    members: List[Dict[str, Any]] = []
+
+    bot_map = build_miniapp_fact_map(chat_mem, "bot:self")
+    bot_tags = [
+        node.get("label", "")
+        for node in bot_map.get("nodes", [])
+        if node.get("kind") in {"fact", "tag"}
+    ][:8]
+    members.append(
+        {
+            "id": "bot:self",
+            "title": "@timur",
+            "tags": bot_tags or ["пока пусто"],
+            "archetypes": ["бот", "легенда"],
+            "links": ["чат", "долгая память"],
+            "facts": bot_map.get("facts", []),
+            "mind_map": bot_map,
+        }
+    )
+
     participants = chat_mem.get("participants", {})
     p_sorted = sorted(
         participants.values(),
         key=lambda p: int(p.get("message_count", 0)),
         reverse=True,
     )[:8]
-    members: List[Dict[str, Any]] = []
     for p in p_sorted:
         uid = int(p.get("user_id", 0))
         if not uid:
@@ -2557,7 +2693,14 @@ def _miniapp_members(memory: Dict[str, Any], chat_id: int) -> List[Dict[str, Any
         username = p.get("username") or ""
         label = f"@{username}" if username else name
         archetypes = [name for name, _ in _top_items(p.get("archetypes", {}), n=3)] or ["хаотик"]
-        tags = [name for name, _ in _top_items(p.get("keywords", {}), n=6)] or ["пока пусто"]
+        keyword_tags = [name for name, _ in _top_items(p.get("keywords", {}), n=6)]
+        fact_map = build_miniapp_fact_map(chat_mem, f"user:{uid}")
+        fact_tags = [
+            node.get("label", "")
+            for node in fact_map.get("nodes", [])
+            if node.get("kind") in {"fact", "tag"}
+        ]
+        tags = (keyword_tags + fact_tags)[:10] or ["пока пусто"]
         rel_names: List[str] = []
         for key, _ in sorted(
             chat_mem.get("user_relations", {}).items(),
@@ -2582,6 +2725,8 @@ def _miniapp_members(memory: Dict[str, Any], chat_id: int) -> List[Dict[str, Any
                 "tags": tags,
                 "archetypes": archetypes,
                 "links": rel_names or ["пока без связей"],
+                "facts": fact_map.get("facts", []),
+                "mind_map": fact_map,
             }
         )
     return members
@@ -2633,6 +2778,7 @@ def build_miniapp_launch_url(memory: Dict[str, Any], chat_id: int) -> str:
             "systemPromptSet": bool(str(cfg.get("system_prompt") or "").strip()),
             "styleSet": bool(str(cfg.get("style_settings") or "").strip()),
             "bioSet": bool(str(cfg.get("bio") or "").strip()),
+            "version": get_build_version(),
         },
     }
     encoded = base64.urlsafe_b64encode(

@@ -9,6 +9,6 @@ build:
   useCache: true
 
 run:
-  command: python3 -m timur_bot
+  scriptName: run_combined.py
   persistenceMount: /data
   containerPort: 80

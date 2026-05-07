@@ -1,4 +1,5 @@
 import os
+from urllib.parse import parse_qs, urlsplit
 
 os.environ.setdefault("TELEGRAM_BOT_TOKEN", "test-token")
 os.environ.setdefault("OPENAI_API_KEY", "test-api-key")
@@ -46,3 +47,20 @@ def test_build_tts_input_keeps_only_bracket_directives() -> None:
     )
 
     assert text == "[slightly raspy] [casual, confident]\nбрат ща скину голосовое"
+
+
+def test_build_miniapp_launch_url_contains_version_and_fact_memory(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(runtime, "MINIAPP_URL", "https://example.com/miniapp")
+    monkeypatch.setattr(runtime, "get_build_version", lambda: "abc1234")
+    memory = runtime.default_memory()
+    chat_mem = runtime.get_chat_mem(memory, 123)
+    runtime.upsert_claim_facts(chat_mem, runtime.extract_claim_facts(chat_mem, "где ты родился", "родился в казани"))
+
+    url = runtime.build_miniapp_launch_url(memory, 123)
+
+    assert "state=" in url
+    encoded = parse_qs(urlsplit(url).query)["state"][0]
+    payload = runtime.json.loads(runtime.base64.urlsafe_b64decode(encoded + "=" * ((4 - len(encoded) % 4) % 4)).decode("utf-8"))
+    assert payload["meta"]["version"] == "abc1234"
+    assert payload["memory"]["members"][0]["id"] == "bot:self"
+    assert payload["memory"]["members"][0]["facts"]

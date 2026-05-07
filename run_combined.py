@@ -14,6 +14,7 @@ from threading import Thread
 
 from timur_bot.app.runner import main as run_bot
 from timur_bot.web.admin_panel import app as admin_app
+from timur_bot.web.runtime_meta import get_runtime_meta
 
 
 logger = logging.getLogger("timur-bot.combined")
@@ -26,11 +27,16 @@ def _run_admin_panel() -> None:
 
 
 def main() -> None:
+    meta = get_runtime_meta()
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
-    logger.info("Starting combined runtime: admin panel + telegram bot")
+    logger.info(
+        "Starting combined runtime: admin panel + telegram bot version=%s source=%s",
+        meta.version,
+        meta.source,
+    )
 
     web_thread = Thread(target=_run_admin_panel, name="miniapp-web", daemon=True)
     web_thread.start()

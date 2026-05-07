@@ -135,6 +135,107 @@
       text-transform: uppercase;
       margin-bottom: 10px;
     }
+    .build-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+      padding: 8px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: color-mix(in srgb, var(--card) 88%, transparent);
+      color: var(--hint);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: .4px;
+      text-transform: uppercase;
+    }
+    .graph-panel {
+      margin-top: 12px;
+      border-top: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+      padding-top: 12px;
+    }
+    .graph-panel.hidden { display: none; }
+    .graph-grid {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .graph-card {
+      border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
+      border-radius: 16px;
+      padding: 12px;
+      background: color-mix(in srgb, var(--card) 82%, transparent);
+    }
+    .graph-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .graph-title strong {
+      font-size: 12px;
+      letter-spacing: 0.2px;
+    }
+    .graph-badge {
+      padding: 4px 8px;
+      border-radius: 999px;
+      border: 1px solid color-mix(in srgb, var(--line) 92%, transparent);
+      color: var(--hint);
+      font-size: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+    .graph-cloud {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: flex-start;
+    }
+    .graph-chip {
+      padding: 8px 10px;
+      border-radius: 999px;
+      border: 1px solid color-mix(in srgb, var(--line) 90%, transparent);
+      background: color-mix(in srgb, var(--surface) 88%, transparent);
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .graph-chip[data-kind="tag"] { color: var(--cyan); }
+    .graph-chip[data-kind="archetype"] { border-color: rgba(94, 72, 245, 0.32); }
+    .graph-chip[data-kind="fact"] { border-color: rgba(46, 230, 255, 0.28); }
+    .graph-summary {
+      color: var(--hint);
+      font-size: 11px;
+      line-height: 1.55;
+      margin-top: 10px;
+    }
+    .fact-list,
+    .edge-list {
+      display: grid;
+      gap: 8px;
+    }
+    .fact-item,
+    .edge-item {
+      border-radius: 14px;
+      padding: 10px 12px;
+      background: color-mix(in srgb, var(--surface) 86%, transparent);
+      border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+    }
+    .fact-item b,
+    .edge-item b {
+      display: block;
+      font-size: 11px;
+      margin-bottom: 4px;
+    }
+    .fact-meta,
+    .edge-meta {
+      color: var(--hint);
+      font-size: 10px;
+      line-height: 1.45;
+    }
     .preview {
       margin-top: 12px;
       border-left: 3px solid var(--cyan);
@@ -299,6 +400,7 @@
       .persona-grid { grid-template-columns: 1fr; }
       .mode-grid { grid-template-columns: 1fr; }
       .buttons { grid-template-columns: 1fr; }
+      .graph-grid { grid-template-columns: 1fr; }
       .logo { margin-bottom: 12px; letter-spacing: -1px; }
       .tab-btn { padding: 9px 13px; font-size: 10px; }
       .member-btn { font-size: 10px; padding: 7px 12px; }
@@ -326,6 +428,7 @@
     <div id="statusBox" class="status" data-tone="muted">панель загружается и подстраивается под telegram</div>
     <section id="settings" class="section active">
       <div class="eyebrow">telegram admin panel</div>
+      <div id="buildBadge" class="build-badge">build unknown</div>
       <h1 class="logo">timur.<span class="grad">bot</span></h1>
       <p class="lede">меняй поведение бота быстро: сначала режим и вредность, потом проверь память и только после этого отправляй конфиг в чат.</p>
       <div class="card">
@@ -352,6 +455,36 @@
         </div>
         <div class="small" id="archText" style="margin-top:10px"></div>
         <div class="small" id="linksText"></div>
+        <div id="mindMapPanel" class="graph-panel hidden">
+          <div class="graph-title">
+            <strong>mind map / fact graph</strong>
+            <span id="graphSource" class="graph-badge">preview</span>
+          </div>
+          <div class="graph-grid">
+            <div class="graph-card">
+              <div class="graph-title">
+                <strong>узлы и ассоциации</strong>
+                <span id="graphCounts" class="graph-badge">0 nodes</span>
+              </div>
+              <div id="graphCloud" class="graph-cloud"></div>
+              <div id="graphSummary" class="graph-summary"></div>
+            </div>
+            <div class="graph-card">
+              <div class="graph-title">
+                <strong>долгие факты</strong>
+                <span class="graph-badge">memory</span>
+              </div>
+              <div id="factList" class="fact-list"></div>
+            </div>
+          </div>
+          <div class="graph-card" style="margin-top:10px">
+            <div class="graph-title">
+              <strong>связи и переходы</strong>
+              <span class="graph-badge">edges</span>
+            </div>
+            <div id="edgeList" class="edge-list"></div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -388,6 +521,7 @@
 
   <script>
     const tg = window.Telegram?.WebApp;
+    const runtimeMeta = window.__TIMUR_MINIAPP_META__ || {};
     if (tg) {
       tg.ready();
       tg.expand();
@@ -409,11 +543,154 @@
       }
     }
 
-    const launchState = decodeLaunchState() || {};
+    function isPlainObject(value) {
+      return value && typeof value === "object" && !Array.isArray(value);
+    }
+
+    function deepMerge(base, extra) {
+      if (!isPlainObject(base) || !isPlainObject(extra)) {
+        return extra === undefined ? base : extra;
+      }
+      const merged = { ...base };
+      Object.entries(extra).forEach(([key, value]) => {
+        if (Array.isArray(value)) {
+          merged[key] = value.slice();
+          return;
+        }
+        if (isPlainObject(value) && isPlainObject(merged[key])) {
+          merged[key] = deepMerge(merged[key], value);
+          return;
+        }
+        merged[key] = value;
+      });
+      return merged;
+    }
+
+    const injectedState = isPlainObject(runtimeMeta.state) ? runtimeMeta.state : {};
+    const launchState = deepMerge(injectedState, decodeLaunchState() || {});
     const personasFromLaunch = (launchState.settings?.personas || []).map(item => [
       item.id,
       item.title
     ]);
+
+    function normalizeFactItem(item, fallbackOwner) {
+      if (typeof item === "string") {
+        return {
+          text: item,
+          subject: fallbackOwner || "timur",
+          tags: [],
+          confidence: null,
+          source: "state"
+        };
+      }
+      if (!isPlainObject(item)) return null;
+      const text = String(item.text || item.value || item.fact || item.label || "").trim();
+      if (!text) return null;
+      return {
+        text,
+        subject: String(item.subject || item.owner || fallbackOwner || "timur").trim(),
+        tags: Array.isArray(item.tags) ? item.tags.map(tag => String(tag).trim()).filter(Boolean) : [],
+        confidence: typeof item.confidence === "number" ? item.confidence : null,
+        source: String(item.source || item.kind || "state").trim()
+      };
+    }
+
+    function normalizeGraphNode(item) {
+      if (typeof item === "string") {
+        return { id: item, label: item, kind: "tag", weight: 1 };
+      }
+      if (!isPlainObject(item)) return null;
+      const label = String(item.label || item.title || item.name || item.id || "").trim();
+      if (!label) return null;
+      return {
+        id: String(item.id || label).trim(),
+        label,
+        kind: String(item.kind || item.type || "fact").trim(),
+        weight: Number(item.weight || item.score || 1) || 1
+      };
+    }
+
+    function normalizeGraphEdge(item) {
+      if (!isPlainObject(item)) return null;
+      const from = String(item.from || item.source || item.a || "").trim();
+      const to = String(item.to || item.target || item.b || "").trim();
+      if (!from || !to) return null;
+      return {
+        from,
+        to,
+        label: String(item.label || item.relation || item.kind || "linked").trim(),
+        weight: Number(item.weight || item.score || 1) || 1
+      };
+    }
+
+    function buildFallbackGraph(members) {
+      const nodes = [];
+      const edges = [];
+      const facts = [];
+
+      members.forEach(member => {
+        const memberId = String(member.id || member.title || "").trim();
+        const memberLabel = String(member.title || memberId || "member").trim();
+        if (!memberId) return;
+        nodes.push({ id: memberId, label: memberLabel, kind: "person", weight: 5 });
+
+        (member.tags || []).forEach(tag => {
+          const tagId = `${memberId}:tag:${tag}`;
+          nodes.push({ id: tagId, label: String(tag), kind: "tag", weight: 2 });
+          edges.push({ from: memberId, to: tagId, label: "theme", weight: 1 });
+        });
+
+        (member.archetypes || []).forEach(archetype => {
+          const archId = `${memberId}:arch:${archetype}`;
+          nodes.push({ id: archId, label: String(archetype), kind: "archetype", weight: 2 });
+          edges.push({ from: memberId, to: archId, label: "role", weight: 1 });
+        });
+
+        (member.links || []).forEach(link => {
+          const linkId = `${memberId}:link:${link}`;
+          nodes.push({ id: linkId, label: String(link), kind: "link", weight: 1 });
+          edges.push({ from: memberId, to: linkId, label: "mentions", weight: 1 });
+        });
+
+        if (member.facts && Array.isArray(member.facts)) {
+          member.facts.forEach(fact => {
+            const normalized = normalizeFactItem(fact, memberLabel);
+            if (normalized) facts.push(normalized);
+          });
+        }
+      });
+
+      return { nodes, edges, facts, source: "derived-preview" };
+    }
+
+    function resolveMindMap(payload, members) {
+      const memoryPayload = isPlainObject(payload.memory) ? payload.memory : {};
+      const directGraph = payload.mindMap || payload.factGraph || memoryPayload.mindMap || memoryPayload.factGraph || runtimeMeta.mindMap || runtimeMeta.factGraph;
+      const graphPayload = isPlainObject(directGraph) ? directGraph : {};
+      const nodes = (Array.isArray(graphPayload.nodes) ? graphPayload.nodes : [])
+        .map(normalizeGraphNode)
+        .filter(Boolean);
+      const edges = (Array.isArray(graphPayload.edges) ? graphPayload.edges : [])
+        .map(normalizeGraphEdge)
+        .filter(Boolean);
+      const factCandidates = []
+        .concat(Array.isArray(graphPayload.facts) ? graphPayload.facts : [])
+        .concat(Array.isArray(memoryPayload.facts) ? memoryPayload.facts : [])
+        .concat(Array.isArray(payload.facts) ? payload.facts : []);
+      const facts = factCandidates
+        .map(item => normalizeFactItem(item, "timur"))
+        .filter(Boolean);
+
+      if (nodes.length || edges.length || facts.length) {
+        return {
+          nodes,
+          edges,
+          facts,
+          source: String(graphPayload.source || runtimeMeta.source || "state").trim()
+        };
+      }
+      return buildFallbackGraph(members);
+    }
 
     const state = {
       currentTab: "settings",
@@ -437,14 +714,26 @@
         ["quotes", "QUOTES"]
       ],
       members: launchState.memory?.members || [],
+      mindMap: { nodes: [], edges: [], facts: [], source: "preview" },
       chatId: launchState.chatId || null,
       statusTone: "muted",
       statusText: tg ? "панель готова. main button в telegram отправит действие в чат." : "telegram web app не найден. это fallback-preview в браузере.",
       dirty: false,
       submitted: false
     };
+    state.mindMap = resolveMindMap(launchState, state.members);
 
     let cloudEngine = null;
+
+    function renderBuildBadge() {
+      const badge = document.getElementById("buildBadge");
+      const version = runtimeMeta.buildLabel || runtimeMeta.version || "dev";
+      const source = runtimeMeta.versionSource || "fallback";
+      badge.textContent = `build ${version} · ${source}`;
+      badge.title = runtimeMeta.servedAt
+        ? `deployed ${runtimeMeta.servedAt}`
+        : `source ${source}`;
+    }
 
     function haptic(type = "selection") {
       if (!tg?.HapticFeedback) return;
@@ -483,6 +772,8 @@
       const raw = state.activeUsers30d * state.pricePerRub;
       return Math.max(state.minRub, Math.min(state.maxRub, raw));
     }
+
+    renderBuildBadge();
 
     function totalStars() {
       return Math.max(1, Math.round(totalRub() * state.starsPerRub));
@@ -627,6 +918,7 @@
       document.getElementById("bubbleWrap").innerHTML = '<div class="empty-state">память пока пустая. сначала дай боту пообщаться в чате, потом здесь появятся люди, темы и связи.</div>';
       document.getElementById("archText").textContent = "архетипы: пока нет данных";
       document.getElementById("linksText").textContent = "связи: тоже пока пусто";
+      renderMindMap(null);
     }
 
     function ensureCanvas() {
@@ -635,6 +927,105 @@
         wrap.innerHTML = '<canvas id="cloudCanvas"></canvas>';
       }
       return document.getElementById("cloudCanvas");
+    }
+
+    function uniqueBy(items, keyFn) {
+      const seen = new Set();
+      return items.filter(item => {
+        const key = keyFn(item);
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }
+
+    function renderMindMap(member) {
+      const panel = document.getElementById("mindMapPanel");
+      const graph = member?.mind_map || state.mindMap || { nodes: [], edges: [], facts: [], source: "preview" };
+      const memberTitle = member?.title || member?.id || "";
+      const memberLinks = new Set((member?.links || []).map(item => String(item).trim()).filter(Boolean));
+      const nodePool = graph.nodes || [];
+      const edgePool = graph.edges || [];
+      const factPool = graph.facts || [];
+
+      const focusedNodes = uniqueBy(
+        nodePool.filter(node => {
+          const label = String(node.label || "").trim();
+          return !member || label === memberTitle || (member?.tags || []).includes(label) || (member?.archetypes || []).includes(label) || memberLinks.has(label);
+        }),
+        node => `${node.kind}:${node.id}`
+      );
+      const fallbackNodes = uniqueBy(
+        []
+          .concat((member?.tags || []).map(label => ({ id: `tag:${label}`, label, kind: "tag" })))
+          .concat((member?.archetypes || []).map(label => ({ id: `arch:${label}`, label, kind: "archetype" })))
+          .concat((member?.links || []).map(label => ({ id: `link:${label}`, label, kind: "link" }))),
+        node => `${node.kind}:${node.id}`
+      );
+      const visibleNodes = (focusedNodes.length ? focusedNodes : fallbackNodes).slice(0, 18);
+
+      const visibleFacts = factPool
+        .filter(fact => !member || !fact.subject || fact.subject === memberTitle)
+        .slice(0, 6);
+
+      const visibleEdges = edgePool
+        .filter(edge => {
+          if (!member) return true;
+          const touchesMember = edge.from === member?.id || edge.to === member?.id || edge.from === memberTitle || edge.to === memberTitle;
+          const touchesKnownLabel = visibleNodes.some(node => node.label === edge.from || node.label === edge.to || node.id === edge.from || node.id === edge.to);
+          return touchesMember || touchesKnownLabel;
+        })
+        .slice(0, 8);
+
+      const hasGraph = visibleNodes.length || visibleFacts.length || visibleEdges.length;
+      panel.classList.toggle("hidden", !hasGraph);
+      if (!hasGraph) return;
+
+      document.getElementById("graphSource").textContent = graph.source || "preview";
+      document.getElementById("graphCounts").textContent = `${visibleNodes.length} nodes`;
+
+      const cloud = document.getElementById("graphCloud");
+      cloud.innerHTML = "";
+      visibleNodes.forEach(node => {
+        const chip = document.createElement("div");
+        chip.className = "graph-chip";
+        chip.dataset.kind = node.kind || "fact";
+        chip.textContent = node.label;
+        cloud.appendChild(chip);
+      });
+
+      const summary = document.getElementById("graphSummary");
+      summary.textContent = member
+        ? `карта показывает, что бот уже держит рядом с ${member.title} темы, роли и длинные факты. это дешевый preview памяти до полноценного runtime-графа.`
+        : "карта памяти собрана из прокинутых фактов и локального preview участников.";
+
+      const factList = document.getElementById("factList");
+      factList.innerHTML = "";
+      if (!visibleFacts.length) {
+        factList.innerHTML = '<div class="fact-item"><b>пока пусто</b><div class="fact-meta">когда backend начнет прокидывать long-term факты, они появятся здесь без смены UI.</div></div>';
+      } else {
+        visibleFacts.forEach(fact => {
+          const item = document.createElement("div");
+          item.className = "fact-item";
+          const tags = fact.tags?.length ? `теги: ${fact.tags.join(", ")}` : "теги: нет";
+          const confidence = fact.confidence == null ? "" : ` · confidence ${fact.confidence}`;
+          item.innerHTML = `<b>${fact.text}</b><div class="fact-meta">${fact.subject || "timur"} · ${tags}${confidence}</div>`;
+          factList.appendChild(item);
+        });
+      }
+
+      const edgeList = document.getElementById("edgeList");
+      edgeList.innerHTML = "";
+      if (!visibleEdges.length) {
+        edgeList.innerHTML = '<div class="edge-item"><b>связи строятся автоматически</b><div class="edge-meta">как только граф будет приходить из state/window meta, здесь появятся реальные ребра между людьми, фактами и темами.</div></div>';
+      } else {
+        visibleEdges.forEach(edge => {
+          const item = document.createElement("div");
+          item.className = "edge-item";
+          item.innerHTML = `<b>${edge.from} -> ${edge.to}</b><div class="edge-meta">${edge.label || "linked"} · вес ${edge.weight || 1}</div>`;
+          edgeList.appendChild(item);
+        });
+      }
     }
 
     function renderMembers() {
@@ -663,6 +1054,7 @@
       document.getElementById("archText").textContent = "архетипы: " + (m.archetypes || []).join(", ");
       document.getElementById("linksText").textContent = "связи: " + (m.links || []).join(", ");
       renderBubbleCloud(m.tags || []);
+      renderMindMap(m);
     }
 
     function renderBubbleCloud(tags) {
