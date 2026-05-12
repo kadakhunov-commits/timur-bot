@@ -20,9 +20,19 @@ from timur_bot.web.runtime_meta import get_runtime_meta
 logger = logging.getLogger("timur-bot.combined")
 
 
+def _resolve_port(default: int = 80) -> int:
+    raw = os.getenv("PORT", "").strip()
+    if not raw or raw.lower() == "null":
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
 def _run_admin_panel() -> None:
     # Disable reloader in worker thread to avoid double-start behavior.
-    port = int(os.getenv("PORT", "80"))
+    port = _resolve_port(80)
     admin_app.run(host="0.0.0.0", port=port, use_reloader=False)
 
 
