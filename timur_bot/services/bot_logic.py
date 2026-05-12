@@ -51,7 +51,7 @@ from timur_bot.services.funny_scan_admin import (
     format_funny_status,
 )
 from timur_bot.services.funny_scan_llm import evaluate_candidate_with_llm
-from timur_bot.services.funny_scan_pipeline import build_stage1_candidates, extract_period_messages
+from timur_bot.services.funny_scan_pipeline import build_learning_profile, build_stage1_candidates, extract_period_messages
 from timur_bot.services.funny_scan_storage import (
     STATUS_APPROVED,
     STATUS_NEW,
@@ -98,6 +98,8 @@ from timur_bot.services.fact_recall import (
     build_fact_recall_bundle,
     build_miniapp_fact_map,
 )
+from timur_bot.tools.import_telegram_html import import_messages as import_telegram_messages
+from timur_bot.tools.import_telegram_html import parse_export_dir as parse_telegram_export_dir
 
 # =========================
 # БАЗОВАЯ НАСТРОЙКА
@@ -124,6 +126,7 @@ client = OpenAI(
 )
 
 OWNER_ID = APP_CONFIG.owner_id
+OWNER_IDS = {int(x) for x in (APP_CONFIG.owner_ids or [APP_CONFIG.owner_id])}
 TEXT_MODEL = APP_CONFIG.text_model
 VISION_MODEL = APP_CONFIG.vision_model
 VOICE_MODEL = APP_CONFIG.voice_model
@@ -369,6 +372,138 @@ def _parse_iso_ts(ts: str) -> datetime | None:
         return None
 
 
+def _parse_backfill_start_utc(backfill_start_date_msk: str) -> datetime | None:
+    raw = str(backfill_start_date_msk or "").strip()
+    if not raw:
+        return None
+    try:
+        local_dt = datetime.strptime(raw, "%Y-%m-%d").replace(tzinfo=ZoneInfo("Europe/Moscow"))
+    except ValueError:
+        return None
+    return local_dt.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+
+
+def _extract_forward_meta(message: Message) -> Dict[str, Any]:
+    sender_chat = getattr(message, "sender_chat", None)
+    forward_origin = getattr(message, "forward_origin", None)
+
+    sender_chat_id = int(getattr(sender_chat, "id", 0) or 0)
+    sender_chat_title = str(getattr(sender_chat, "title", "") or "")
+    sender_chat_type = str(getattr(sender_chat, "type", "") or "")
+
+    origin_chat = getattr(forward_origin, "chat", None)
+    origin_sender_chat = getattr(forward_origin, "sender_chat", None)
+    forward_chat_id = int(getattr(origin_chat, "id", 0) or getattr(origin_sender_chat, "id", 0) or 0)
+    forward_chat_title = str(getattr(origin_chat, "title", "") or getattr(origin_sender_chat, "title", "") or "")
+    forward_message_id = int(getattr(forward_origin, "message_id", 0) or 0)
+    return {
+        "sender_chat_id": sender_chat_id,
+        "sender_chat_title": sender_chat_title,
+        "sender_chat_type": sender_chat_type,
+        "is_forward": bool(forward_origin),
+        "forward_origin_chat_id": forward_chat_id,
+        "forward_origin_chat_title": forward_chat_title,
+        "forward_origin_message_id": forward_message_id,
+    }
+
+
+def _build_learning_profile_from_memory(
+    memory: Dict[str, Any],
+    settings: Dict[str, Any],
+) -> Dict[str, Any]:
+    chat_id = int(settings.get("gluboko_chat_id", 0) or 0)
+    if not chat_id:
+        return {
+            "examples": [],
+            "updated_at": datetime.utcnow().isoformat(),
+            "source_stats": {"source_chat_id": 0, "source_chat_title": "", "messages_total": 0, "examples_total": 0},
+        }
+    chats = memory.get("chats", {}) if isinstance(memory.get("chats"), dict) else {}
+    chat_mem = chats.get(str(chat_id))
+    if not isinstance(chat_mem, dict):
+        return {
+            "examples": [],
+            "updated_at": datetime.utcnow().isoformat(),
+            "source_stats": {"source_chat_id": chat_id, "source_chat_title": f"chat {chat_id}", "messages_total": 0, "examples_total": 0},
+        }
+    history = chat_mem.get("history", [])
+    if not isinstance(history, list):
+        history = []
+    scoped = extract_period_messages(
+        history,
+        period_hours=24 * 365 * 5,
+        backfill_start_date_msk=str(settings.get("backfill_start_date_msk", "") or ""),
+    )
+    return build_learning_profile(
+        scoped,
+        source_chat_id=chat_id,
+        source_chat_title=f"chat {chat_id}",
+        lexicon=FUNNY_SCAN_LEXICON,
+        max_examples=8,
+    )
+
+
+def _resolve_scan_period_hours_for_trigger(settings: Dict[str, Any], *, trigger: str) -> int:
+    base_hours = max(1, int(settings.get("scan_period_hours", 24)))
+    if trigger != "manual":
+        return base_hours
+    backfill_start = _parse_backfill_start_utc(str(settings.get("backfill_start_date_msk", "") or ""))
+    if not backfill_start:
+        return base_hours
+    delta_hours = int(max(1.0, (datetime.utcnow() - backfill_start).total_seconds() / 3600.0)) + 1
+    return max(base_hours, delta_hours)
+
+
+def _import_telegram_export_for_role(
+    *,
+    memory: Dict[str, Any],
+    settings: Dict[str, Any],
+    role: str,
+    src_path_raw: str,
+) -> str:
+    role_norm = str(role or "").strip().lower()
+    if role_norm not in {"main", "gluboko"}:
+        return "неизвестная роль импорта, ожидается main|gluboko"
+    chat_id = int(settings.get("main_chat_id", 0) if role_norm == "main" else settings.get("gluboko_chat_id", 0))
+    if not chat_id:
+        return f"для роли {role_norm} не задан chat_id"
+    src_path = Path(src_path_raw).expanduser().resolve()
+    if not src_path.exists() or not src_path.is_dir():
+        return f"папка экспорта не найдена: {src_path}"
+
+    parsed = parse_telegram_export_dir(src_path)
+    result = import_telegram_messages(
+        memory,
+        parsed,
+        chat_id=chat_id,
+        mode="merge",
+        limits={
+            "max_history_per_chat": MAX_HISTORY_PER_CHAT,
+            "max_log_per_chat": MAX_LOG_PER_CHAT,
+            "max_user_samples": MAX_USER_SAMPLES,
+            "max_quotes_per_user": MAX_QUOTES_PER_USER,
+            "max_keywords_per_user": MAX_KEYWORDS_PER_USER,
+            "max_topic_edges": MAX_TOPIC_EDGES,
+            "max_user_relations": MAX_USER_RELATIONS,
+        },
+        rus_stopwords=RUS_STOPWORDS,
+        en_stopwords=EN_STOPWORDS,
+        profanity_markers=PROFANITY_MARKERS,
+        archetypes=ARCHETYPE_LEXICON,
+        apply_style_profile=False,
+        recent_days=RECENT_FACT_WINDOW_DAYS,
+        max_recent_messages=MAX_RECENT_MESSAGES,
+        max_recent_facts=MAX_RECENT_FACTS,
+        max_long_facts=MAX_LONG_FACTS,
+        keep_raw_log=False,
+    )
+    save_memory(memory)
+    return (
+        f"import {role_norm}: parsed={len(parsed.messages)} imported={result.get('imported', 0)} "
+        f"deduped={result.get('deduped', 0)} chat_id={chat_id}"
+    )
+
+
 def _norm_fact_key(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").strip().lower())
 
@@ -604,6 +739,29 @@ def _extract_message_text(message: Message) -> str:
     return (getattr(message, "text", None) or getattr(message, "caption", None) or "").strip()
 
 
+def _resolve_author_from_message(message: Message) -> Dict[str, Any] | None:
+    tg_user = message.from_user
+    if tg_user:
+        return {
+            "user_id": int(tg_user.id),
+            "name": str(tg_user.first_name or ""),
+            "username": str(tg_user.username or ""),
+            "is_bot": bool(tg_user.is_bot),
+        }
+    sender_chat = getattr(message, "sender_chat", None)
+    if sender_chat:
+        sid = int(getattr(sender_chat, "id", 0) or 0)
+        if not sid:
+            return None
+        return {
+            "user_id": sid,
+            "name": str(getattr(sender_chat, "title", "") or getattr(sender_chat, "username", "") or f"chat {sid}"),
+            "username": str(getattr(sender_chat, "username", "") or ""),
+            "is_bot": False,
+        }
+    return None
+
+
 def _make_event_key(kind: str, chat_id: int, message_id: int) -> str:
     return f"{kind}:{chat_id}:{message_id}"
 
@@ -810,16 +968,20 @@ def _extract_user_mentions_by_text(chat_mem: Dict[str, Any], text: str, author_i
     return mentions
 
 
-def _update_participant_portrait(chat_mem: Dict[str, Any], message: Message, text: str, user_keywords: List[str]) -> None:
-    tg_user = message.from_user
-    if not tg_user:
-        return
-
+def _update_participant_portrait(
+    chat_mem: Dict[str, Any],
+    *,
+    user_id: int,
+    name: str,
+    username: str,
+    text: str,
+    user_keywords: List[str],
+) -> None:
     participants = chat_mem.setdefault("participants", {})
-    p = participants.setdefault(str(tg_user.id), {
-        "user_id": tg_user.id,
-        "name": tg_user.first_name or "",
-        "username": tg_user.username or "",
+    p = participants.setdefault(str(user_id), {
+        "user_id": user_id,
+        "name": name or "",
+        "username": username or "",
         "message_count": 0,
         "last_seen": None,
         "quotes": [],
@@ -833,8 +995,8 @@ def _update_participant_portrait(chat_mem: Dict[str, Any], message: Message, tex
         },
     })
 
-    p["name"] = tg_user.first_name or p.get("name", "")
-    p["username"] = tg_user.username or p.get("username", "")
+    p["name"] = name or p.get("name", "")
+    p["username"] = username or p.get("username", "")
     p["message_count"] = int(p.get("message_count", 0)) + 1
     p["last_seen"] = datetime.utcnow().isoformat()
 
@@ -870,12 +1032,7 @@ def _update_participant_portrait(chat_mem: Dict[str, Any], message: Message, tex
             archetypes[name] = float(archetypes.get(name, 0.0)) + float(val)
 
 
-def _update_association_graph(chat_mem: Dict[str, Any], message: Message, text: str, user_keywords: List[str]) -> None:
-    tg_user = message.from_user
-    if not tg_user:
-        return
-
-    user_id = tg_user.id
+def _update_association_graph(chat_mem: Dict[str, Any], *, user_id: int, message: Message, text: str, user_keywords: List[str]) -> None:
 
     # Связи пользователь <-> тема
     topic_edges = chat_mem.setdefault("topic_edges", {})
@@ -909,18 +1066,21 @@ def _update_association_graph(chat_mem: Dict[str, Any], message: Message, text: 
 
 def update_memory_with_message(memory: Dict[str, Any], message: Message) -> None:
     chat_id = message.chat_id
-    tg_user = message.from_user
-
-    if not tg_user:
+    author = _resolve_author_from_message(message)
+    if not author:
         return
+    user_id = int(author["user_id"])
+    user_name = str(author["name"] or "")
+    user_username = str(author["username"] or "")
+    user_is_bot = bool(author["is_bot"])
 
     chat_mem = get_chat_mem(memory, chat_id)
-    user_mem = get_user_mem(memory, tg_user.id)
+    user_mem = get_user_mem(memory, user_id)
 
     text = _extract_message_text(message)
 
-    user_mem["name"] = tg_user.first_name or user_mem.get("name", "")
-    user_mem["username"] = tg_user.username or user_mem.get("username", "")
+    user_mem["name"] = user_name or user_mem.get("name", "")
+    user_mem["username"] = user_username or user_mem.get("username", "")
     user_mem["count"] = user_mem.get("count", 0) + 1
 
     if text:
@@ -930,13 +1090,14 @@ def update_memory_with_message(memory: Dict[str, Any], message: Message) -> None
             samples.pop(0)
 
     rec = {
-        "user_id": tg_user.id,
+        "user_id": user_id,
         "name": user_mem["name"],
         "username": user_mem["username"],
         "text": text,
         "ts": datetime.utcnow().isoformat(),
-        "is_bot": tg_user.is_bot,
+        "is_bot": user_is_bot,
         "message_id": message.message_id,
+        **_extract_forward_meta(message),
     }
 
     history = chat_mem["history"]
@@ -953,17 +1114,24 @@ def update_memory_with_message(memory: Dict[str, Any], message: Message) -> None
 
     if text:
         keywords = extract_keywords(text)
-        _update_participant_portrait(chat_mem, message, text, keywords)
-        _update_association_graph(chat_mem, message, text, keywords)
+        _update_participant_portrait(
+            chat_mem,
+            user_id=user_id,
+            name=user_mem["name"],
+            username=user_mem["username"],
+            text=text,
+            user_keywords=keywords,
+        )
+        _update_association_graph(chat_mem, user_id=user_id, message=message, text=text, user_keywords=keywords)
 
     save_memory(memory)
     try:
         billing.register_activity(
             chat_id=chat_id,
-            user_id=tg_user.id,
-            username=tg_user.username or "",
-            name=tg_user.first_name or "",
-            is_bot=bool(tg_user.is_bot),
+            user_id=user_id,
+            username=user_username,
+            name=user_name,
+            is_bot=user_is_bot,
         )
     except Exception as e:
         logger.error("Ошибка обновления активности в биллинге: %s", e)
@@ -1901,14 +2069,24 @@ async def _run_funny_scan_once(application: Any, *, trigger: str) -> Dict[str, A
                 return {"skipped": "disabled"}
             adapted_settings = _adapt_funny_scan_settings(settings, state)
             reaction_index_snapshot = dict(state.get("reaction_index", {}))
-
-        sources = [src for src in settings.get("sources", []) if isinstance(src, dict) and bool(src.get("enabled", True))]
+        learning_profile = _build_learning_profile_from_memory(memory, settings)
+        async with _FUNNY_SCAN_STATE_LOCK:
+            state = _load_funny_scan_state()
+            state["learning_profile"] = learning_profile
+            _save_funny_scan_state(state)
+        main_chat_id = int(settings.get("main_chat_id", 0) or 0)
+        if main_chat_id:
+            sources = [{"chat_id": main_chat_id, "title": f"chat {main_chat_id}", "enabled": True}]
+        else:
+            sources = [src for src in settings.get("sources", []) if isinstance(src, dict) and bool(src.get("enabled", True))]
         summary = {
             "sources": 0,
             "stage1_candidates": 0,
             "llm_calls": 0,
             "created": 0,
             "previewed": 0,
+            "forwarded": 0,
+            "learned_examples": len(learning_profile.get("examples", [])) if isinstance(learning_profile, dict) else 0,
             "skipped_budget": False,
             "deduped": 0,
         }
@@ -1925,9 +2103,11 @@ async def _run_funny_scan_once(application: Any, *, trigger: str) -> Dict[str, A
             if not isinstance(history, list) or not history:
                 continue
 
+            scan_hours = _resolve_scan_period_hours_for_trigger(adapted_settings, trigger=trigger)
             scoped_messages = extract_period_messages(
                 history,
-                period_hours=int(adapted_settings.get("scan_period_hours", 24)),
+                period_hours=scan_hours,
+                backfill_start_date_msk=str(adapted_settings.get("backfill_start_date_msk", "") or ""),
             )
             if not scoped_messages:
                 continue
@@ -1964,6 +2144,7 @@ async def _run_funny_scan_once(application: Any, *, trigger: str) -> Dict[str, A
                         max_context_messages=int(adapted_settings.get("llm_max_context_messages", 12)),
                         max_chars_per_message=int(adapted_settings.get("llm_max_chars_per_message", 220)),
                         review_threshold=int(adapted_settings.get("review_threshold", 70)),
+                        learning_examples=learning_profile.get("examples", []) if isinstance(learning_profile, dict) else [],
                     )
                 except Exception as e:
                     logger.error("funny scan LLM failed (chat=%s): %s", chat_id, e)
@@ -1998,12 +2179,22 @@ async def _run_funny_scan_once(application: Any, *, trigger: str) -> Dict[str, A
                     and bool(candidate.get("show_to_owner"))
                     and int(candidate.get("score", 0)) >= int(adapted_settings.get("review_threshold", 70))
                 ):
-                    if await _send_funny_candidate_preview(
-                        application,
-                        settings=settings,
-                        candidate_id=candidate_id,
-                    ):
-                        summary["previewed"] += 1
+                    if str(settings.get("owner_delivery_mode", "auto_forward")) == "auto_forward":
+                        ok, _message_text = await _forward_funny_candidate(
+                            bot=application.bot,
+                            settings=settings,
+                            candidate_id=candidate_id,
+                            action="approve",
+                        )
+                        if ok:
+                            summary["forwarded"] += 1
+                    else:
+                        if await _send_funny_candidate_preview(
+                            application,
+                            settings=settings,
+                            candidate_id=candidate_id,
+                        ):
+                            summary["previewed"] += 1
 
             async with _FUNNY_SCAN_STATE_LOCK:
                 state = _load_funny_scan_state()
@@ -2301,7 +2492,7 @@ async def send_reply_with_style(
 
 def _is_owner(update: Update) -> bool:
     user = update.effective_user
-    return bool(user and user.id == OWNER_ID)
+    return bool(user and int(user.id) in OWNER_IDS)
 
 
 def _admin_main_keyboard(chat_id: int) -> InlineKeyboardMarkup:
@@ -2344,12 +2535,23 @@ def _funny_menu_keyboard(chat_id: int, settings: Dict[str, Any]) -> InlineKeyboa
                 InlineKeyboardButton("период", callback_data=f"adm:funny:period:{chat_id}"),
             ],
             [
+                InlineKeyboardButton("роли чатов", callback_data=f"adm:funny:roles:{chat_id}"),
+                InlineKeyboardButton("дата backfill", callback_data=f"adm:input:funny_backfill_date:{chat_id}"),
+            ],
+            [
                 InlineKeyboardButton(f"intensity: {intensity}", callback_data=f"adm:funny:intensity:{chat_id}"),
                 InlineKeyboardButton("порог", callback_data=f"adm:funny:threshold:{chat_id}"),
             ],
             [
                 InlineKeyboardButton("лимиты", callback_data=f"adm:funny:limits:{chat_id}"),
                 InlineKeyboardButton("бюджет", callback_data=f"adm:funny:budget:{chat_id}"),
+            ],
+            [
+                InlineKeyboardButton("learn now", callback_data=f"adm:funny:learn_now:{chat_id}"),
+                InlineKeyboardButton("import main", callback_data=f"adm:input:funny_import_main_path:{chat_id}"),
+            ],
+            [
+                InlineKeyboardButton("import gluboko", callback_data=f"adm:input:funny_import_gluboko_path:{chat_id}"),
             ],
             [
                 InlineKeyboardButton("кандидаты new", callback_data=f"adm:funny:list:{chat_id}"),
@@ -2419,6 +2621,18 @@ def _funny_period_keyboard(chat_id: int) -> InlineKeyboardMarkup:
                 InlineKeyboardButton("ввести вручную", callback_data=f"adm:input:funny_period:{chat_id}"),
                 InlineKeyboardButton("назад", callback_data=f"adm:funny:menu:{chat_id}"),
             ],
+        ]
+    )
+
+
+def _funny_roles_keyboard(chat_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("set main_chat_id", callback_data=f"adm:input:funny_main_chat_id:{chat_id}"),
+                InlineKeyboardButton("set gluboko_chat_id", callback_data=f"adm:input:funny_gluboko_chat_id:{chat_id}"),
+            ],
+            [InlineKeyboardButton("назад", callback_data=f"adm:funny:menu:{chat_id}")],
         ]
     )
 
@@ -3139,7 +3353,13 @@ async def _handle_admin_pending_text(
         await message.reply_text(f"кастомный текст для режима {mode} обновлен")
         return True
 
-    if action in {"funny_period", "funny_threshold", "funny_budget"}:
+    if action in {
+        "funny_period",
+        "funny_threshold",
+        "funny_budget",
+        "funny_main_chat_id",
+        "funny_gluboko_chat_id",
+    }:
         try:
             value = int(text.strip())
         except ValueError:
@@ -3152,6 +3372,12 @@ async def _handle_admin_pending_text(
         elif action == "funny_threshold":
             settings["review_threshold"] = max(0, min(100, value))
             reply = f"review threshold обновлен: {settings['review_threshold']}"
+        elif action == "funny_main_chat_id":
+            settings["main_chat_id"] = int(value)
+            reply = f"main_chat_id обновлен: {settings['main_chat_id']}"
+        elif action == "funny_gluboko_chat_id":
+            settings["gluboko_chat_id"] = int(value)
+            reply = f"gluboko_chat_id обновлен: {settings['gluboko_chat_id']}"
         else:
             settings["daily_token_budget"] = max(1000, min(10_000_000, value))
             settings["daily_token_hard_stop"] = max(
@@ -3165,6 +3391,37 @@ async def _handle_admin_pending_text(
         save_memory(memory)
         _clear_admin_pending(context)
         await message.reply_text(reply)
+        return True
+
+    if action == "funny_backfill_date":
+        normalized = text.strip()
+        try:
+            datetime.strptime(normalized, "%Y-%m-%d")
+        except ValueError:
+            await message.reply_text("нужен формат YYYY-MM-DD или /cancel")
+            return True
+        settings = _get_funny_scan_settings(memory)
+        settings["backfill_start_date_msk"] = normalized
+        save_memory(memory)
+        _clear_admin_pending(context)
+        await message.reply_text(f"backfill_start_date_msk обновлен: {normalized}")
+        return True
+
+    if action in {"funny_import_main_path", "funny_import_gluboko_path"}:
+        role = "main" if action == "funny_import_main_path" else "gluboko"
+        settings = _get_funny_scan_settings(memory)
+        try:
+            report = await asyncio.to_thread(
+                _import_telegram_export_for_role,
+                memory=memory,
+                settings=settings,
+                role=role,
+                src_path_raw=text.strip(),
+            )
+        except Exception as e:
+            report = f"import failed: {e}"
+        _clear_admin_pending(context)
+        await message.reply_text(report)
         return True
 
     _clear_admin_pending(context)
@@ -3261,6 +3518,20 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
             await query.edit_message_text(
                 f"период анализа сейчас: {settings.get('scan_period_hours', 24)}h",
                 reply_markup=_funny_period_keyboard(chat_id),
+            )
+            return
+
+        if sub == "roles":
+            parsed_chat_id = _part_int(3)
+            chat_id = parsed_chat_id if parsed_chat_id is not None else _chat_id_fallback()
+            await query.edit_message_text(
+                (
+                    "роли чатов funny-scan:\n"
+                    f"- main_chat_id={settings.get('main_chat_id', 0)}\n"
+                    f"- gluboko_chat_id={settings.get('gluboko_chat_id', 0)}\n"
+                    f"- backfill_start_date_msk={settings.get('backfill_start_date_msk') or '-'}"
+                ),
+                reply_markup=_funny_roles_keyboard(chat_id),
             )
             return
 
@@ -3410,9 +3681,30 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
                 state = _load_funny_scan_state()
             text = format_funny_status(settings, state) + "\n\n" + (
                 f"scan result: sources={summary.get('sources', 0)}, stage1={summary.get('stage1_candidates', 0)}, "
-                f"llm={summary.get('llm_calls', 0)}, created={summary.get('created', 0)}, previewed={summary.get('previewed', 0)}"
+                f"llm={summary.get('llm_calls', 0)}, created={summary.get('created', 0)}, previewed={summary.get('previewed', 0)}, "
+                f"forwarded={summary.get('forwarded', 0)}, learned={summary.get('learned_examples', 0)}"
             )
             await query.edit_message_text(text, reply_markup=_funny_menu_keyboard(chat_id, settings))
+            return
+
+        if sub == "learn_now":
+            parsed_chat_id = _part_int(3)
+            chat_id = parsed_chat_id if parsed_chat_id is not None else _chat_id_fallback()
+            profile = _build_learning_profile_from_memory(memory, settings)
+            async with _FUNNY_SCAN_STATE_LOCK:
+                state = _load_funny_scan_state()
+                state["learning_profile"] = profile
+                _save_funny_scan_state(state)
+            stats = profile.get("source_stats", {}) if isinstance(profile, dict) else {}
+            await query.edit_message_text(
+                (
+                    "learning profile обновлен\n"
+                    f"source={stats.get('source_chat_id', 0)}\n"
+                    f"messages={stats.get('messages_total', 0)}\n"
+                    f"examples={stats.get('examples_total', 0)}"
+                ),
+                reply_markup=_funny_menu_keyboard(chat_id, settings),
+            )
             return
 
         if sub == "list":
@@ -3590,7 +3882,20 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
             return
 
         chat_id = int(parts[3]) if len(parts) >= 4 else query.message.chat_id
-        if input_kind in {"system_prompt", "style", "bio", "heat", "funny_period", "funny_threshold", "funny_budget"}:
+        if input_kind in {
+            "system_prompt",
+            "style",
+            "bio",
+            "heat",
+            "funny_period",
+            "funny_threshold",
+            "funny_budget",
+            "funny_main_chat_id",
+            "funny_gluboko_chat_id",
+            "funny_backfill_date",
+            "funny_import_main_path",
+            "funny_import_gluboko_path",
+        }:
             _set_admin_pending(context, {"action": input_kind})
             hints = {
                 "system_prompt": "пришли новый system prompt одним сообщением",
@@ -3600,6 +3905,11 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
                 "funny_period": "пришли период сканирования в часах (например 24)",
                 "funny_threshold": "пришли review threshold 0..100",
                 "funny_budget": "пришли daily token budget (например 50000)",
+                "funny_main_chat_id": "пришли chat_id основной беседы (например -1001234567890)",
+                "funny_gluboko_chat_id": "пришли chat_id канала Глубоко (например -1001234567890)",
+                "funny_backfill_date": "пришли дату старта backfill в формате YYYY-MM-DD",
+                "funny_import_main_path": "пришли абсолютный путь до папки Telegram Export для main",
+                "funny_import_gluboko_path": "пришли абсолютный путь до папки Telegram Export для gluboko",
             }
             back_target = f"adm:funny:menu:{chat_id}" if input_kind.startswith("funny_") else f"adm:root:{chat_id}"
             await query.edit_message_text(
@@ -3630,7 +3940,7 @@ async def web_app_data_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     message = update.effective_message
     if not message or not message.from_user:
         return
-    if message.from_user.id != OWNER_ID:
+    if int(message.from_user.id) not in OWNER_IDS:
         logger.warning("Unauthorized web_app_data from %s", message.from_user.id)
         return
     web_app_data = getattr(message, "web_app_data", None)
@@ -3705,8 +4015,9 @@ async def story_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     memory = load_memory()
     message = update.effective_message
+    author = _resolve_author_from_message(message) if message else None
 
-    if not message or not message.from_user:
+    if not message or not author:
         return
 
     if await _handle_admin_pending_text(update, context, memory):
@@ -3717,8 +4028,8 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     logger.info(
         "Входящее текстовое сообщение: user_id=%s username=%s chat_id=%s текст=%s",
-        message.from_user.id,
-        message.from_user.username,
+        author.get("user_id"),
+        author.get("username"),
         message.chat_id,
         message.text,
     )
@@ -3784,16 +4095,16 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     memory = load_memory()
     message = update.effective_message
 
-    if not message or not message.from_user:
+    if not message or not _resolve_author_from_message(message):
         return
 
-    user = message.from_user
+    author = _resolve_author_from_message(message) or {}
     chat_id = message.chat_id
 
     logger.info(
         "Входящее фото: user_id=%s username=%s chat_id=%s",
-        user.id,
-        user.username,
+        author.get("user_id"),
+        author.get("username"),
         chat_id,
     )
 
@@ -3833,7 +4144,7 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         if not decision.should_reply:
             return
 
-        if not can_use_vision(memory, chat_id, user.id):
+        if not can_use_vision(memory, chat_id, int(author.get("user_id", 0) or 0)):
             logger.info("Лимит vision исчерпан, фото пропускаю")
             return
 
@@ -3842,7 +4153,7 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         file_bytes = await file.download_as_bytearray()
         image_b64 = base64.b64encode(file_bytes).decode("utf-8")
 
-        increase_vision_counters(memory, chat_id, user.id)
+        increase_vision_counters(memory, chat_id, int(author.get("user_id", 0) or 0))
 
         reply_text = await _run_with_typing(context, message.chat_id, call_openai_vision(memory, message, image_b64))
         reply_text = sanitize_reply_text(reply_text)
@@ -3865,7 +4176,7 @@ def owner_only(func):
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = update.effective_user
 
-        if not user or user.id != OWNER_ID:
+        if not user or int(user.id) not in OWNER_IDS:
             logger.warning("Неавторизованная admin-команда от user_id=%s", user.id if user else "unknown")
             return
 

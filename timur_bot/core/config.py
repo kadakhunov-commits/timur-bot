@@ -34,6 +34,7 @@ class AppConfig:
     gemini_api_key: str
     miniapp_url: str
     owner_id: int
+    owner_ids: List[int]
     text_model: str
     vision_model: str
     voice_model: str
@@ -142,6 +143,12 @@ def _normalize_funny_scan_defaults(raw: Any) -> Dict[str, Any]:
         }
     return {
         "enabled": bool(data.get("enabled", False)),
+        "gluboko_chat_id": int(data.get("gluboko_chat_id", 0) or 0),
+        "main_chat_id": int(data.get("main_chat_id", 0) or 0),
+        "backfill_start_date_msk": str(data.get("backfill_start_date_msk", "") or "").strip(),
+        "owner_delivery_mode": str(data.get("owner_delivery_mode", "auto_forward") or "auto_forward"),
+        "rule_min_hearts": int(data.get("rule_min_hearts", 3)),
+        "rule_min_laugh_markers": int(data.get("rule_min_laugh_markers", 2)),
         "scan_period_hours": int(data.get("scan_period_hours", 24)),
         "scan_schedule_minutes": int(data.get("scan_schedule_minutes", 60)),
         "intensity": str(data.get("intensity", "balanced")),
@@ -174,6 +181,7 @@ def _normalize_funny_scan_lexicon(raw: Any) -> Dict[str, Any]:
         "noise_markers": _coerce_str_list(data.get("noise_markers")) or ["кринж", "жесть", "мда"],
         "heart_emojis": _coerce_str_list(data.get("heart_emojis")) or ["❤", "❤️", "💘", "💖", "💗", "💓", "💞", "💕"],
         "laugh_emojis": _coerce_str_list(data.get("laugh_emojis")) or ["😂", "🤣", "😹", "😆"],
+        "extra_laugh_markers": _coerce_str_list(data.get("extra_laugh_markers")) or ["сука", "мука", "бля", "лол", "лоо"],
         "reaction_weights": {
             "total": float(reaction_weights_raw.get("total", 0.35)),
             "heart": float(reaction_weights_raw.get("heart", 1.4)),
@@ -234,6 +242,19 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
     memory_path_env = os.getenv("MEMORY_PATH", "").strip()
     billing_path_env = os.getenv("BILLING_PATH", "").strip()
 
+    owner_id = int(runtime.get("owner_id", 428469927))
+    owner_ids_raw = runtime.get("owner_ids") if isinstance(runtime.get("owner_ids"), list) else []
+    owner_ids: List[int] = []
+    for item in owner_ids_raw:
+        try:
+            parsed = int(item)
+        except Exception:
+            continue
+        if parsed not in owner_ids:
+            owner_ids.append(parsed)
+    if owner_id not in owner_ids:
+        owner_ids.insert(0, owner_id)
+
     return AppConfig(
         base_dir=root,
         memory_path=Path(memory_path_env) if memory_path_env else root / "memory.json",
@@ -243,7 +264,8 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
         openai_base_url=openai_base_url,
         gemini_api_key=gemini_api_key,
         miniapp_url=miniapp_url,
-        owner_id=int(runtime.get("owner_id", 428469927)),
+        owner_id=owner_id,
+        owner_ids=owner_ids,
         text_model=openai_text_model or str(models.get("text", "gpt-4o-mini")),
         vision_model=openai_vision_model or str(models.get("vision", "gpt-4o-mini")),
         voice_model=str(models.get("voice", "gemini-3.1-flash-tts-preview")),

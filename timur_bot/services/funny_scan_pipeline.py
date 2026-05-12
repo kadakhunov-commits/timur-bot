@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Sequence, Tuple
+from zoneinfo import ZoneInfo
 
 
 def _norm_text(text: str) -> str:
@@ -17,6 +18,17 @@ def _parse_ts(value: str) -> datetime | None:
         return datetime.fromisoformat(raw.replace("Z", "+00:00")).replace(tzinfo=None)
     except Exception:
         return None
+
+
+def _backfill_start_utc(backfill_start_date_msk: str) -> datetime | None:
+    raw = str(backfill_start_date_msk or "").strip()
+    if not raw:
+        return None
+    try:
+        start_local = datetime.strptime(raw, "%Y-%m-%d").replace(tzinfo=ZoneInfo("Europe/Moscow"))
+    except Exception:
+        return None
+    return start_local.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
 
 
 def _clamp_score(score: float) -> float:
@@ -54,14 +66,31 @@ def extract_period_messages(
     messages: Sequence[Dict[str, Any]],
     *,
     period_hours: int,
+    backfill_start_date_msk: str = "",
     now: datetime | None = None,
 ) -> List[Dict[str, Any]]:
     if not messages:
         return []
     end_ts = now or datetime.utcnow()
     cutoff = end_ts - timedelta(hours=max(1, int(period_hours)))
+    backfill_cutoff = _backfill_start_utc(backfill_start_date_msk)
+    if backfill_cutoff:
+        cutoff = max(cutoff, backfill_cutoff)
     filtered = [msg for msg in messages if (_parse_ts(str(msg.get("ts", ""))) or datetime.min) >= cutoff]
     return filtered
+
+
+def _count_laugh_marker_hits(text: str, markers: Sequence[str]) -> int:
+    normalized = _norm_text(text).lower()
+    if not normalized:
+        return 0
+    total = 0
+    for marker in markers:
+        token = str(marker or "").strip().lower()
+        if not token:
+            continue
+        total += normalized.count(token)
+    return total
 
 
 def _reaction_stats(
@@ -186,7 +215,9 @@ def _score_anchor(
         return 0.0, [], ["empty_text"], []
 
     low = text.lower()
-    laugh_markers = [str(x).lower() for x in (lexicon.get("laugh_markers") or [])]
+    laugh_markers = sorted(
+        set([str(x).lower() for x in (lexicon.get("laugh_markers") or [])] + [str(x).lower() for x in (lexicon.get("extra_laugh_markers") or [])])
+    )
     habitual_markers = [str(x).lower() for x in (lexicon.get("habitual_laugh_markers") or [])]
     sarcasm_markers = [str(x).lower() for x in (lexicon.get("sarcasm_markers") or [])]
     toxicity_markers = [str(x).lower() for x in (lexicon.get("toxicity_markers") or [])]
@@ -271,7 +302,17 @@ def build_stage1_candidates(
     stage1_min = max(0, min(100, int(settings.get("stage1_min_score", 42))))
     max_candidates = max(1, int(settings.get("max_candidates_per_scan", 30)))
     pure_laugh_re = _build_pure_laugh_re(lexicon)
-    laugh_markers = [str(x).lower() for x in (lexicon.get("laugh_markers") or [])]
+    laugh_markers = sorted(
+        set([str(x).lower() for x in (lexicon.get("laugh_markers") or [])] + [str(x).lower() for x in (lexicon.get("extra_laugh_markers") or [])])
+    )
+    rule_min_hearts = max(0, int(settings.get("rule_min_hearts", 3)))
+    rule_min_laugh_markers = max(0, int(settings.get("rule_min_laugh_markers", 2)))
+    has_reaction_data_for_chat = any(
+        str(key).startswith(f"{int(source_chat_id)}:")
+        and isinstance(value, dict)
+        and int(value.get("total", 0)) > 0
+        for key, value in (reaction_index.items() if isinstance(reaction_index, dict) else [])
+    )
 
     drafts: List[Dict[str, Any]] = []
     used_anchors: set[int] = set()
@@ -288,6 +329,14 @@ def build_stage1_candidates(
             pure_laugh_re=pure_laugh_re,
         )
         if score < stage1_min:
+            continue
+        anchor_reactions = _reaction_stats(reaction_index, chat_id=source_chat_id, message_id=message_id)
+        if has_reaction_data_for_chat and anchor_reactions["heart"] < rule_min_hearts:
+            continue
+        laugh_hits = _count_laugh_marker_hits(str(msg.get("text", "")), laugh_markers)
+        for tail_msg in messages[idx + 1 : idx + 7]:
+            laugh_hits += _count_laugh_marker_hits(str(tail_msg.get("text", "")), laugh_markers)
+        if laugh_hits < rule_min_laugh_markers:
             continue
 
         start, end = _build_cluster(
@@ -327,6 +376,11 @@ def build_stage1_candidates(
             positives_local.append("dynamic_cluster")
         if laugh_after:
             positives_local.append("laugh_tail")
+        if has_reaction_data_for_chat:
+            positives_local.append("rule_hearts")
+        else:
+            positives_local.append("rule_hearts_skipped_no_reactions")
+        positives_local.append("rule_laugh_hits")
 
         drafts.append(
             {
@@ -351,3 +405,84 @@ def build_stage1_candidates(
 
     drafts.sort(key=lambda x: (-float(x.get("pre_score", 0.0)), int(x.get("anchor_message_id", 0))))
     return drafts[:max_candidates]
+
+
+def build_learning_profile(
+    messages: Sequence[Dict[str, Any]],
+    *,
+    source_chat_id: int,
+    source_chat_title: str,
+    lexicon: Dict[str, Any],
+    max_examples: int = 8,
+) -> Dict[str, Any]:
+    if not messages:
+        return {
+            "examples": [],
+            "updated_at": datetime.utcnow().isoformat(),
+            "source_stats": {
+                "source_chat_id": int(source_chat_id),
+                "source_chat_title": source_chat_title,
+                "messages_total": 0,
+                "examples_total": 0,
+            },
+        }
+
+    laugh_markers = sorted(
+        set([str(x).lower() for x in (lexicon.get("laugh_markers") or [])] + [str(x).lower() for x in (lexicon.get("extra_laugh_markers") or [])])
+    )
+    pure_laugh_re = _build_pure_laugh_re(lexicon)
+    toxicity_markers = [str(x).lower() for x in (lexicon.get("toxicity_markers") or [])]
+    examples: List[Dict[str, Any]] = []
+
+    for idx, msg in enumerate(messages):
+        text = _norm_text(str(msg.get("text", "")))
+        if not text or len(text) < 3 or len(text) > 300:
+            continue
+        if pure_laugh_re.match(text.lower()):
+            continue
+
+        score = 0.0
+        signals: List[str] = []
+        if len(text) <= 120:
+            score += 1.2
+            signals.append("compact")
+        hits = _count_laugh_marker_hits(text, laugh_markers)
+        if hits > 0:
+            score += 2.2 + min(2.0, hits * 0.4)
+            signals.append("laugh_marker")
+        if any(marker and marker in text.lower() for marker in toxicity_markers):
+            score += 0.6
+            signals.append("rough_style")
+        after = messages[idx + 1 : idx + 4]
+        if any(_is_laugh_response(str(item.get("text", "")), laugh_markers, pure_laugh_re) for item in after):
+            score += 2.4
+            signals.append("laugh_after")
+        if score < 2.8:
+            continue
+
+        context_rows: List[str] = []
+        for row in messages[max(0, idx - 2) : idx]:
+            author = str(row.get("name") or row.get("username") or row.get("user_id") or "unknown")
+            context_rows.append(f"{author}: {_norm_text(str(row.get('text', '')))}")
+        examples.append(
+            {
+                "anchor_message_id": int(msg.get("message_id", 0)),
+                "score": round(score, 2),
+                "context": context_rows,
+                "punchline": text,
+                "signals": sorted(set(signals)),
+            }
+        )
+
+    examples.sort(key=lambda x: (-float(x.get("score", 0.0)), int(x.get("anchor_message_id", 0))))
+    trimmed = examples[: max(1, int(max_examples))]
+    return {
+        "examples": trimmed,
+        "updated_at": datetime.utcnow().isoformat(),
+        "source_stats": {
+            "source_chat_id": int(source_chat_id),
+            "source_chat_title": source_chat_title,
+            "messages_total": len(messages),
+            "examples_total": len(trimmed),
+        },
+    }

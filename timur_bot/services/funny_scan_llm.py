@@ -41,6 +41,7 @@ def build_llm_payload(
     *,
     max_context_messages: int,
     max_chars_per_message: int,
+    learning_examples: Sequence[Dict[str, Any]] | None = None,
 ) -> Dict[str, Any]:
     messages = list(candidate.get("cluster_messages") or [])
     compact_messages: List[Dict[str, Any]] = []
@@ -68,6 +69,7 @@ def build_llm_payload(
             "end_message_id": int((candidate.get("message_ids") or [0])[-1]),
         },
         "messages": compact_messages,
+        "learning_examples": list(learning_examples or [])[:8],
     }
 
 
@@ -77,6 +79,7 @@ def build_llm_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
         "Оценивай только по данным в payload: текст, последовательность реплик и реакции.\n"
         "Ставь итоговый score по единой шкале 0..100.\n"
         "Штрафуй привычные ахах/лол, сарказм без реального эффекта и мат без смешного контекста.\n"
+        "Используй learning_examples в payload как эталон вкуса юмора этого чата.\n"
         "Верни только JSON-объект без комментариев."
     )
     user_text = (
@@ -153,11 +156,13 @@ def evaluate_candidate_with_llm(
     max_context_messages: int,
     max_chars_per_message: int,
     review_threshold: int,
+    learning_examples: Sequence[Dict[str, Any]] | None = None,
 ) -> Tuple[Dict[str, Any], int]:
     payload = build_llm_payload(
         candidate,
         max_context_messages=max_context_messages,
         max_chars_per_message=max_chars_per_message,
+        learning_examples=learning_examples,
     )
     messages = build_llm_messages(payload)
     request_text = json.dumps(messages, ensure_ascii=False)

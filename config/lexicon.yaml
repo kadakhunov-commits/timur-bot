@@ -156,6 +156,12 @@ funny_scan_lexicon:
     - "ржака"
     - "угар"
     - "вынесло"
+  extra_laugh_markers:
+    - "сука"
+    - "мука"
+    - "бля"
+    - "лол"
+    - "лоо"
   habitual_laugh_markers:
     - "ахах"
     - "ахаха"

@@ -18,6 +18,7 @@ def test_build_llm_payload_truncates_context_and_text() -> None:
 
     assert len(payload["messages"]) == 2
     assert len(payload["messages"][0]["text"]) == 50
+    assert payload["learning_examples"] == []
 
 
 def test_normalize_llm_result_clamps_and_repairs_boundary() -> None:

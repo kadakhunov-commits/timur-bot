@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from copy import deepcopy
 from datetime import date, datetime
 from pathlib import Path
@@ -31,6 +32,19 @@ def _clamp_int(value: Any, low: int, high: int, default: int) -> int:
 
 def _norm_emoji(value: str) -> str:
     return str(value or "").replace("\ufe0f", "").strip()
+
+
+def _normalize_backfill_start_date_msk(raw: Any) -> str:
+    value = str(raw or "").strip()
+    if not value:
+        return ""
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        return ""
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+    except ValueError:
+        return ""
+    return value
 
 
 def default_funny_scan_config(owner_id: int, runtime_defaults: Dict[str, Any] | None = None) -> Dict[str, Any]:
@@ -64,6 +78,12 @@ def default_funny_scan_config(owner_id: int, runtime_defaults: Dict[str, Any] | 
     return {
         "enabled": bool(defaults.get("enabled", False)),
         "owner_dm_chat_id": int(defaults.get("owner_dm_chat_id", owner_id)),
+        "gluboko_chat_id": int(defaults.get("gluboko_chat_id", 0) or 0),
+        "main_chat_id": int(defaults.get("main_chat_id", 0) or 0),
+        "backfill_start_date_msk": _normalize_backfill_start_date_msk(defaults.get("backfill_start_date_msk")),
+        "owner_delivery_mode": str(defaults.get("owner_delivery_mode", "auto_forward") or "auto_forward"),
+        "rule_min_hearts": _clamp_int(defaults.get("rule_min_hearts"), 0, 100, 3),
+        "rule_min_laugh_markers": _clamp_int(defaults.get("rule_min_laugh_markers"), 0, 20, 2),
         "sources": [],
         "scan_period_hours": _clamp_int(defaults.get("scan_period_hours"), 1, 24 * 30, 24),
         "scan_schedule_minutes": _clamp_int(defaults.get("scan_schedule_minutes"), 15, 24 * 60, 60),
@@ -120,6 +140,18 @@ def ensure_funny_scan_config(
         settings.setdefault(key, deepcopy(value))
 
     settings["owner_dm_chat_id"] = int(settings.get("owner_dm_chat_id", owner_id))
+    settings["gluboko_chat_id"] = int(settings.get("gluboko_chat_id", defaults["gluboko_chat_id"]))
+    settings["main_chat_id"] = int(settings.get("main_chat_id", defaults["main_chat_id"]))
+    settings["backfill_start_date_msk"] = _normalize_backfill_start_date_msk(
+        settings.get("backfill_start_date_msk", defaults["backfill_start_date_msk"])
+    )
+    settings["owner_delivery_mode"] = str(settings.get("owner_delivery_mode") or defaults["owner_delivery_mode"])
+    if settings["owner_delivery_mode"] not in {"auto_forward", "preview"}:
+        settings["owner_delivery_mode"] = "auto_forward"
+    settings["rule_min_hearts"] = _clamp_int(settings.get("rule_min_hearts"), 0, 100, defaults["rule_min_hearts"])
+    settings["rule_min_laugh_markers"] = _clamp_int(
+        settings.get("rule_min_laugh_markers"), 0, 20, defaults["rule_min_laugh_markers"]
+    )
     settings["scan_period_hours"] = _clamp_int(settings.get("scan_period_hours"), 1, 24 * 30, defaults["scan_period_hours"])
     settings["scan_schedule_minutes"] = _clamp_int(
         settings.get("scan_schedule_minutes"), 15, 24 * 60, defaults["scan_schedule_minutes"]
@@ -206,6 +238,11 @@ def default_funny_scan_state() -> Dict[str, Any]:
             "last_candidate_seq": 0,
         },
         "reaction_index": {},
+        "learning_profile": {
+            "examples": [],
+            "updated_at": None,
+            "source_stats": {"source_chat_id": 0, "source_chat_title": "", "messages_total": 0, "examples_total": 0},
+        },
         "candidates": {},
         "candidate_order": [],
     }
@@ -230,6 +267,20 @@ def ensure_state_schema(state: Dict[str, Any]) -> Dict[str, Any]:
 
     if not isinstance(state.get("reaction_index"), dict):
         state["reaction_index"] = {}
+    if not isinstance(state.get("learning_profile"), dict):
+        state["learning_profile"] = {}
+    lp = state["learning_profile"]
+    lp.setdefault("examples", [])
+    lp.setdefault("updated_at", None)
+    lp.setdefault("source_stats", {})
+    if not isinstance(lp.get("examples"), list):
+        lp["examples"] = []
+    if not isinstance(lp.get("source_stats"), dict):
+        lp["source_stats"] = {}
+    lp["source_stats"].setdefault("source_chat_id", 0)
+    lp["source_stats"].setdefault("source_chat_title", "")
+    lp["source_stats"].setdefault("messages_total", 0)
+    lp["source_stats"].setdefault("examples_total", 0)
     if not isinstance(state.get("candidates"), dict):
         state["candidates"] = {}
     if not isinstance(state.get("candidate_order"), list):

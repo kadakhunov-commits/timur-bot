@@ -29,15 +29,22 @@ def format_funny_status(settings: Dict[str, Any], state: Dict[str, Any]) -> str:
             by_status[status] += 1
 
     enabled_sources = [s for s in (settings.get("sources") or []) if isinstance(s, dict) and bool(s.get("enabled", True))]
+    learning = state.get("learning_profile", {}) if isinstance(state.get("learning_profile"), dict) else {}
+    learning_stats = learning.get("source_stats", {}) if isinstance(learning.get("source_stats"), dict) else {}
     return (
         "смешные моменты (scanner)\n"
         f"enabled: {'on' if settings.get('enabled') else 'off'}\n"
+        f"delivery: {settings.get('owner_delivery_mode', 'auto_forward')}\n"
         f"intensity: {settings.get('intensity', 'balanced')}\n"
         f"sources active: {len(enabled_sources)}\n"
+        f"roles: main={settings.get('main_chat_id', 0)} gluboko={settings.get('gluboko_chat_id', 0)}\n"
+        f"backfill_start_date_msk: {settings.get('backfill_start_date_msk') or '-'}\n"
         f"period: {settings.get('scan_period_hours', 24)}h, schedule: {settings.get('scan_schedule_minutes', 60)}m\n"
         f"thresholds: stage1={settings.get('stage1_min_score', 42)} review={settings.get('review_threshold', 70)}\n"
+        f"rules: hearts>={settings.get('rule_min_hearts', 3)} laugh_hits>={settings.get('rule_min_laugh_markers', 2)}\n"
         f"limits: cand={settings.get('max_candidates_per_scan', 30)}, llm={settings.get('max_llm_candidates_per_scan', 12)}, fwd/day={settings.get('daily_forward_limit', 20)}\n"
         f"budget: {budget.get('tokens_used', 0)}/{settings.get('daily_token_budget', 0)} (hard {settings.get('daily_token_hard_stop', 0)}) day={budget.get('day', '-')}\n"
+        f"learning: source={learning_stats.get('source_chat_id', 0)} examples={learning_stats.get('examples_total', 0)} updated={_fmt_ts(str(learning.get('updated_at') or ''))}\n"
         f"queue: new={by_status['new']} approved={by_status['approved']} rejected={by_status['rejected']} sent={by_status['sent']}\n"
         f"last_scan: {_fmt_ts(str(data.get('last_scan_ts') or ''))}"
     )

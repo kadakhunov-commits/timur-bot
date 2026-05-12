@@ -1,7 +1,10 @@
 owner_id: 428469927
+owner_ids:
+  - 428469927
+  - 93135242
 
 models:
-  text: "gpt-4o-mini"
+  text: "x-ai/grok-4-fast"
   vision: "gpt-4o-mini"
   voice: "gemini-3.1-flash-tts-preview"
   voice_name: "Kore"
@@ -31,6 +34,12 @@ probabilities:
 
 funny_scan:
   enabled: false
+  gluboko_chat_id: 0
+  main_chat_id: 0
+  backfill_start_date_msk: ""
+  owner_delivery_mode: "auto_forward"
+  rule_min_hearts: 3
+  rule_min_laugh_markers: 2
   scan_period_hours: 24
   scan_schedule_minutes: 60
   intensity: "balanced"

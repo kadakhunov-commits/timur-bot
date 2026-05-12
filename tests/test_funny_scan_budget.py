@@ -170,3 +170,126 @@ def test_scan_does_not_hold_state_lock_during_llm_call(monkeypatch) -> None:
 
     assert summary["llm_calls"] == 1
     assert lock_seen["during_llm"] is False
+
+
+def test_scan_uses_main_chat_and_auto_forwards(monkeypatch) -> None:
+    now_ts = datetime.utcnow().isoformat()
+    memory = runtime.default_memory()
+    settings = runtime._get_funny_scan_settings(memory)
+    settings["main_chat_id"] = -5001
+    settings["owner_delivery_mode"] = "auto_forward"
+    settings["review_threshold"] = 70
+    memory["chats"]["-5001"] = {
+        "history": [{"message_id": 42, "user_id": 1, "name": "u1", "text": "x", "ts": now_ts}]
+    }
+    memory["chats"]["-7001"] = {
+        "history": [{"message_id": 99, "user_id": 2, "name": "u2", "text": "y", "ts": now_ts}]
+    }
+    state = default_funny_scan_state()
+    stage1 = {
+        "source_chat_id": -5001,
+        "source_chat_title": "chat",
+        "anchor_message_id": 42,
+        "time_start": now_ts,
+        "time_end": now_ts,
+        "message_ids": [42],
+        "cluster_messages": [],
+        "pre_score": 55,
+        "signals_pos": [],
+        "signals_neg": [],
+    }
+
+    monkeypatch.setattr(runtime, "load_memory", lambda: memory)
+    monkeypatch.setattr(runtime, "_load_funny_scan_state", lambda: state)
+    monkeypatch.setattr(runtime, "_save_funny_scan_state", lambda _state: None)
+    monkeypatch.setattr(runtime, "build_stage1_candidates", lambda *args, **kwargs: [stage1])
+    monkeypatch.setattr(
+        runtime,
+        "evaluate_candidate_with_llm",
+        lambda *args, **kwargs: (
+            {
+                "score": 88,
+                "show_to_owner": True,
+                "reason_short": "ok",
+                "boundary": {},
+                "positive_signals": [],
+                "negative_signals": [],
+            },
+            111,
+        ),
+    )
+
+    calls = {"count": 0}
+
+    async def _forward(*, bot, settings, candidate_id, action="approve"):
+        del bot, settings, candidate_id, action
+        calls["count"] += 1
+        return True, "ok"
+
+    monkeypatch.setattr(runtime, "_forward_funny_candidate", _forward)
+
+    app = SimpleNamespace(bot=SimpleNamespace())
+    summary = asyncio.run(runtime._run_funny_scan_once(app, trigger="manual"))
+
+    assert summary["sources"] == 1
+    assert summary["forwarded"] == 1
+    assert calls["count"] == 1
+
+
+def test_manual_scan_expands_period_to_backfill_start(monkeypatch) -> None:
+    now_ts = datetime.utcnow().isoformat()
+    memory = runtime.default_memory()
+    settings = runtime._get_funny_scan_settings(memory)
+    settings["main_chat_id"] = -5001
+    settings["backfill_start_date_msk"] = "2024-01-01"
+    settings["owner_delivery_mode"] = "preview"
+    memory["chats"]["-5001"] = {
+        "history": [{"message_id": 42, "user_id": 1, "name": "u1", "text": "x", "ts": now_ts}]
+    }
+    state = default_funny_scan_state()
+    seen = {"hours": 0}
+    stage1 = {
+        "source_chat_id": -5001,
+        "source_chat_title": "chat",
+        "anchor_message_id": 42,
+        "time_start": now_ts,
+        "time_end": now_ts,
+        "message_ids": [42],
+        "cluster_messages": [],
+        "pre_score": 55,
+        "signals_pos": [],
+        "signals_neg": [],
+    }
+
+    monkeypatch.setattr(runtime, "load_memory", lambda: memory)
+    monkeypatch.setattr(runtime, "_load_funny_scan_state", lambda: state)
+    monkeypatch.setattr(runtime, "_save_funny_scan_state", lambda _state: None)
+
+    def _extract(messages, *, period_hours, backfill_start_date_msk="", now=None):
+        del backfill_start_date_msk, now
+        seen["hours"] = period_hours
+        return list(messages)
+
+    monkeypatch.setattr(runtime, "extract_period_messages", _extract)
+    monkeypatch.setattr(runtime, "build_stage1_candidates", lambda *args, **kwargs: [stage1])
+    monkeypatch.setattr(
+        runtime,
+        "evaluate_candidate_with_llm",
+        lambda *args, **kwargs: (
+            {
+                "score": 88,
+                "show_to_owner": True,
+                "reason_short": "ok",
+                "boundary": {},
+                "positive_signals": [],
+                "negative_signals": [],
+            },
+            111,
+        ),
+    )
+    monkeypatch.setattr(runtime, "_send_funny_candidate_preview", lambda *args, **kwargs: asyncio.sleep(0, result=True))
+
+    app = SimpleNamespace(bot=SimpleNamespace())
+    asyncio.run(runtime._run_funny_scan_once(app, trigger="manual"))
+
+    assert seen["hours"] > 24

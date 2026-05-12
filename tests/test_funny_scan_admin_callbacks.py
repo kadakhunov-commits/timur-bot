@@ -42,6 +42,14 @@ def _make_update(query: DummyQuery):
     )
 
 
+def _make_update_with_user(query: DummyQuery, user_id: int):
+    return SimpleNamespace(
+        callback_query=query,
+        effective_user=SimpleNamespace(id=user_id),
+        effective_chat=SimpleNamespace(id=query.message.chat_id),
+    )
+
+
 @pytest.mark.parametrize("callback_data", ["adm:funny:toggle:1", "adm:funny:menu:1"])
 def test_funny_callbacks_render_without_error(monkeypatch: pytest.MonkeyPatch, callback_data: str) -> None:
     memory = runtime.default_memory()
@@ -96,3 +104,20 @@ def test_funny_callbacks_handle_bad_int_payload(monkeypatch: pytest.MonkeyPatch)
     asyncio.run(runtime.admin_callback_handler(update, context))
 
     assert any(kwargs.get("show_alert") for _, kwargs in query.answer_calls)
+
+
+def test_funny_callbacks_allow_second_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+    memory = runtime.default_memory()
+    state = default_funny_scan_state()
+    monkeypatch.setattr(runtime, "load_memory", lambda: memory)
+    monkeypatch.setattr(runtime, "save_memory", lambda _memory: None)
+    monkeypatch.setattr(runtime, "_load_funny_scan_state", lambda: state)
+    monkeypatch.setattr(runtime, "_save_funny_scan_state", lambda _state: None)
+    monkeypatch.setattr(runtime, "OWNER_IDS", {runtime.OWNER_ID, runtime.OWNER_ID + 1})
+
+    query = DummyQuery("adm:funny:menu:1")
+    update = _make_update_with_user(query, runtime.OWNER_ID + 1)
+    context = DummyContext()
+    asyncio.run(runtime.admin_callback_handler(update, context))
+
+    assert "смешные моменты" in query.edited_text
