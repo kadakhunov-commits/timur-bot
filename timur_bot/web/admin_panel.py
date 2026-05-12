@@ -27,16 +27,6 @@ def _read_index() -> str:
     return MINIAPP_INDEX.read_text(encoding="utf-8")
 
 
-def _resolve_port(default: int = 80) -> int:
-    raw = os.getenv("PORT", "").strip()
-    if not raw or raw.lower() == "null":
-        return default
-    try:
-        return int(raw)
-    except ValueError:
-        return default
-
-
 def _build_client_meta() -> dict[str, object]:
     meta = get_runtime_meta()
     build_number = (
@@ -106,8 +96,7 @@ def miniapp_launch() -> Response:
 
 
 def main() -> None:
-    port = _resolve_port(80)
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=80)
 
 
 if __name__ == "__main__":
