@@ -8,8 +8,8 @@ from typing import Any, Dict, List, Set
 import yaml
 from dotenv import load_dotenv
 
-DEFAULT_MINIAPP_URL = "https://timur-bot-91825649.web.app"
-DEAD_MINIAPP_HOSTS = ("albasty-5ba44.web.app",)
+DEFAULT_MINIAPP_URL = ""
+DEAD_MINIAPP_HOSTS = ("albasty-5ba44.web.app", "timur-bot-91825649.web.app")
 
 
 class ConfigError(RuntimeError):
@@ -19,7 +19,7 @@ class ConfigError(RuntimeError):
 def _resolve_miniapp_url() -> str:
     raw_url = os.getenv("MINIAPP_URL", "").strip()
     if raw_url and any(host in raw_url for host in DEAD_MINIAPP_HOSTS):
-        return DEFAULT_MINIAPP_URL
+        return ""
     return raw_url or DEFAULT_MINIAPP_URL
 
 

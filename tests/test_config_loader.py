@@ -28,6 +28,7 @@ defaults:
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
     monkeypatch.setenv("OPENAI_API_KEY", "k")
     monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_TEXT_MODEL", raising=False)
 
     cfg = load_app_config(tmp_path)
     assert cfg.default_active_mode == "default"

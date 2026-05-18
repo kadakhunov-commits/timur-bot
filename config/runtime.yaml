@@ -4,7 +4,7 @@ owner_ids:
   - 93135242
 
 models:
-  text: "x-ai/grok-4-fast"
+  text: "deepseek/deepseek-v4-flash"
   vision: "gpt-4o-mini"
   voice: "gemini-3.1-flash-tts-preview"
   voice_name: "Kore"
