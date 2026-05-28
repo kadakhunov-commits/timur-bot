@@ -136,7 +136,7 @@ def _load_settings() -> SecureFaceSettings:
         cache_dir=cache_dir,
         max_side=_clamp_int(os.getenv("SECURE_FACE_MAX_SIDE", "960"), 320, 2048, 960),
         match_threshold=_clamp_float(os.getenv("SECURE_FACE_MATCH_THRESHOLD", "92"), 20.0, 180.0, 92.0),
-        emoji_chance=_clamp_float(os.getenv("SECURE_FACE_EMOJI_CHANCE", "0.12"), 0.0, 1.0, 0.12),
+        emoji_chance=_clamp_float(os.getenv("SECURE_FACE_EMOJI_CHANCE", "0.24"), 0.0, 1.0, 0.24),
         min_ref_samples=_clamp_int(os.getenv("SECURE_FACE_MIN_REF_SAMPLES", "3"), 2, 5000, 3),
         max_matches=_clamp_int(os.getenv("SECURE_FACE_MAX_MATCHES", "1"), 1, 5, 1),
         second_best_margin=_clamp_float(os.getenv("SECURE_FACE_SECOND_BEST_MARGIN", "5"), 0.0, 100.0, 5.0),
@@ -674,8 +674,13 @@ def _draw_red_marker(draw: ImageDraw.ImageDraw, x: int, y: int, w: int, h: int) 
     for i in range(sweep_count):
         y_line = top + i * sweep_gap + rng.uniform(-sweep_gap * 0.15, sweep_gap * 0.15)
         y_line = max(top, min(bottom, y_line))
-        x_start = left + rng.uniform(0, (right - left) * 0.08)
-        x_end = right - rng.uniform(0, (right - left) * 0.08)
+        base_start = left + rng.uniform(0, (right - left) * 0.08)
+        base_end = right - rng.uniform(0, (right - left) * 0.08)
+        # Слегка гуляем длину концов каждого прохода.
+        start_ext = rng.uniform(-(right - left) * 0.03, (right - left) * 0.09)
+        end_ext = rng.uniform(-(right - left) * 0.03, (right - left) * 0.09)
+        x_start = base_start - start_ext
+        x_end = base_end + end_ext
 
         if current_left_to_right:
             path.append((x_start, y_line))
@@ -686,12 +691,19 @@ def _draw_red_marker(draw: ImageDraw.ImageDraw, x: int, y: int, w: int, h: int) 
         current_left_to_right = not current_left_to_right
 
     smooth_path = _smooth_polyline(path, iterations=2)
+    # Небольшой общий поворот, чтобы мазня выглядела живее.
+    angle = rng.uniform(-0.22, 0.22)
+    cx = (left + right) * 0.5
+    cy = (top + bottom) * 0.5
+    rotated_path = [_rotate_point(px, py, cx, cy, angle) for px, py in smooth_path]
+    x_pad = max(2, int(w * 0.03))
+    y_pad = max(2, int(h * 0.03))
     clamped_path = [
         (
-            int(round(max(left, min(right, px)))),
-            int(round(max(top, min(bottom, py)))),
+            int(round(max(left - x_pad, min(right + x_pad, px)))),
+            int(round(max(top - y_pad, min(bottom + y_pad, py)))),
         )
-        for px, py in smooth_path
+        for px, py in rotated_path
     ]
     if len(clamped_path) < 2:
         return
@@ -707,6 +719,17 @@ def _draw_red_marker(draw: ImageDraw.ImageDraw, x: int, y: int, w: int, h: int) 
     radius = max(3, width_main // 2)
     draw.ellipse((start_x - radius, start_y - radius, start_x + radius, start_y + radius), fill=color)
     draw.ellipse((end_x - radius, end_y - radius, end_x + radius, end_y + radius), fill=color)
+
+
+def _rotate_point(px: float, py: float, cx: float, cy: float, angle_rad: float) -> tuple[float, float]:
+    cos_a = float(np.cos(angle_rad))
+    sin_a = float(np.sin(angle_rad))
+    dx = px - cx
+    dy = py - cy
+    return (
+        cx + dx * cos_a - dy * sin_a,
+        cy + dx * sin_a + dy * cos_a,
+    )
 
 
 def _smooth_polyline(points: Sequence[tuple[float, float]], iterations: int = 2) -> list[tuple[float, float]]:
