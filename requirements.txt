@@ -5,3 +5,5 @@ python-dotenv
 PyYAML
 pytest
 Flask
+numpy
+Pillow

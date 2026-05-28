@@ -18,6 +18,7 @@ from timur_bot.handlers.billing import (
     billstatus_cmd,
 )
 from timur_bot.handlers.chat import photo_handler, reaction_handler, start_cmd, story_cmd, summary_cmd, text_handler
+from timur_bot.handlers.noire import noire_cmd
 from timur_bot.handlers.owner import (
     appendprompt_cmd,
     bit_cmd,
@@ -44,12 +45,14 @@ from timur_bot.handlers.owner import (
     unfunny_cmd,
     whois_cmd,
 )
+from timur_bot.services.noire import NOIRE_COMMAND_PATTERN
 
 
 def register_handlers(application) -> None:
     application.add_handler(CommandHandler("start", start_cmd))
     application.add_handler(CommandHandler("story", story_cmd))
     application.add_handler(CommandHandler("summary", summary_cmd))
+    application.add_handler(CommandHandler("noire", noire_cmd))
     application.add_handler(CommandHandler("admin", admin_cmd))
     application.add_handler(CommandHandler("panel", admin_cmd))
     application.add_handler(CommandHandler("miniapp", miniapp_cmd))
@@ -89,5 +92,11 @@ def register_handlers(application) -> None:
     application.add_handler(CallbackQueryHandler(admin_callback_handler, pattern=r"^adm:"))
     application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, web_app_data_handler))
     application.add_handler(MessageReactionHandler(reaction_handler))
-    application.add_handler(MessageHandler(filters.PHOTO & ~filters.COMMAND, photo_handler))
+    application.add_handler(MessageHandler(filters.PHOTO & filters.CaptionRegex(NOIRE_COMMAND_PATTERN), noire_cmd))
+    application.add_handler(
+        MessageHandler(
+            filters.PHOTO & ~filters.COMMAND & ~filters.CaptionRegex(NOIRE_COMMAND_PATTERN),
+            photo_handler,
+        )
+    )
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
