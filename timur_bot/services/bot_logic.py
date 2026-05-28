@@ -3677,6 +3677,29 @@ def _miniapp_billing_state(chat_id: int) -> Dict[str, Any]:
     }
 
 
+def _miniapp_mood_events(mood: Dict[str, Any], *, limit: int = 8) -> List[Dict[str, Any]]:
+    history = mood.get("event_history", [])
+    if not isinstance(history, list):
+        return []
+    recent = history[-max(1, int(limit)) :]
+    out: List[Dict[str, Any]] = []
+    for raw in reversed(recent):
+        if not isinstance(raw, dict):
+            continue
+        out.append(
+            {
+                "id": int(raw.get("id", 0) or 0),
+                "key": str(raw.get("key", "") or ""),
+                "ts": str(raw.get("created_ts", "") or ""),
+                "privacy": int(raw.get("privacy_level", 0) or 0),
+                "seriousness": int(raw.get("seriousness", 0) or 0),
+                "absurdity": int(raw.get("absurdity", 0) or 0),
+                "public_text": str(raw.get("public_text", "") or ""),
+            }
+        )
+    return out
+
+
 def build_miniapp_launch_url(memory: Dict[str, Any], chat_id: int) -> str:
     if not MINIAPP_URL:
         return ""
@@ -3697,8 +3720,16 @@ def build_miniapp_launch_url(memory: Dict[str, Any], chat_id: int) -> str:
                 "energy": round(float(mood.get("energy", 50.0)), 2),
                 "guard": round(float(mood.get("guard_level", 55.0)), 2),
                 "openness": round(float(mood_chat.get("openness", 50.0)), 2),
+                "trust": round(float(mood_chat.get("trust", 50.0)), 2),
+                "disclosureProgress": round(float(mood_chat.get("progress", 0.0)), 2),
+                "qualifiedAttempts": int(mood_chat.get("qualified_attempts", 0) or 0),
+                "attemptsTotal": int(mood_chat.get("attempts_total", 0) or 0),
                 "eventPrivacy": int(mood_event.get("privacy_level", 0)) if mood_event else 0,
                 "eventPublic": str(mood_event.get("public_text", "")) if mood_event else "",
+                "eventKey": str(mood_event.get("key", "")) if mood_event else "",
+                "eventSeriousness": int(mood_event.get("seriousness", 0) or 0) if mood_event else 0,
+                "eventAbsurdity": int(mood_event.get("absurdity", 0) or 0) if mood_event else 0,
+                "recentEvents": _miniapp_mood_events(mood, limit=8),
             },
         },
         "memory": {

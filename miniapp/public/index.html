@@ -389,6 +389,80 @@
       font-size: 11px;
       line-height: 1.55;
     }
+    .mood-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .mood-kpi {
+      border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
+      border-radius: 12px;
+      padding: 10px;
+      background: color-mix(in srgb, var(--surface) 86%, transparent);
+    }
+    .mood-kpi b {
+      display: block;
+      font-size: 16px;
+      margin-top: 4px;
+      color: var(--text);
+    }
+    .mood-kpi span {
+      color: var(--hint);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      font-weight: 700;
+    }
+    .mood-events {
+      display: grid;
+      gap: 8px;
+      margin-top: 10px;
+      max-height: 240px;
+      overflow: auto;
+      padding-right: 2px;
+    }
+    .mood-event {
+      border: 1px solid color-mix(in srgb, var(--line) 86%, transparent);
+      border-radius: 12px;
+      padding: 10px;
+      background: color-mix(in srgb, var(--surface) 84%, transparent);
+      font-size: 11px;
+      line-height: 1.5;
+    }
+    .mood-event-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      color: var(--hint);
+      font-size: 10px;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      font-weight: 700;
+    }
+    .mood-badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 6px;
+    }
+    .mood-badge {
+      border-radius: 999px;
+      border: 1px solid color-mix(in srgb, var(--line) 90%, transparent);
+      padding: 4px 8px;
+      font-size: 10px;
+      color: var(--hint);
+      background: color-mix(in srgb, var(--card) 88%, transparent);
+      font-weight: 700;
+    }
+    .mood-empty {
+      color: var(--hint);
+      font-size: 11px;
+      border: 1px dashed color-mix(in srgb, var(--line) 88%, transparent);
+      border-radius: 12px;
+      padding: 10px;
+    }
 
     .bubble {
       filter: drop-shadow(0 0 14px rgba(116,69,255,.35));
@@ -440,6 +514,19 @@
         </div>
         <input id="heatRange" type="range" min="0" max="100" value="82" style="width:100%; margin-top:8px; accent-color:#2ee6ff;">
         <div id="previewText" class="preview"></div>
+      </div>
+      <div class="card">
+        <span class="label">Состояние Тимура</span>
+        <div id="moodHeadline" class="small">live mood snapshot</div>
+        <div class="mood-grid">
+          <div class="mood-kpi"><span>Valence</span><b id="moodValence">0.0</b></div>
+          <div class="mood-kpi"><span>Energy</span><b id="moodEnergy">50.0</b></div>
+          <div class="mood-kpi"><span>Guard</span><b id="moodGuard">55.0</b></div>
+          <div class="mood-kpi"><span>Openness (chat)</span><b id="moodOpenness">50.0</b></div>
+        </div>
+        <div id="moodProbeMeta" class="small" style="margin-top:10px"></div>
+        <div class="label" style="margin-top:12px">Последние внутренние события</div>
+        <div id="moodEvents" class="mood-events"></div>
       </div>
     </section>
 
@@ -623,6 +710,19 @@
       };
     }
 
+    function normalizeMoodEvent(item) {
+      if (!isPlainObject(item)) return null;
+      return {
+        id: Number(item.id || 0) || 0,
+        key: String(item.key || "event").trim() || "event",
+        ts: String(item.ts || "").trim(),
+        privacy: Number(item.privacy || 0) || 0,
+        seriousness: Number(item.seriousness || 0) || 0,
+        absurdity: Number(item.absurdity || 0) || 0,
+        publicText: String(item.public_text || item.publicText || "").trim()
+      };
+    }
+
     function buildFallbackGraph(members) {
       const nodes = [];
       const edges = [];
@@ -714,6 +814,24 @@
         ["quotes", "QUOTES"]
       ],
       members: launchState.memory?.members || [],
+      mood: {
+        valence: Number(launchState.settings?.mood?.valence ?? 0),
+        energy: Number(launchState.settings?.mood?.energy ?? 50),
+        guard: Number(launchState.settings?.mood?.guard ?? 55),
+        openness: Number(launchState.settings?.mood?.openness ?? 50),
+        trust: Number(launchState.settings?.mood?.trust ?? 50),
+        disclosureProgress: Number(launchState.settings?.mood?.disclosureProgress ?? 0),
+        qualifiedAttempts: Number(launchState.settings?.mood?.qualifiedAttempts ?? 0),
+        attemptsTotal: Number(launchState.settings?.mood?.attemptsTotal ?? 0),
+        eventPrivacy: Number(launchState.settings?.mood?.eventPrivacy ?? 0),
+        eventKey: String(launchState.settings?.mood?.eventKey || "").trim(),
+        eventPublic: String(launchState.settings?.mood?.eventPublic || "").trim(),
+        eventSeriousness: Number(launchState.settings?.mood?.eventSeriousness ?? 0),
+        eventAbsurdity: Number(launchState.settings?.mood?.eventAbsurdity ?? 0),
+        recentEvents: (Array.isArray(launchState.settings?.mood?.recentEvents) ? launchState.settings.mood.recentEvents : [])
+          .map(normalizeMoodEvent)
+          .filter(Boolean)
+      },
       mindMap: { nodes: [], edges: [], facts: [], source: "preview" },
       chatId: launchState.chatId || null,
       statusTone: "muted",
@@ -905,6 +1023,65 @@
       };
       document.getElementById("heatValue").textContent = state.heat + "/100";
       document.getElementById("previewText").textContent = state.previewText || "...";
+      renderMoodPanel();
+    }
+
+    function renderMoodPanel() {
+      const mood = state.mood || {};
+      const v = Number(mood.valence || 0);
+      const e = Number(mood.energy || 50);
+      const g = Number(mood.guard || 55);
+      const o = Number(mood.openness || 50);
+      const trust = Number(mood.trust || 50);
+      const progress = Number(mood.disclosureProgress || 0);
+      const qa = Number(mood.qualifiedAttempts || 0);
+      const ta = Number(mood.attemptsTotal || 0);
+      const privacy = Number(mood.eventPrivacy || 0);
+      const eventKey = String(mood.eventKey || "none");
+      const publicText = String(mood.eventPublic || "").trim();
+
+      document.getElementById("moodValence").textContent = v.toFixed(1);
+      document.getElementById("moodEnergy").textContent = e.toFixed(1);
+      document.getElementById("moodGuard").textContent = g.toFixed(1);
+      document.getElementById("moodOpenness").textContent = o.toFixed(1);
+
+      const moodLabel =
+        v <= -20 ? "напряжен" :
+        v >= 20 ? "в хорошем плюсе" :
+        "ровное состояние";
+      const headline = `сейчас ${moodLabel} · privacy=${privacy}/3 · event=${eventKey}`;
+      document.getElementById("moodHeadline").textContent = headline;
+      document.getElementById("moodProbeMeta").textContent =
+        `открытость ${o.toFixed(1)} · trust ${trust.toFixed(1)} · disclosure ${progress.toFixed(2)} · попытки ${qa}/${ta}`;
+
+      const eventsWrap = document.getElementById("moodEvents");
+      const events = Array.isArray(mood.recentEvents) ? mood.recentEvents : [];
+      eventsWrap.innerHTML = "";
+      if (!events.length) {
+        eventsWrap.innerHTML = '<div class="mood-empty">события пока не накопились. после пары циклов life loop тут появится история внутренних событий.</div>';
+        return;
+      }
+
+      events.forEach(event => {
+        const card = document.createElement("div");
+        card.className = "mood-event";
+        const dt = event.ts ? new Date(event.ts) : null;
+        const tsText = dt && !Number.isNaN(dt.getTime()) ? dt.toLocaleString("ru-RU") : (event.ts || "unknown time");
+        const safeText = event.publicText || "публичный текст не задан";
+        card.innerHTML = `
+          <div class="mood-event-head">
+            <span>#${event.id || "?"} · ${event.key}</span>
+            <span>${tsText}</span>
+          </div>
+          <div>${safeText}</div>
+          <div class="mood-badges">
+            <span class="mood-badge">privacy ${event.privacy}/3</span>
+            <span class="mood-badge">serious ${event.seriousness}/3</span>
+            <span class="mood-badge">absurd ${event.absurdity}/3</span>
+          </div>
+        `;
+        eventsWrap.appendChild(card);
+      });
     }
 
     function stopBubbleCloud() {

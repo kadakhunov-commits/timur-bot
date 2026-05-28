@@ -55,6 +55,19 @@ def test_build_miniapp_launch_url_contains_version_and_fact_memory(monkeypatch: 
     memory = runtime.default_memory()
     chat_mem = runtime.get_chat_mem(memory, 123)
     runtime.upsert_claim_facts(chat_mem, runtime.extract_claim_facts(chat_mem, "где ты родился", "родился в казани"))
+    mood = memory["config"]["mood"]
+    mood["event_history"] = [
+        {
+            "id": 11,
+            "key": "transport_fail",
+            "created_ts": "2026-05-28T10:00:00",
+            "privacy_level": 1,
+            "seriousness": 1,
+            "absurdity": 2,
+            "public_text": "сегодня транспорт устроил мне стендап",
+        }
+    ]
+    mood["current_event"] = mood["event_history"][0]
 
     url = runtime.build_miniapp_launch_url(memory, 123)
 
@@ -64,3 +77,7 @@ def test_build_miniapp_launch_url_contains_version_and_fact_memory(monkeypatch: 
     assert payload["meta"]["version"] == "abc1234"
     assert payload["memory"]["members"][0]["id"] == "bot:self"
     assert payload["memory"]["members"][0]["facts"]
+    assert "mood" in payload["settings"]
+    assert "openness" in payload["settings"]["mood"]
+    assert payload["settings"]["mood"]["recentEvents"]
+    assert payload["settings"]["mood"]["recentEvents"][0]["key"] == "transport_fail"
