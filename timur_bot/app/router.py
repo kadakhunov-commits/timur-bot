@@ -19,7 +19,7 @@ from timur_bot.handlers.billing import (
 )
 from timur_bot.handlers.chat import command_memory_tap, photo_handler, reaction_handler, start_cmd, story_cmd, summary_cmd, text_handler
 from timur_bot.handlers.noire import noire_cmd
-from timur_bot.handlers.secure import secure_cmd
+from timur_bot.handlers.secure import secure_auto_photo_handler, secure_cmd
 from timur_bot.handlers.owner import (
     appendprompt_cmd,
     bit_cmd,
@@ -93,6 +93,13 @@ def register_handlers(application) -> None:
     application.add_handler(CommandHandler("dump", dump_cmd))
     application.add_handler(CommandHandler("clearmemory", clearmemory_cmd))
     application.add_handler(MessageHandler(filters.COMMAND, command_memory_tap), group=1)
+    application.add_handler(
+        MessageHandler(
+            filters.PHOTO & ~filters.CaptionRegex(NOIRE_COMMAND_PATTERN) & ~filters.CaptionRegex(SECURE_COMMAND_PATTERN),
+            secure_auto_photo_handler,
+        ),
+        group=-1,
+    )
     application.add_handler(CallbackQueryHandler(admin_callback_handler, pattern=r"^adm:"))
     application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, web_app_data_handler))
     application.add_handler(MessageReactionHandler(reaction_handler))

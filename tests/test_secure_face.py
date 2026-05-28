@@ -48,7 +48,12 @@ def test_looks_like_face_box_filters_extreme_ratio() -> None:
 
 def test_select_final_matches_prefers_single_best() -> None:
     engine = _SecureFaceEngine.__new__(_SecureFaceEngine)
-    engine.settings = SimpleNamespace(max_matches=1, second_best_margin=9.0)
+    engine.settings = SimpleNamespace(
+        max_matches=1,
+        second_best_margin=5.0,
+        rescue_best_distance=74.0,
+        rescue_second_best_margin=2.5,
+    )
     selected = _SecureFaceEngine._select_final_matches(
         engine,
         [
@@ -62,16 +67,40 @@ def test_select_final_matches_prefers_single_best() -> None:
 
 def test_select_final_matches_rejects_ambiguous() -> None:
     engine = _SecureFaceEngine.__new__(_SecureFaceEngine)
-    engine.settings = SimpleNamespace(max_matches=1, second_best_margin=9.0)
+    engine.settings = SimpleNamespace(
+        max_matches=1,
+        second_best_margin=5.0,
+        rescue_best_distance=74.0,
+        rescue_second_best_margin=2.5,
+    )
     selected = _SecureFaceEngine._select_final_matches(
         engine,
         [
-            (64.0, (1, 1, 10, 10)),
-            (68.0, (2, 2, 10, 10)),
+            (75.81, (1, 1, 10, 10)),
+            (76.40, (2, 2, 10, 10)),
         ],
         detected_faces=2,
     )
     assert selected == []
+
+
+def test_select_final_matches_accepts_by_rescue_rule() -> None:
+    engine = _SecureFaceEngine.__new__(_SecureFaceEngine)
+    engine.settings = SimpleNamespace(
+        max_matches=1,
+        second_best_margin=5.0,
+        rescue_best_distance=74.0,
+        rescue_second_best_margin=2.5,
+    )
+    selected = _SecureFaceEngine._select_final_matches(
+        engine,
+        [
+            (73.25, (1, 1, 10, 10)),
+            (75.90, (2, 2, 10, 10)),
+        ],
+        detected_faces=2,
+    )
+    assert selected == [(1, 1, 10, 10)]
 
 
 def test_expand_bbox_without_overlap_respects_neighbor() -> None:

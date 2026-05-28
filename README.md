@@ -25,7 +25,9 @@ SECURE_FACE_MATCH_THRESHOLD=92
 SECURE_FACE_EMOJI_CHANCE=0.12
 SECURE_FACE_MIN_REF_SAMPLES=3
 SECURE_FACE_MAX_MATCHES=1
-SECURE_FACE_SECOND_BEST_MARGIN=9
+SECURE_FACE_SECOND_BEST_MARGIN=5
+SECURE_FACE_RESCUE_BEST_DISTANCE=74
+SECURE_FACE_RESCUE_SECOND_BEST_MARGIN=2.5
 SECURE_FACE_CONTEXT_EXPAND_SIDE=0.22
 SECURE_FACE_CONTEXT_EXPAND_TOP=0.35
 SECURE_FACE_CONTEXT_EXPAND_BOTTOM=0.12
@@ -39,7 +41,9 @@ SECURE_FACE_CONTEXT_EXPAND_BOTTOM=0.12
 `SECURE_FACE_MAX_SIDE`, `SECURE_FACE_MATCH_THRESHOLD`, `SECURE_FACE_EMOJI_CHANCE`, `SECURE_FACE_MIN_REF_SAMPLES` — тюнинг скорости/чувствительности `/secure`.
 `SECURE_FACE_MAX_MATCHES` (по умолчанию `1`) — сколько лиц максимум замазывать.
 `SECURE_FACE_SECOND_BEST_MARGIN` — минимальный отрыв лучшего кандидата от второго, иначе `/secure` считает результат неоднозначным и не срабатывает.
+`SECURE_FACE_RESCUE_BEST_DISTANCE` и `SECURE_FACE_RESCUE_SECOND_BEST_MARGIN` — смягчающее правило для “почти уверенных” кейсов: если лучший кандидат очень близок к рефу, допускается меньший отрыв от второго.
 `SECURE_FACE_CONTEXT_EXPAND_SIDE/TOP/BOTTOM` — насколько расширять кроп лица для сравнения (включая волосы/контур головы), при этом кроп не заходит на соседние face-boxes.
+`/secure auto on` включает автоматический secure для чата; `/secure auto off` выключает.
 
 3. Запусти бота:
 

@@ -41,6 +41,8 @@ class SecureFaceSettings:
     min_ref_samples: int
     max_matches: int
     second_best_margin: float
+    rescue_best_distance: float
+    rescue_second_best_margin: float
     context_expand_side: float
     context_expand_top: float
     context_expand_bottom: float
@@ -59,6 +61,8 @@ class SecureFaceSettings:
             self.min_ref_samples,
             self.max_matches,
             round(self.second_best_margin, 6),
+            round(self.rescue_best_distance, 6),
+            round(self.rescue_second_best_margin, 6),
             round(self.context_expand_side, 6),
             round(self.context_expand_top, 6),
             round(self.context_expand_bottom, 6),
@@ -135,7 +139,11 @@ def _load_settings() -> SecureFaceSettings:
         emoji_chance=_clamp_float(os.getenv("SECURE_FACE_EMOJI_CHANCE", "0.12"), 0.0, 1.0, 0.12),
         min_ref_samples=_clamp_int(os.getenv("SECURE_FACE_MIN_REF_SAMPLES", "3"), 2, 5000, 3),
         max_matches=_clamp_int(os.getenv("SECURE_FACE_MAX_MATCHES", "1"), 1, 5, 1),
-        second_best_margin=_clamp_float(os.getenv("SECURE_FACE_SECOND_BEST_MARGIN", "9"), 0.0, 100.0, 9.0),
+        second_best_margin=_clamp_float(os.getenv("SECURE_FACE_SECOND_BEST_MARGIN", "5"), 0.0, 100.0, 5.0),
+        rescue_best_distance=_clamp_float(os.getenv("SECURE_FACE_RESCUE_BEST_DISTANCE", "74"), 0.0, 250.0, 74.0),
+        rescue_second_best_margin=_clamp_float(
+            os.getenv("SECURE_FACE_RESCUE_SECOND_BEST_MARGIN", "2.5"), 0.0, 100.0, 2.5
+        ),
         context_expand_side=_clamp_float(os.getenv("SECURE_FACE_CONTEXT_EXPAND_SIDE", "0.22"), 0.0, 1.5, 0.22),
         context_expand_top=_clamp_float(os.getenv("SECURE_FACE_CONTEXT_EXPAND_TOP", "0.35"), 0.0, 1.8, 0.35),
         context_expand_bottom=_clamp_float(os.getenv("SECURE_FACE_CONTEXT_EXPAND_BOTTOM", "0.12"), 0.0, 1.2, 0.12),
@@ -267,15 +275,29 @@ class _SecureFaceEngine:
             if detected_faces >= 2 and len(sorted_candidates) >= 2 and self.settings.second_best_margin > 0:
                 second_distance = sorted_candidates[1][0]
                 margin = second_distance - best_distance
-                if margin < self.settings.second_best_margin:
+                base_margin_ok = margin >= self.settings.second_best_margin
+                rescue_ok = (
+                    best_distance <= self.settings.rescue_best_distance
+                    and margin >= self.settings.rescue_second_best_margin
+                )
+                if not base_margin_ok and not rescue_ok:
                     logger.info(
-                        "/secure rejected as ambiguous: best=%.2f second=%.2f margin=%.2f required=%.2f",
+                        "/secure rejected as ambiguous: best=%.2f second=%.2f margin=%.2f required=%.2f rescue_best<=%.2f rescue_margin>=%.2f",
                         best_distance,
                         second_distance,
                         margin,
                         self.settings.second_best_margin,
+                        self.settings.rescue_best_distance,
+                        self.settings.rescue_second_best_margin,
                     )
                     return []
+                if rescue_ok and not base_margin_ok:
+                    logger.info(
+                        "/secure accepted by rescue rule: best=%.2f second=%.2f margin=%.2f",
+                        best_distance,
+                        second_distance,
+                        margin,
+                    )
             return [best_box]
 
         return [box for _, box in sorted_candidates[: self.settings.max_matches]]
@@ -637,67 +659,73 @@ def _draw_secure_overlay(
 
 def _draw_red_marker(draw: ImageDraw.ImageDraw, x: int, y: int, w: int, h: int) -> None:
     rng = random.Random()
-    cx = x + w * 0.5
-    cy = y + h * 0.5
-    half_w = w * 0.52
-    half_h = h * 0.56
-    base_width = max(8, int(min(w, h) * 0.16))
-    stroke_count = max(7, min(18, int((w * h) / 5000) + 7))
+    left = x + int(w * 0.1)
+    right = x + int(w * 0.9)
+    top = y + int(h * 0.18)
+    bottom = y + int(h * 0.82)
+    if right <= left or bottom <= top:
+        return
 
-    for _ in range(stroke_count):
-        angle = rng.uniform(-0.45, 0.45)
-        direction = -1 if rng.random() < 0.5 else 1
-        # Чередуем горизонтальные и более вертикальные штрихи для "грязной" маркерной фактуры.
-        if rng.random() < 0.3:
-            angle += direction * rng.uniform(0.6, 1.25)
+    sweep_count = max(4, min(7, int(h / 35) + 4))
+    sweep_gap = (bottom - top) / float(max(1, sweep_count - 1))
+    path: list[tuple[float, float]] = []
 
-        length = rng.uniform(min(w, h) * 0.7, max(w, h) * 1.35)
-        offset_x = rng.uniform(-half_w * 0.6, half_w * 0.6)
-        offset_y = rng.uniform(-half_h * 0.6, half_h * 0.6)
-        px = cx + offset_x
-        py = cy + offset_y
-        dx = (length * 0.5) * np.cos(angle)
-        dy = (length * 0.5) * np.sin(angle)
+    current_left_to_right = True
+    for i in range(sweep_count):
+        y_line = top + i * sweep_gap + rng.uniform(-sweep_gap * 0.15, sweep_gap * 0.15)
+        y_line = max(top, min(bottom, y_line))
+        x_start = left + rng.uniform(0, (right - left) * 0.08)
+        x_end = right - rng.uniform(0, (right - left) * 0.08)
 
-        x0 = int(round(px - dx))
-        y0 = int(round(py - dy))
-        x1 = int(round(px + dx))
-        y1 = int(round(py + dy))
+        if current_left_to_right:
+            path.append((x_start, y_line))
+            path.append((x_end, y_line + rng.uniform(-2.0, 2.0)))
+        else:
+            path.append((x_end, y_line))
+            path.append((x_start, y_line + rng.uniform(-2.0, 2.0)))
+        current_left_to_right = not current_left_to_right
 
-        width = max(5, int(base_width * rng.uniform(0.65, 1.28)))
-        alpha = int(rng.uniform(160, 232))
-        color = (
-            int(rng.uniform(228, 250)),
-            int(rng.uniform(25, 70)),
-            int(rng.uniform(22, 62)),
-            alpha,
+    smooth_path = _smooth_polyline(path, iterations=2)
+    clamped_path = [
+        (
+            int(round(max(left, min(right, px)))),
+            int(round(max(top, min(bottom, py)))),
         )
-        draw.line((x0, y0, x1, y1), fill=color, width=width)
-        # Скругляем концы, чтобы штрих был как от фломастера.
-        radius = max(2, width // 2)
-        draw.ellipse((x0 - radius, y0 - radius, x0 + radius, y0 + radius), fill=color)
-        draw.ellipse((x1 - radius, y1 - radius, x1 + radius, y1 + radius), fill=color)
+        for px, py in smooth_path
+    ]
+    if len(clamped_path) < 2:
+        return
 
-    # Пара дополнительных пятен с низкой альфой даёт эффект многократного прохода маркером.
-    for _ in range(rng.randint(2, 4)):
-        blob_w = rng.uniform(w * 0.18, w * 0.42)
-        blob_h = rng.uniform(h * 0.16, h * 0.38)
-        bx = cx + rng.uniform(-half_w * 0.55, half_w * 0.55)
-        by = cy + rng.uniform(-half_h * 0.55, half_h * 0.55)
-        draw.ellipse(
-            (
-                int(round(bx - blob_w * 0.5)),
-                int(round(by - blob_h * 0.5)),
-                int(round(bx + blob_w * 0.5)),
-                int(round(by + blob_h * 0.5)),
-            ),
-            fill=(
-                int(rng.uniform(232, 252)),
-                int(rng.uniform(25, 62)),
-                int(rng.uniform(20, 58)),
-                int(rng.uniform(95, 155)),
-            ),
-        )
+    color = (247, 62, 62, 225)
+    width_main = max(10, int(min(w, h) * 0.28))
+    width_soft = max(7, int(width_main * 0.75))
+    draw.line(clamped_path, fill=color, width=width_main, joint="curve")
+    draw.line(clamped_path, fill=color, width=width_soft, joint="curve")
+
+    start_x, start_y = clamped_path[0]
+    end_x, end_y = clamped_path[-1]
+    radius = max(3, width_main // 2)
+    draw.ellipse((start_x - radius, start_y - radius, start_x + radius, start_y + radius), fill=color)
+    draw.ellipse((end_x - radius, end_y - radius, end_x + radius, end_y + radius), fill=color)
+
+
+def _smooth_polyline(points: Sequence[tuple[float, float]], iterations: int = 2) -> list[tuple[float, float]]:
+    if len(points) < 2:
+        return list(points)
+    result = list(points)
+    for _ in range(max(0, iterations)):
+        if len(result) < 2:
+            break
+        smoothed: list[tuple[float, float]] = [result[0]]
+        for idx in range(len(result) - 1):
+            x0, y0 = result[idx]
+            x1, y1 = result[idx + 1]
+            q = (0.75 * x0 + 0.25 * x1, 0.75 * y0 + 0.25 * y1)
+            r = (0.25 * x0 + 0.75 * x1, 0.25 * y0 + 0.75 * y1)
+            smoothed.extend((q, r))
+        smoothed.append(result[-1])
+        result = smoothed
+    return result
 
 
 def _draw_weird_emoji(draw: ImageDraw.ImageDraw, x: int, y: int, w: int, h: int, emoji: str) -> None:
