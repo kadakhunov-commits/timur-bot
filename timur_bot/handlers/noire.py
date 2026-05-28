@@ -55,6 +55,20 @@ def _log_task_failure(task: asyncio.Task) -> None:
         logger.exception("Фоновая задача /noire завершилась с ошибкой")
 
 
+async def _acknowledge_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.effective_message
+    if not message:
+        return
+    try:
+        await context.bot.set_message_reaction(
+            chat_id=message.chat_id,
+            message_id=message.message_id,
+            reaction="👌",
+        )
+    except Exception:
+        logger.debug("Не удалось поставить реакцию на /noire", exc_info=True)
+
+
 async def noire_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
     source = resolve_noire_source_message(message)
@@ -64,7 +78,7 @@ async def noire_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await message.reply_text("Используй /noire вместе с фото или ответь /noire на сообщение с фото.")
         return
 
-    await message.reply_text("Делаю нуарный фильтр, подожди немного.")
+    await _acknowledge_command(update, context)
 
     task_factory = getattr(context, "application", None)
     coro = _run_noire_task(

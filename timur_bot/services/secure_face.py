@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import logging
 import os
 import random
 import threading
@@ -26,6 +27,7 @@ _TARGET_LABEL = 1
 _ENGINE_LOCK = threading.Lock()
 _ENGINE: "_SecureFaceEngine | None" = None
 _ENGINE_SETTINGS_KEY: tuple[Any, ...] | None = None
+logger = logging.getLogger("timur-bot.secureface")
 
 
 @dataclass(frozen=True)
@@ -60,6 +62,8 @@ class SecurePhotoResult:
     image_bytes: bytes
     matched_faces: int
     used_emoji: bool
+    detected_faces: int
+    best_distance: float | None
 
 
 def resolve_secure_source_message(message: "Message | None") -> "Message | None":
@@ -85,8 +89,12 @@ def warmup_secure_face_model() -> str:
     if not settings.enabled:
         return "disabled: SECURE_FACE_REF_DIR not set"
     engine = _get_engine(settings)
-    engine.warmup()
-    return "ready"
+    meta = engine.warmup()
+    return (
+        "ready "
+        f"(cache_hit={meta.get('cache_hit')} refs_total={meta.get('refs_total')} "
+        f"refs_with_face={meta.get('samples')} threshold={meta.get('match_threshold')})"
+    )
 
 
 def _load_settings() -> SecureFaceSettings:
@@ -112,7 +120,7 @@ def _load_settings() -> SecureFaceSettings:
         ref_dir=ref_dir,
         cache_dir=cache_dir,
         max_side=_clamp_int(os.getenv("SECURE_FACE_MAX_SIDE", "960"), 320, 2048, 960),
-        match_threshold=_clamp_float(os.getenv("SECURE_FACE_MATCH_THRESHOLD", "66"), 20.0, 140.0, 66.0),
+        match_threshold=_clamp_float(os.getenv("SECURE_FACE_MATCH_THRESHOLD", "92"), 20.0, 180.0, 92.0),
         emoji_chance=_clamp_float(os.getenv("SECURE_FACE_EMOJI_CHANCE", "0.12"), 0.0, 1.0, 0.12),
         min_ref_samples=_clamp_int(os.getenv("SECURE_FACE_MIN_REF_SAMPLES", "3"), 2, 5000, 3),
         cascade_path=cascade_path,
@@ -152,9 +160,11 @@ class _SecureFaceEngine:
         self._cascade = self._load_cascade()
         self._recognizer: Any | None = None
         self._model_lock = threading.Lock()
+        self._model_meta: dict[str, Any] = {}
 
-    def warmup(self) -> None:
+    def warmup(self) -> dict[str, Any]:
         self._ensure_model()
+        return dict(self._model_meta)
 
     def process(self, image_bytes: bytes) -> SecurePhotoResult:
         recognizer = self._ensure_model()
@@ -165,18 +175,36 @@ class _SecureFaceEngine:
         faces = self._detect_faces(gray)
 
         matched_boxes: List[tuple[int, int, int, int]] = []
+        distances: List[float] = []
         for bbox in faces:
             face_img = _extract_face(gray, bbox)
             if face_img is None:
                 continue
             label, confidence = recognizer.predict(face_img)
-            if int(label) == _TARGET_LABEL and float(confidence) <= self.settings.match_threshold:
+            distance = float(confidence)
+            distances.append(distance)
+            if int(label) == _TARGET_LABEL and distance <= self.settings.match_threshold:
                 matched_boxes.append(_scale_bbox_to_original(bbox, scale, original.width, original.height))
+        best_distance = min(distances) if distances else None
+        logger.info(
+            "/secure inference: detected_faces=%s matched_faces=%s best_distance=%s threshold=%.2f max_side=%s",
+            len(faces),
+            len(matched_boxes),
+            f"{best_distance:.2f}" if best_distance is not None else "n/a",
+            self.settings.match_threshold,
+            self.settings.max_side,
+        )
 
         if not matched_boxes:
             output = io.BytesIO()
             original.save(output, format="PNG")
-            return SecurePhotoResult(image_bytes=output.getvalue(), matched_faces=0, used_emoji=False)
+            return SecurePhotoResult(
+                image_bytes=output.getvalue(),
+                matched_faces=0,
+                used_emoji=False,
+                detected_faces=len(faces),
+                best_distance=best_distance,
+            )
 
         should_use_emoji = random.random() < self.settings.emoji_chance
         edited = _draw_secure_overlay(
@@ -191,6 +219,8 @@ class _SecureFaceEngine:
             image_bytes=output.getvalue(),
             matched_faces=len(matched_boxes),
             used_emoji=should_use_emoji,
+            detected_faces=len(faces),
+            best_distance=best_distance,
         )
 
     def _ensure_model(self):
@@ -202,15 +232,20 @@ class _SecureFaceEngine:
         return self._recognizer
 
     def _detect_faces(self, gray_img: np.ndarray) -> list[tuple[int, int, int, int]]:
-        boxes = self._cascade.detectMultiScale(
-            gray_img,
-            scaleFactor=1.12,
-            minNeighbors=5,
-            minSize=(36, 36),
+        passes = (
+            {"scaleFactor": 1.12, "minNeighbors": 5, "minSize": (30, 30)},
+            {"scaleFactor": 1.08, "minNeighbors": 4, "minSize": (24, 24)},
         )
-        if boxes is None or len(boxes) == 0:
-            return []
-        return [tuple(int(v) for v in box) for box in boxes]
+        out: list[tuple[int, int, int, int]] = []
+        for params in passes:
+            boxes = self._cascade.detectMultiScale(gray_img, **params)
+            if boxes is None or len(boxes) == 0:
+                continue
+            for box in boxes:
+                candidate = tuple(int(v) for v in box)
+                if _is_new_box(candidate, out):
+                    out.append(candidate)
+        return out
 
     def _load_cascade(self):
         if self.settings.cascade_path:
@@ -244,6 +279,19 @@ class _SecureFaceEngine:
         ):
             recognizer = self._create_recognizer()
             recognizer.read(str(model_path))
+            self._model_meta = {
+                "cache_hit": True,
+                "refs_total": len(images),
+                "samples": int(meta.get("sample_count", 0)),
+                "match_threshold": self.settings.match_threshold,
+            }
+            logger.info(
+                "/secure model cache hit: refs_total=%s refs_with_face=%s threshold=%.2f cache_dir=%s",
+                len(images),
+                int(meta.get("sample_count", 0)),
+                self.settings.match_threshold,
+                self.settings.cache_dir,
+            )
             return recognizer
 
         samples: List[np.ndarray] = []
@@ -271,6 +319,19 @@ class _SecureFaceEngine:
                 "sample_count": len(samples),
                 "min_ref_samples": self.settings.min_ref_samples,
             },
+        )
+        self._model_meta = {
+            "cache_hit": False,
+            "refs_total": len(images),
+            "samples": len(samples),
+            "match_threshold": self.settings.match_threshold,
+        }
+        logger.info(
+            "/secure model trained: refs_total=%s refs_with_face=%s threshold=%.2f cache_dir=%s",
+            len(images),
+            len(samples),
+            self.settings.match_threshold,
+            self.settings.cache_dir,
         )
         return recognizer
 
@@ -343,6 +404,20 @@ def _extract_face(gray: np.ndarray, bbox: Sequence[int]) -> np.ndarray | None:
     normalized = cv2.equalizeHist(roi)
     face = cv2.resize(normalized, _FACE_SIZE, interpolation=cv2.INTER_AREA)
     return face
+
+
+def _is_new_box(candidate: tuple[int, int, int, int], existing: Sequence[tuple[int, int, int, int]]) -> bool:
+    x, y, w, h = candidate
+    cx = x + w / 2.0
+    cy = y + h / 2.0
+    for ex in existing:
+        ex_x, ex_y, ex_w, ex_h = ex
+        ex_cx = ex_x + ex_w / 2.0
+        ex_cy = ex_y + ex_h / 2.0
+        dist = ((cx - ex_cx) ** 2 + (cy - ex_cy) ** 2) ** 0.5
+        if dist < max(w, h, ex_w, ex_h) * 0.25:
+            return False
+    return True
 
 
 def _resize_for_analysis(image: Image.Image, max_side: int) -> tuple[Image.Image, float]:

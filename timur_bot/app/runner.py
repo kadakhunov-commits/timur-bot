@@ -18,7 +18,7 @@ from timur_bot.services.bot_logic import (
 async def _post_init(application: Application) -> None:
     await start_life_loop(application)
     await start_funny_scan_loop(application)
-    application.create_task(_warmup_secure_model())
+    asyncio.create_task(_warmup_secure_model())
 
 
 async def _post_shutdown(application: Application) -> None:

@@ -2559,7 +2559,7 @@ async def start_life_loop(application: Any) -> None:
     global _LIFE_TASK
     if _LIFE_TASK and not _LIFE_TASK.done():
         return
-    _LIFE_TASK = application.create_task(_life_loop(application))
+    _LIFE_TASK = asyncio.create_task(_life_loop(application))
 
 
 async def stop_life_loop() -> None:
@@ -2868,7 +2868,7 @@ async def start_funny_scan_loop(application: Any) -> None:
     global _FUNNY_SCAN_TASK
     if _FUNNY_SCAN_TASK and not _FUNNY_SCAN_TASK.done():
         return
-    _FUNNY_SCAN_TASK = application.create_task(_funny_scan_loop(application))
+    _FUNNY_SCAN_TASK = asyncio.create_task(_funny_scan_loop(application))
 
 
 async def stop_funny_scan_loop() -> None:

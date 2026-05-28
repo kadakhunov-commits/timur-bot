@@ -42,14 +42,34 @@ async def _run_secure_task(
             result = await asyncio.to_thread(process_secure_photo, bytes(file_bytes))
 
             if result.matched_faces <= 0:
+                if result.detected_faces <= 0:
+                    text = "Лицо на фото не обнаружено. Попробуй кадр, где лицо крупнее и без сильного наклона."
+                else:
+                    best = f"{result.best_distance:.1f}" if result.best_distance is not None else "n/a"
+                    text = (
+                        "Лицо найдено, но не прошло порог совпадения. "
+                        f"(best_distance={best})"
+                    )
+                logger.info(
+                    "/secure no match: detected_faces=%s best_distance=%s",
+                    result.detected_faces,
+                    f"{result.best_distance:.2f}" if result.best_distance is not None else "n/a",
+                )
                 await context.bot.send_message(
                     chat_id=chat_id,
-                    text="Не нашел нужное лицо на фото. Попробуй кадр, где лицо крупнее и фронтальнее.",
+                    text=text,
                     reply_to_message_id=trigger_message_id,
                 )
                 return
 
             caption, parse_mode = _build_warning_text(source_message)
+            logger.info(
+                "/secure success: matched_faces=%s used_emoji=%s detected_faces=%s best_distance=%s",
+                result.matched_faces,
+                result.used_emoji,
+                result.detected_faces,
+                f"{result.best_distance:.2f}" if result.best_distance is not None else "n/a",
+            )
             await context.bot.send_photo(
                 chat_id=chat_id,
                 photo=InputFile(io.BytesIO(result.image_bytes), filename="secure.png"),
@@ -73,6 +93,20 @@ def _log_task_failure(task: asyncio.Task) -> None:
         logger.exception("Фоновая задача /secure завершилась с ошибкой")
 
 
+async def _acknowledge_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.effective_message
+    if not message:
+        return
+    try:
+        await context.bot.set_message_reaction(
+            chat_id=message.chat_id,
+            message_id=message.message_id,
+            reaction="👌",
+        )
+    except Exception:
+        logger.debug("Не удалось поставить реакцию на /secure", exc_info=True)
+
+
 async def secure_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
     source = resolve_secure_source_message(message)
@@ -82,7 +116,14 @@ async def secure_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             await message.reply_text("Используй /secure вместе с фото или ответь /secure на сообщение с фото.")
         return
 
-    await message.reply_text("Проверяю лицо на фото и делаю отметку, подожди немного.")
+    await _acknowledge_command(update, context)
+    logger.info(
+        "/secure accepted: chat_id=%s trigger_message_id=%s source_message_id=%s source_user_id=%s",
+        source.chat_id,
+        message.message_id,
+        source.message_id,
+        source.from_user.id if source.from_user else None,
+    )
     task_factory = getattr(context, "application", None)
     coro = _run_secure_task(
         context,
@@ -91,4 +132,3 @@ async def secure_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     )
     task = task_factory.create_task(coro) if task_factory else asyncio.create_task(coro)
     task.add_done_callback(_log_task_failure)
-
