@@ -7,3 +7,4 @@ pytest
 Flask
 numpy
 Pillow
+opencv-contrib-python-headless

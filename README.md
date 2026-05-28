@@ -18,11 +18,20 @@ OPENAI_API_KEY=...
 OPENAI_BASE_URL=
 GEMINI_API_KEY=
 MINIAPP_URL=
+SECURE_FACE_REF_DIR=
+SECURE_FACE_CACHE_DIR=
+SECURE_FACE_MAX_SIDE=960
+SECURE_FACE_MATCH_THRESHOLD=66
+SECURE_FACE_EMOJI_CHANCE=0.12
+SECURE_FACE_MIN_REF_SAMPLES=3
 ```
 
 `OPENAI_BASE_URL` опционален. Если пустой, используется стандартный endpoint SDK.
 `GEMINI_API_KEY` нужен для voice/TTS.
 `MINIAPP_URL` нужен для запуска Telegram Mini App из `/admin` и `/miniapp`.
+`SECURE_FACE_REF_DIR` включает команду `/secure` (папка с референс-фото нужного человека).
+`SECURE_FACE_CACHE_DIR` (опционально) — папка кэша LBPH-модели и метаданных.
+`SECURE_FACE_MAX_SIDE`, `SECURE_FACE_MATCH_THRESHOLD`, `SECURE_FACE_EMOJI_CHANCE`, `SECURE_FACE_MIN_REF_SAMPLES` — тюнинг скорости/чувствительности `/secure`.
 
 3. Запусти бота:
 
