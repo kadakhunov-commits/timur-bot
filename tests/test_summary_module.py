@@ -2,6 +2,8 @@ from datetime import datetime, timezone
 
 from timur_bot.services.summary import (
     SUMMARY_MAX_MESSAGES,
+    SUMMARY_MIN_MESSAGES_FOR_GENERAL_TOPIC,
+    build_summary_messages,
     parse_summary_request,
     select_summary_window,
 )
@@ -91,3 +93,43 @@ def test_select_summary_too_many() -> None:
     window = select_summary_window(history, req)
     assert window.status == "too_many"
     assert window.selected_total == SUMMARY_MAX_MESSAGES + 1
+
+
+async def _fake_llm_general_theme(messages, max_tokens, temperature):  # type: ignore[no-untyped-def]
+    user_text = messages[-1]["content"]
+    if "сделай анализ куска переписки" in user_text:
+        return '{"topics":[],"announcements":[]}'
+    if "собери итоговое summary" in user_text:
+        return '{"topic_messages":[],"announcements_message":"","fallback_message":""}'
+    return '{"message":"в целом тут одна рабочая тема: ковыряли smtp блок и как переждать 24 часа"}'
+
+
+def test_build_summary_messages_forces_general_topic_when_not_empty_range() -> None:
+    text_messages = [
+        {
+            "name": "u1",
+            "text": f"msg {i}",
+            "ts": "2026-05-28T14:00:00",
+            "is_bot": False,
+            "user_id": 1,
+            "message_id": i,
+        }
+        for i in range(SUMMARY_MIN_MESSAGES_FOR_GENERAL_TOPIC)
+    ]
+
+    import asyncio
+
+    result = asyncio.run(
+        build_summary_messages(
+            text_messages=text_messages,
+            tz_name="Europe/Moscow",
+            system_prompt="sys",
+            active_mode="default",
+            mode_prompt="mode",
+            style_settings="",
+            bio_settings="",
+            llm_call=_fake_llm_general_theme,
+        )
+    )
+    assert result
+    assert "рабочая тема" in result[0]

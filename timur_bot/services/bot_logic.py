@@ -100,6 +100,7 @@ from timur_bot.services.fact_recall import (
 )
 from timur_bot.services.summary import (
     SUMMARY_MAX_MESSAGES,
+    SummaryWindow,
     build_summary_messages,
     parse_summary_request,
     select_summary_window,
@@ -4790,6 +4791,52 @@ async def summary_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     window = select_summary_window(history, request, max_messages=SUMMARY_MAX_MESSAGES)
+    if window.status == "not_found" and message.reply_to_message:
+        reply_text = _extract_message_text(message.reply_to_message)
+        if reply_text:
+            synthetic = {
+                "name": (
+                    (message.reply_to_message.from_user.first_name or message.reply_to_message.from_user.username)
+                    if message.reply_to_message.from_user
+                    else "unknown"
+                )
+                or "unknown",
+                "text": reply_text,
+                "ts": (
+                    message.reply_to_message.date.astimezone(timezone.utc).replace(tzinfo=None).isoformat()
+                    if message.reply_to_message.date
+                    else datetime.utcnow().isoformat()
+                ),
+                "is_bot": bool(message.reply_to_message.from_user.is_bot) if message.reply_to_message.from_user else False,
+                "user_id": message.reply_to_message.from_user.id if message.reply_to_message.from_user else None,
+                "message_id": message.reply_to_message.message_id,
+            }
+            tail = []
+            for rec in history:
+                try:
+                    rec_id = int(rec.get("message_id", 0) or 0)
+                except Exception:
+                    rec_id = 0
+                if rec_id > int(message.reply_to_message.message_id or 0):
+                    txt = str(rec.get("text", "")).strip()
+                    if not txt:
+                        continue
+                    tail.append(
+                        {
+                            "name": str(rec.get("name") or rec.get("username") or rec.get("user_id") or "unknown"),
+                            "text": txt,
+                            "ts": str(rec.get("ts", "")),
+                            "is_bot": bool(rec.get("is_bot", False)),
+                            "user_id": rec.get("user_id"),
+                            "message_id": rec.get("message_id"),
+                        }
+                    )
+            window = SummaryWindow(
+                status="ok",
+                selected_total=1 + len(tail),
+                text_messages=[synthetic, *tail],
+                requested_limit=window.requested_limit,
+            )
     if window.status == "not_found":
         await message.reply_text("не нашел это сообщение в моей памяти, возьми посвежее диапазон")
         return
@@ -4829,6 +4876,22 @@ async def summary_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         if not text:
             continue
         await message.reply_text(text)
+
+
+async def command_memory_tap(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    del context
+    message = update.effective_message
+    author = _resolve_author_from_message(message) if message else None
+    if not message or not author:
+        return
+
+    memory = load_memory()
+    chat_mem = get_chat_mem(memory, message.chat_id)
+    event_key = _make_event_key("cmd", message.chat_id, message.message_id)
+    if _is_processed_event(chat_mem, event_key):
+        return
+    _mark_processed_event(chat_mem, event_key)
+    update_memory_with_message(memory, message)
 
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

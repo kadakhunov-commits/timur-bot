@@ -3,5 +3,9 @@ __pycache__/
 .DS_Store
 *.pyc
 memory.backup.*.json
+memory
+memory.prod.json
+memory.from-prod.json
+test_data/
 data/
 *.jsonl

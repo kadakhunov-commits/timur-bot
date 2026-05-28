@@ -9,6 +9,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Literal
 from zoneinfo import ZoneInfo
 
 SUMMARY_MAX_MESSAGES = 5000
+SUMMARY_MIN_MESSAGES_FOR_GENERAL_TOPIC = 6
 
 Mode = Literal["last_n", "since_time", "from_message"]
 WindowStatus = Literal["ok", "empty", "too_many", "not_found"]
@@ -248,6 +249,21 @@ def _normalize_final_payload(raw: Dict[str, Any] | None) -> Dict[str, Any]:
     }
 
 
+def _clean_plain_message(raw: str) -> str:
+    text = (raw or "").strip()
+    if not text:
+        return ""
+    fenced = re.search(r"```(?:json)?\s*(.*?)\s*```", text, flags=re.DOTALL | re.IGNORECASE)
+    if fenced:
+        text = fenced.group(1).strip()
+    payload = _extract_json(text)
+    if isinstance(payload, dict):
+        candidate = str(payload.get("message", "")).strip()
+        if candidate:
+            return candidate
+    return text.strip().strip("\"'")
+
+
 async def build_summary_messages(
     *,
     text_messages: List[Dict[str, Any]],
@@ -328,7 +344,8 @@ async def build_summary_messages(
         "- не включай совсем короткие или одиночные темы\n"
         "- темы где в основном диалог с ботом пропускай, если там нет реально важного для участников\n"
         "- важные объявления (встречи, предложения, сборы, организационные штуки) вынеси отдельным сообщением, если они не часть больших тем\n"
-        "- если нечего толком выжимать, дай одну короткую фразу в стиле тимура\n"
+        f"- если total_text_messages >= {SUMMARY_MIN_MESSAGES_FOR_GENERAL_TOPIC}, обязательно дай минимум один topic_messages как общую тему, не пиши что пусто\n"
+        "- если сообщений совсем мало и темы реально не сложились, можно дать fallback_message\n"
         "- отвечай только json, без текста вокруг\n"
         "формат json:\n"
         "{\n"
@@ -360,4 +377,24 @@ async def build_summary_messages(
         output.append(announcements_message)
     if not output and fallback_message:
         output.append(fallback_message)
+    if not output and len(text_messages) >= SUMMARY_MIN_MESSAGES_FOR_GENERAL_TOPIC:
+        general_prompt = (
+            "в диапазоне много сообщений, но явные отдельные темы не оформлены.\n"
+            "сделай одну общую тему в стиле тимура про то, что в целом обсуждали.\n"
+            "не говори что пусто.\n"
+            'верни только json вида {"message":"..."}.\n'
+            "json-отчеты по кускам:\n"
+            + json.dumps(chunk_reports, ensure_ascii=False)
+        )
+        general_raw = await llm_call(
+            [
+                {"role": "system", "content": character_prompt},
+                {"role": "user", "content": general_prompt},
+            ],
+            180,
+            0.55,
+        )
+        general_message = _clean_plain_message(general_raw)
+        if general_message:
+            output.append(general_message)
     return output

@@ -12,7 +12,8 @@ class DummyApp:
     def __init__(self) -> None:
         self.handlers = []
 
-    def add_handler(self, handler) -> None:
+    def add_handler(self, handler, group: int = 0) -> None:
+        del group
         self.handlers.append(handler)
 
 
@@ -20,7 +21,7 @@ def test_register_handlers_smoke() -> None:
     app = DummyApp()
     register_handlers(app)
 
-    assert len(app.handlers) == 46
+    assert len(app.handlers) == 47
     assert any(isinstance(h, MessageReactionHandler) for h in app.handlers)
 
     commands = []
