@@ -41,6 +41,7 @@ defaults:
     assert cfg.funny_scan_defaults["rule_min_hearts"] == 3
     assert "laugh_markers" in cfg.funny_scan_lexicon
     assert "extra_laugh_markers" in cfg.funny_scan_lexicon
+    assert "defaults" in cfg.mood_events_catalog
 
 
 def test_load_config_fail_fast_on_broken_yaml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

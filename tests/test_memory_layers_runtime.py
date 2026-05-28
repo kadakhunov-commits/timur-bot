@@ -77,6 +77,43 @@ def test_default_memory_contains_life_config() -> None:
     assert funny_scan["intensity"] == "balanced"
     assert funny_scan["scan_period_hours"] == 24
 
+    mood = memory["config"]["mood"]
+    assert mood["enabled"] is True
+    assert "valence" in mood
+    assert "energy" in mood
+    assert "guard_level" in mood
+
+
+def test_sync_mood_state_can_roll_event_when_due() -> None:
+    memory = runtime.default_memory()
+    mood = memory["config"]["mood"]
+    mood["next_event_after_ts"] = "2000-01-01T00:00:00"
+
+    changed, mood_state, rolled = runtime._sync_mood_state(memory, allow_event_roll=True)
+
+    assert changed is True
+    assert rolled is not None
+    assert mood_state["current_event"]
+    assert 0 <= int(mood_state["current_event"]["privacy_level"]) <= 3
+
+
+def test_apply_message_mood_impact_reacts_to_aggression() -> None:
+    memory = runtime.default_memory()
+    before_v = float(memory["config"]["mood"]["valence"])
+    before_e = float(memory["config"]["mood"]["energy"])
+
+    class DummyMessage:
+        chat_id = 1
+        text = "ты дебил и чмо"
+        caption = None
+
+    changed = runtime._apply_message_mood_impact(memory, DummyMessage())
+    assert changed is True
+    after_v = float(memory["config"]["mood"]["valence"])
+    after_e = float(memory["config"]["mood"]["energy"])
+    assert after_v < before_v
+    assert after_e >= before_e
+
 
 def test_toxicity_fallback_uses_persona_default() -> None:
     memory = runtime.default_memory()

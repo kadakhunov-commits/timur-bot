@@ -25,6 +25,12 @@ from timur_bot.handlers.owner import (
     clearmemory_cmd,
     dump_cmd,
     funny_cmd,
+    mood_cmd,
+    moodguard_cmd,
+    moodopen_cmd,
+    moodreset_cmd,
+    moodset_cmd,
+    moodevent_cmd,
     mode_cmd,
     remember_cmd,
     resetprompt_cmd,
@@ -69,6 +75,12 @@ def register_handlers(application) -> None:
     application.add_handler(CommandHandler("bits", bits_cmd))
     application.add_handler(CommandHandler("funny", funny_cmd))
     application.add_handler(CommandHandler("unfunny", unfunny_cmd))
+    application.add_handler(CommandHandler("mood", mood_cmd))
+    application.add_handler(CommandHandler("moodevent", moodevent_cmd))
+    application.add_handler(CommandHandler("moodset", moodset_cmd))
+    application.add_handler(CommandHandler("moodguard", moodguard_cmd))
+    application.add_handler(CommandHandler("moodopen", moodopen_cmd))
+    application.add_handler(CommandHandler("moodreset", moodreset_cmd))
     application.add_handler(CommandHandler("remember", remember_cmd))
     application.add_handler(CommandHandler("whois", whois_cmd))
     application.add_handler(CommandHandler("dump", dump_cmd))

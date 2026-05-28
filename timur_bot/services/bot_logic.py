@@ -160,6 +160,12 @@ ARCHETYPE_LEXICON = APP_CONFIG.archetype_lexicon
 PERSONA_MODES = APP_CONFIG.persona_modes
 FUNNY_SCAN_RUNTIME_DEFAULTS = APP_CONFIG.funny_scan_defaults
 FUNNY_SCAN_LEXICON = APP_CONFIG.funny_scan_lexicon
+MOOD_EVENTS_CATALOG = APP_CONFIG.mood_events_catalog
+MOOD_DEFAULTS = (
+    MOOD_EVENTS_CATALOG.get("defaults", {})
+    if isinstance(MOOD_EVENTS_CATALOG.get("defaults"), dict)
+    else {}
+)
 RECENT_FACT_WINDOW_DAYS = 14
 MAX_RECENT_MESSAGES = 24
 MAX_RECENT_FACTS = 120
@@ -170,6 +176,8 @@ TOXIC_REPLY_PATTERNS = (
 )
 PROCESSED_EVENT_KEYS_LIMIT = 400
 LIFE_STORY_LOG_LIMIT = 80
+MOOD_EVENT_HISTORY_LIMIT = 80
+MOOD_ATTEMPT_LOG_LIMIT = 80
 LIFE_LOOP_INTERVAL_SECONDS = 60
 DEFAULT_LIFE_TIMEZONE = "Europe/Moscow"
 LONG_FACT_USAGE_TRACK_LIMIT = 600
@@ -277,6 +285,90 @@ def _ensure_life_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     return life
 
 
+def _clamp_float(value: Any, low: float, high: float, default: float) -> float:
+    try:
+        parsed = float(value)
+    except Exception:
+        parsed = default
+    return max(low, min(high, parsed))
+
+
+def _default_mood_config() -> Dict[str, Any]:
+    baseline_valence = _clamp_float(MOOD_DEFAULTS.get("baseline_valence", 8), -100.0, 100.0, 8.0)
+    baseline_energy = _clamp_float(MOOD_DEFAULTS.get("baseline_energy", 52), 0.0, 100.0, 52.0)
+    default_guard = _clamp_float(MOOD_DEFAULTS.get("default_guard_level", 55), 0.0, 100.0, 55.0)
+    return {
+        "enabled": True,
+        "valence": baseline_valence,
+        "energy": baseline_energy,
+        "baseline_valence": baseline_valence,
+        "baseline_energy": baseline_energy,
+        "guard_level": default_guard,
+        "decay_hours": 6.0,
+        "last_update_ts": None,
+        "next_event_after_ts": None,
+        "last_event_id": 0,
+        "current_event": {},
+        "event_history": [],
+        "chat_state": {},
+    }
+
+
+def _ensure_mood_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    mood = cfg.setdefault("mood", {})
+    defaults = _default_mood_config()
+    for key, value in defaults.items():
+        if key in {"event_history", "chat_state", "current_event"}:
+            mood.setdefault(key, json.loads(json.dumps(value)))
+        else:
+            mood.setdefault(key, value)
+
+    mood["enabled"] = bool(mood.get("enabled", True))
+    mood["valence"] = _clamp_float(mood.get("valence"), -100.0, 100.0, defaults["valence"])
+    mood["energy"] = _clamp_float(mood.get("energy"), 0.0, 100.0, defaults["energy"])
+    mood["baseline_valence"] = _clamp_float(
+        mood.get("baseline_valence"), -100.0, 100.0, defaults["baseline_valence"]
+    )
+    mood["baseline_energy"] = _clamp_float(mood.get("baseline_energy"), 0.0, 100.0, defaults["baseline_energy"])
+    mood["guard_level"] = _clamp_float(mood.get("guard_level"), 0.0, 100.0, defaults["guard_level"])
+    mood["decay_hours"] = _clamp_float(mood.get("decay_hours"), 1.0, 48.0, 6.0)
+    if not isinstance(mood.get("current_event"), dict):
+        mood["current_event"] = {}
+    if not isinstance(mood.get("event_history"), list):
+        mood["event_history"] = []
+    if not isinstance(mood.get("chat_state"), dict):
+        mood["chat_state"] = {}
+    return mood
+
+
+def _ensure_mood_chat_state(mood: Dict[str, Any], chat_id: int) -> Dict[str, Any]:
+    chat_state = mood.setdefault("chat_state", {})
+    key = str(int(chat_id))
+    default_openness = _clamp_float(MOOD_DEFAULTS.get("default_chat_openness", 50), 0.0, 100.0, 50.0)
+    state = chat_state.setdefault(
+        key,
+        {
+            "openness": default_openness,
+            "trust": 50.0,
+            "qualified_attempts": 0,
+            "attempts_total": 0,
+            "progress": 0.0,
+            "revealed_level": 0,
+            "attempt_log": [],
+            "last_probe_ts": None,
+        },
+    )
+    state["openness"] = _clamp_float(state.get("openness"), 0.0, 100.0, default_openness)
+    state["trust"] = _clamp_float(state.get("trust"), 0.0, 100.0, 50.0)
+    state["progress"] = _clamp_float(state.get("progress"), 0.0, 1000.0, 0.0)
+    state["revealed_level"] = int(max(0, min(3, int(state.get("revealed_level", 0)))))
+    state["qualified_attempts"] = int(max(0, int(state.get("qualified_attempts", 0))))
+    state["attempts_total"] = int(max(0, int(state.get("attempts_total", 0))))
+    if not isinstance(state.get("attempt_log"), list):
+        state["attempt_log"] = []
+    return state
+
+
 def _ensure_funny_scan_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     return ensure_funny_scan_config(
         cfg,
@@ -287,6 +379,7 @@ def _ensure_funny_scan_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
 
 def default_memory() -> Dict[str, Any]:
     default_life = _default_life_config()
+    default_mood = _default_mood_config()
     return {
         "chats": {},
         "users": {},
@@ -301,6 +394,7 @@ def default_memory() -> Dict[str, Any]:
             "vision_usage": {},
             "voice_usage": {},
             "life": default_life,
+            "mood": default_mood,
             "funny_scan": _ensure_funny_scan_config({}).copy(),
         },
     }
@@ -381,6 +475,441 @@ def _parse_backfill_start_utc(backfill_start_date_msk: str) -> datetime | None:
     except ValueError:
         return None
     return local_dt.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+
+
+def _weighted_choice(items: List[Tuple[Any, float]], fallback: Any) -> Any:
+    normalized = [(value, max(0.0, float(weight))) for value, weight in items if float(weight) > 0.0]
+    if not normalized:
+        return fallback
+    total = sum(weight for _, weight in normalized)
+    roll = random.random() * total
+    acc = 0.0
+    for value, weight in normalized:
+        acc += weight
+        if roll <= acc:
+            return value
+    return normalized[-1][0]
+
+
+def _pick_privacy_level(event_cfg: Dict[str, Any]) -> int:
+    raw = event_cfg.get("privacy_weights")
+    if isinstance(raw, dict):
+        weighted: List[Tuple[int, float]] = []
+        for k, v in raw.items():
+            try:
+                weighted.append((int(k), float(v)))
+            except Exception:
+                continue
+        if weighted:
+            level = int(_weighted_choice(weighted, 1))
+            return max(0, min(3, level))
+    return random.choice([0, 1, 2, 3])
+
+
+def _rand_from_range(raw: Any, low: float, high: float, default: float) -> float:
+    if isinstance(raw, (list, tuple)) and len(raw) >= 2:
+        a = _clamp_float(raw[0], low, high, default)
+        b = _clamp_float(raw[1], low, high, default)
+        left, right = sorted([a, b])
+        return random.uniform(left, right)
+    return _clamp_float(raw, low, high, default)
+
+
+def _schedule_next_mood_event(mood: Dict[str, Any], now_utc: datetime) -> None:
+    min_hours = int(max(1, _clamp_float(MOOD_DEFAULTS.get("event_interval_hours_min", 3), 1.0, 48.0, 3.0)))
+    max_hours = int(max(min_hours, _clamp_float(MOOD_DEFAULTS.get("event_interval_hours_max", 6), 1.0, 72.0, 6.0)))
+    next_hours = random.randint(min_hours, max_hours)
+    mood["next_event_after_ts"] = (now_utc + timedelta(hours=next_hours)).isoformat()
+
+
+def _build_event_text(event_cfg: Dict[str, Any], key: str, fallback: str) -> str:
+    templates = event_cfg.get(key)
+    if isinstance(templates, list):
+        options = [str(x).strip() for x in templates if str(x).strip()]
+        if options:
+            return random.choice(options)
+    return fallback
+
+
+def _roll_mood_event(memory: Dict[str, Any], now_utc: datetime) -> Dict[str, Any] | None:
+    cfg = memory.setdefault("config", {})
+    mood = _ensure_mood_config(cfg)
+    events = MOOD_EVENTS_CATALOG.get("events", []) if isinstance(MOOD_EVENTS_CATALOG.get("events"), list) else []
+    event_cfg = random.choice(events) if events else {}
+
+    if not isinstance(event_cfg, dict):
+        event_cfg = {}
+
+    key = str(event_cfg.get("key", "everyday_noise")) or "everyday_noise"
+    seriousness = int(max(0, min(3, int(event_cfg.get("seriousness", 1)))))
+    absurdity = int(max(0, min(3, int(event_cfg.get("absurdity", 1)))))
+    privacy_level = _pick_privacy_level(event_cfg)
+    valence_delta = _rand_from_range(event_cfg.get("mood_delta_valence"), -50.0, 50.0, random.uniform(-8, 8))
+    energy_delta = _rand_from_range(event_cfg.get("mood_delta_energy"), -30.0, 30.0, random.uniform(-6, 10))
+    guard_delta = _rand_from_range(event_cfg.get("guard_shift"), -40.0, 40.0, 0.0)
+    openness_delta = _rand_from_range(event_cfg.get("openness_shift"), -40.0, 40.0, 0.0)
+    proactive_bias = _clamp_float(event_cfg.get("proactive_share_bias", 0.35), 0.0, 1.0, 0.35)
+    required_attempts = random.randint(2, 4)
+
+    public_text = _build_event_text(event_cfg, "public_templates", "день немного качнуло")
+    private_text = _build_event_text(event_cfg, "private_templates", "есть личная тема, пока перевариваю")
+
+    event_id = int(mood.get("last_event_id", 0)) + 1
+    mood["last_event_id"] = event_id
+    event = {
+        "id": event_id,
+        "key": key,
+        "category": str(event_cfg.get("category", "misc") or "misc"),
+        "created_ts": now_utc.isoformat(),
+        "privacy_level": int(max(0, min(3, privacy_level))),
+        "seriousness": seriousness,
+        "absurdity": absurdity,
+        "public_text": public_text,
+        "private_text": private_text,
+        "valence_delta": round(valence_delta, 2),
+        "energy_delta": round(energy_delta, 2),
+        "guard_delta": round(guard_delta, 2),
+        "openness_delta": round(openness_delta, 2),
+        "proactive_share_bias": proactive_bias,
+        "required_attempts": required_attempts,
+    }
+
+    mood["valence"] = _clamp_float(float(mood.get("valence", 0.0)) + valence_delta, -100.0, 100.0, 0.0)
+    mood["energy"] = _clamp_float(float(mood.get("energy", 50.0)) + energy_delta, 0.0, 100.0, 50.0)
+    mood["guard_level"] = _clamp_float(float(mood.get("guard_level", 55.0)) + guard_delta, 0.0, 100.0, 55.0)
+    mood["decay_hours"] = _rand_from_range(
+        [
+            MOOD_DEFAULTS.get("decay_hours_min", 4),
+            MOOD_DEFAULTS.get("decay_hours_max", 8),
+        ],
+        1.0,
+        48.0,
+        6.0,
+    )
+    mood["current_event"] = event
+    mood["last_update_ts"] = now_utc.isoformat()
+
+    history = mood.setdefault("event_history", [])
+    history.append(event)
+    if len(history) > MOOD_EVENT_HISTORY_LIMIT:
+        del history[:-MOOD_EVENT_HISTORY_LIMIT]
+
+    # New event partially resets disclosure progress but keeps per-chat personality.
+    for chat_state in mood.setdefault("chat_state", {}).values():
+        if not isinstance(chat_state, dict):
+            continue
+        chat_state["qualified_attempts"] = 0
+        chat_state["attempts_total"] = 0
+        chat_state["progress"] = 0.0
+        chat_state["revealed_level"] = 0
+        chat_state["attempt_log"] = []
+        chat_state["openness"] = _clamp_float(
+            float(chat_state.get("openness", 50.0)) + openness_delta,
+            0.0,
+            100.0,
+            50.0,
+        )
+
+    _schedule_next_mood_event(mood, now_utc)
+    logger.info(
+        "Mood event rolled: id=%s key=%s privacy=%s valence=%.1f energy=%.1f guard=%.1f",
+        event_id,
+        key,
+        event["privacy_level"],
+        mood["valence"],
+        mood["energy"],
+        mood["guard_level"],
+    )
+    return event
+
+
+def _apply_mood_decay(mood: Dict[str, Any], now_utc: datetime) -> bool:
+    last_raw = str(mood.get("last_update_ts", "")).strip()
+    if not last_raw:
+        mood["last_update_ts"] = now_utc.isoformat()
+        return True
+    last_dt = _parse_iso_ts(last_raw)
+    if not last_dt:
+        mood["last_update_ts"] = now_utc.isoformat()
+        return True
+    elapsed_hours = max(0.0, (now_utc - last_dt).total_seconds() / 3600.0)
+    if elapsed_hours <= 0.0:
+        return False
+
+    decay_hours = _clamp_float(mood.get("decay_hours", 6.0), 1.0, 48.0, 6.0)
+    factor = min(1.0, elapsed_hours / decay_hours)
+    baseline_valence = _clamp_float(mood.get("baseline_valence", 8.0), -100.0, 100.0, 8.0)
+    baseline_energy = _clamp_float(mood.get("baseline_energy", 52.0), 0.0, 100.0, 52.0)
+    baseline_guard = _clamp_float(MOOD_DEFAULTS.get("default_guard_level", 55), 0.0, 100.0, 55.0)
+    current_valence = _clamp_float(mood.get("valence", baseline_valence), -100.0, 100.0, baseline_valence)
+    current_energy = _clamp_float(mood.get("energy", baseline_energy), 0.0, 100.0, baseline_energy)
+    current_guard = _clamp_float(mood.get("guard_level", baseline_guard), 0.0, 100.0, baseline_guard)
+
+    mood["valence"] = _clamp_float(
+        current_valence + (baseline_valence - current_valence) * factor,
+        -100.0,
+        100.0,
+        baseline_valence,
+    )
+    mood["energy"] = _clamp_float(
+        current_energy + (baseline_energy - current_energy) * factor,
+        0.0,
+        100.0,
+        baseline_energy,
+    )
+    mood["guard_level"] = _clamp_float(
+        current_guard + (baseline_guard - current_guard) * factor,
+        0.0,
+        100.0,
+        baseline_guard,
+    )
+    mood["last_update_ts"] = now_utc.isoformat()
+    return True
+
+
+def _sync_mood_state(memory: Dict[str, Any], *, allow_event_roll: bool = True) -> Tuple[bool, Dict[str, Any], Dict[str, Any] | None]:
+    cfg = memory.setdefault("config", {})
+    mood = _ensure_mood_config(cfg)
+    if not mood.get("enabled", True):
+        return False, mood, None
+
+    now_utc = datetime.utcnow()
+    changed = _apply_mood_decay(mood, now_utc)
+    rolled_event: Dict[str, Any] | None = None
+    next_raw = str(mood.get("next_event_after_ts", "")).strip()
+    next_dt = _parse_iso_ts(next_raw) if next_raw else None
+    if not next_dt:
+        _schedule_next_mood_event(mood, now_utc)
+        changed = True
+    elif allow_event_roll and now_utc >= next_dt:
+        rolled_event = _roll_mood_event(memory, now_utc)
+        changed = True
+
+    return changed, mood, rolled_event
+
+
+def _mood_style_label(valence: float, energy: float) -> str:
+    if valence <= -25 and energy >= 60:
+        return "раздраженный и на взводе"
+    if valence <= -20 and energy < 60:
+        return "уставший и закрытый"
+    if valence >= 25 and energy >= 65:
+        return "заряженный и шутливый"
+    if valence >= 20 and energy < 65:
+        return "спокойно-добрый"
+    if energy <= 30:
+        return "вялый и короткий в ответах"
+    return "ровный, чуть ироничный"
+
+
+def _build_mood_prompt_context(memory: Dict[str, Any], chat_id: int, user_text: str) -> str:
+    cfg = memory.setdefault("config", {})
+    mood = _ensure_mood_config(cfg)
+    chat_state = _ensure_mood_chat_state(mood, chat_id)
+    valence = float(mood.get("valence", 0.0))
+    energy = float(mood.get("energy", 50.0))
+    guard = float(mood.get("guard_level", 55.0))
+    openness = float(chat_state.get("openness", 50.0))
+    event = mood.get("current_event", {}) if isinstance(mood.get("current_event"), dict) else {}
+    event_privacy = int(event.get("privacy_level", 0)) if event else 0
+    mode = _mood_style_label(valence, energy)
+    lines = [
+        "внутреннее состояние тимура (добавка к характеру, не замена):",
+        f"- настроение: {mode}",
+        f"- valence={valence:.1f}, energy={energy:.1f}, guard={guard:.1f}, openness(chat)={openness:.1f}",
+        f"- приватность текущего события: {event_privacy}/3",
+        "- если пользователь не спрашивает про твое состояние, не объясняй его напрямую",
+        "- тон, резкость, длину и инициативность ответа подстрой под состояние выше",
+    ]
+    if _looks_like_story_request(user_text):
+        lines.append("- пользователь явно просит историю: стиль и подробность подстрой под текущее состояние")
+    return "\n".join(lines)
+
+
+def _apply_message_mood_impact(memory: Dict[str, Any], message: Message) -> bool:
+    text = _extract_message_text(message)
+    if not text:
+        return False
+    cfg = memory.setdefault("config", {})
+    mood = _ensure_mood_config(cfg)
+    chat_state = _ensure_mood_chat_state(mood, message.chat_id)
+    now_utc = datetime.utcnow()
+    _apply_mood_decay(mood, now_utc)
+
+    low = text.lower()
+    positive_markers = ("красава", "спасибо", "хорош", "люблю", "ты лучший", "молодец")
+    empathy_markers = ("держись", "все ок", "всё ок", "не парься", "сочувств", "обнимаю")
+    pressure_markers = ("давай говори", "ну расскажи", "что ты ноешь", "хватит ломаться")
+    aggression_markers = ("дебил", "идиот", "чмо", "мраз", "нахуй", "пошел")
+
+    delta_v = 0.0
+    delta_e = 0.0
+    open_delta = 0.0
+
+    if any(marker in low for marker in positive_markers):
+        delta_v += 2.8
+        open_delta += 1.6
+    if any(marker in low for marker in empathy_markers):
+        delta_v += 4.0
+        delta_e -= 2.0
+        open_delta += 2.6
+    if any(marker in low for marker in pressure_markers):
+        delta_v -= 3.5
+        delta_e += 3.0
+        open_delta -= 2.5
+    if any(marker in low for marker in aggression_markers):
+        delta_v -= 8.0
+        delta_e += 7.0
+        open_delta -= 5.0
+
+    exclam = text.count("!")
+    if exclam >= 2:
+        delta_e += min(6.0, float(exclam))
+    caps_tokens = [token for token in re.findall(r"[A-Za-zА-Яа-яЁё]{3,}", text) if token.isupper()]
+    if caps_tokens and len(caps_tokens) >= 2:
+        delta_e += 3.0
+        delta_v -= 1.5
+
+    if abs(delta_v) < 0.01 and abs(delta_e) < 0.01 and abs(open_delta) < 0.01:
+        return False
+
+    mood["valence"] = _clamp_float(float(mood.get("valence", 0.0)) + delta_v, -100.0, 100.0, 0.0)
+    mood["energy"] = _clamp_float(float(mood.get("energy", 50.0)) + delta_e, 0.0, 100.0, 50.0)
+    mood["last_update_ts"] = now_utc.isoformat()
+    chat_state["openness"] = _clamp_float(float(chat_state.get("openness", 50.0)) + open_delta, 0.0, 100.0, 50.0)
+    return True
+
+
+def _looks_like_mood_probe(text: str) -> bool:
+    clean = re.sub(r"\s+", " ", str(text or "")).strip().lower()
+    if not clean:
+        return False
+    hints = (
+        "что с тобой",
+        "что случилось",
+        "ты в порядке",
+        "ты норм",
+        "все нормально",
+        "всё нормально",
+        "ты чего грустный",
+        "почему ты злой",
+        "что у тебя",
+        "расскажи что случилось",
+    )
+    return any(h in clean for h in hints)
+
+
+def _score_probe_attempt_rule(text: str) -> Tuple[float, bool]:
+    low = re.sub(r"\s+", " ", str(text or "").strip().lower())
+    score = 50.0
+    empathetic = ("если хочешь", "можешь рассказать", "держись", "без давления", "я рядом", "сочувств")
+    respectful = ("что случилось", "все в порядке", "ты в порядке", "что у тебя")
+    pushy = ("давай говори", "ну говори", "не ломайся", "что ты ноешь", "быстро расскажи")
+    toxic = ("пофиг", "сам виноват", "дебил", "чмо", "клоун")
+
+    if any(m in low for m in empathetic):
+        score += 22.0
+    if any(m in low for m in respectful):
+        score += 10.0
+    if any(m in low for m in pushy):
+        score -= 22.0
+    if any(m in low for m in toxic):
+        score -= 32.0
+
+    if len(low) < 10:
+        score -= 5.0
+    score = max(0.0, min(100.0, score))
+    uncertain = 44.0 <= score <= 58.0
+    return score, uncertain
+
+
+async def _score_probe_attempt_llm(user_text: str, event: Dict[str, Any]) -> float | None:
+    if not user_text.strip():
+        return None
+    try:
+        prompt = (
+            "Оцени убедительность и эмпатию сообщения пользователя (0..100).\n"
+            "Критерии: уважение к границам, отсутствие давления, поддержка.\n"
+            "Верни только JSON: {\"score\": number}.\n"
+            f"privacy={int(event.get('privacy_level', 0))}; user_text={user_text.strip()}"
+        )
+        response = await asyncio.to_thread(
+            client.chat.completions.create,
+            model=TEXT_MODEL,
+            messages=[
+                {"role": "system", "content": "Ты строгий модератор эмпатии и границ в диалоге."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.0,
+            max_tokens=60,
+            response_format={"type": "json_object"},
+        )
+        content = (response.choices[0].message.content or "").strip()
+        payload = json.loads(content)
+        return _clamp_float(payload.get("score"), 0.0, 100.0, 50.0)
+    except Exception:
+        return None
+
+
+def _mood_probe_reply_text(
+    *,
+    can_reveal: bool,
+    privacy: int,
+    score: float,
+    event: Dict[str, Any],
+    near_reveal: bool,
+) -> str:
+    public_text = str(event.get("public_text", "")).strip() or "есть личная тема, пока перевариваю"
+    private_text = str(event.get("private_text", "")).strip() or "личный момент, пока не готов глубоко"
+    if can_reveal:
+        if privacy <= 1:
+            prefix = random.choice(
+                [
+                    "ладно скажу как есть",
+                    "ок расскажу коротко",
+                    "по-честному",
+                ]
+            )
+            return f"{prefix} {private_text}"
+        if privacy == 2:
+            return random.choice(
+                [
+                    f"коротко: {private_text}",
+                    f"часть расскажу: {private_text}",
+                    f"в общих: {private_text}",
+                ]
+            )
+        return random.choice(
+            [
+                "тема очень личная но да есть неприятный момент и мне нужно время",
+                "есть личное и пока не хочу в детали но спасибо что спросил по-человечески",
+                "могу сказать только что личная штука задела и я пока закрыт",
+            ]
+        )
+
+    if score < 35:
+        return random.choice(
+            [
+                "не хочу это обсуждать сейчас",
+                "давай без давления, не готов",
+                "эту тему пока закрываю",
+            ]
+        )
+    if near_reveal:
+        return random.choice(
+            [
+                f"есть тема: {public_text} позже расскажу подробнее",
+                f"коротко {public_text} дай чуть времени и откроюсь",
+                f"{public_text} если мягко спросишь позже, расскажу больше",
+            ]
+        )
+    return random.choice(
+        [
+            f"пока без деталей, но да: {public_text}",
+            "не хочу в детали прямо сейчас",
+            "пока держу это при себе, позже может расскажу",
+        ]
+    )
 
 
 def _extract_forward_meta(message: Message) -> Dict[str, Any]:
@@ -617,6 +1146,7 @@ def load_memory() -> Dict[str, Any]:
         cfg.setdefault("vision_usage", {})
         cfg.setdefault("voice_usage", {})
         _ensure_life_config(cfg)
+        _ensure_mood_config(cfg)
         _ensure_funny_scan_config(cfg)
 
         for _, chat in data["chats"].items():
@@ -1281,6 +1811,9 @@ def should_reply_decision(memory: Dict[str, Any], message: Message, bot_id: int)
     if is_name_mentioned(text):
         return ReplyDecision(True, "в тексте упомянуто имя Тимура")
 
+    if _looks_like_mood_probe(text):
+        return ReplyDecision(True, "пользователь спрашивает про состояние Тимура")
+
     if looks_like_address_to_bot(text):
         chance = random.uniform(0.75, 1.0)
         roll = random.random()
@@ -1681,6 +2214,7 @@ def build_chat_messages(
     full_system += f"\nуровень прожарки: {toxicity}/100\n"
     full_system += f"активный режим личности: {get_active_mode(memory)}\n"
     full_system += "инструкция режима: " + get_mode_prompt(memory) + "\n"
+    full_system += "\n" + _build_mood_prompt_context(memory, message.chat_id, user_text) + "\n"
 
     if humor_plan:
         full_system += "\n" + format_humor_prompt(humor_plan) + "\n"
@@ -1751,11 +2285,21 @@ async def call_openai_vision(
     message: Message,
     image_b64: str,
 ) -> str:
+    cfg = memory.setdefault("config", {})
+    mood = _ensure_mood_config(cfg)
+    chat_state = _ensure_mood_chat_state(mood, message.chat_id)
+    mood_line = (
+        f"текущее состояние: valence={float(mood.get('valence', 0.0)):.1f}, "
+        f"energy={float(mood.get('energy', 50.0)):.1f}, guard={float(mood.get('guard_level', 55.0)):.1f}, "
+        f"openness={float(chat_state.get('openness', 50.0)):.1f}. "
+        "пусть это мягко влияет на тон шутки."
+    )
     text_context = (
         "тебе прислали фотку в чате. "
         "сделай короткую смешную ироничную реакцию в стиле дружеской подколки, "
         "без технического описания, максимум 1–2 коротких фразы. "
-        "без эмодзи, маленькими буквами."
+        "без эмодзи, маленькими буквами. "
+        + mood_line
     )
 
     history = select_chat_history_for_context(memory, message.chat_id)
@@ -1828,13 +2372,50 @@ async def _run_with_typing(
             pass
 
 
-async def _call_openai_story_text(memory: Dict[str, Any], *, proactive: bool = False) -> str:
+async def _call_openai_story_text(memory: Dict[str, Any], *, proactive: bool = False, chat_id: int | None = None) -> str:
+    cfg = memory.setdefault("config", {})
+    mood = _ensure_mood_config(cfg)
+    valence = float(mood.get("valence", 0.0))
+    energy = float(mood.get("energy", 50.0))
+    guard = float(mood.get("guard_level", 55.0))
+    event = mood.get("current_event", {}) if isinstance(mood.get("current_event"), dict) else {}
+    chat_state = _ensure_mood_chat_state(mood, int(chat_id or 0))
+    openness = float(chat_state.get("openness", 50.0))
+    privacy = int(event.get("privacy_level", 0)) if event else 0
+    public_text = str(event.get("public_text", "")).strip()
+    private_text = str(event.get("private_text", "")).strip()
+    format_variants = [
+        "формат дневника: наблюдение -> короткий добив",
+        "формат мини-сцены: 2 реплики, будто момент из жизни",
+        "формат сухой панч: 1-2 очень коротких фразы",
+        "формат самоиронии: сначала фейл, потом добив",
+        "формат микро-признания: честно и коротко",
+    ]
+    variant = random.choice(format_variants)
+    recent_story_log = []
+    life = _ensure_life_config(cfg)
+    for item in list(life.get("story_log", []))[-6:]:
+        text = str(item.get("text", "")).strip()
+        if text:
+            recent_story_log.append(text)
+
     prompt = (
-        "придумай короткую бытовую историю из жизни тимура на сегодня. "
-        "формат: 1-2 короткие фразы, разговорно, живо, смешно, без грубых оскорблений, без эмодзи."
+        "придумай короткую историю из жизни тимура на сейчас.\n"
+        "обязательно сделай формат отличным от предыдущих повторов.\n"
+        "1-2 очень короткие фразы, без эмодзи.\n"
+        f"выбранный формат: {variant}\n"
+        f"mood: valence={valence:.1f}, energy={energy:.1f}, guard={guard:.1f}, openness={openness:.1f}\n"
     )
+    if event:
+        prompt += (
+            f"текущее событие privacy={privacy}/3, public_hint={public_text or '-'}, private_hint={private_text or '-'}\n"
+            "если guard высокий или privacy высокий - говори намеками.\n"
+            "если guard низкий - можно рассказать подробнее.\n"
+        )
+    if recent_story_log:
+        prompt += "не повторяй буквально эти недавние истории:\n" + "\n".join(f"- {x}" for x in recent_story_log)
     if proactive:
-        prompt += " в конце добавь короткий вопрос в чат."
+        prompt += "\nесли уместно, добавь короткий вопрос в чат в конце."
     try:
         response = await asyncio.to_thread(
             client.chat.completions.create,
@@ -1852,8 +2433,8 @@ async def _call_openai_story_text(memory: Dict[str, Any], *, proactive: bool = F
         return ""
 
 
-async def _generate_story_text(memory: Dict[str, Any], *, proactive: bool = False) -> str:
-    raw = await _call_openai_story_text(memory, proactive=proactive)
+async def _generate_story_text(memory: Dict[str, Any], *, proactive: bool = False, chat_id: int | None = None) -> str:
+    raw = await _call_openai_story_text(memory, proactive=proactive, chat_id=chat_id)
     clean = enforce_reply_guardrails(raw)
     if clean:
         return clean
@@ -1873,7 +2454,10 @@ async def _emit_proactive_story(application: Any) -> None:
     memory = load_memory()
     cfg = memory.setdefault("config", {})
     life = _ensure_life_config(cfg)
+    mood_changed, mood, rolled_event = _sync_mood_state(memory, allow_event_roll=True)
     if not bool(life.get("enabled", True)):
+        if mood_changed:
+            save_memory(memory)
         return
 
     tz = _safe_zoneinfo(str(life.get("timezone", DEFAULT_LIFE_TIMEZONE)))
@@ -1885,22 +2469,41 @@ async def _emit_proactive_story(application: Any) -> None:
     daily_slots = [int(x) for x in life.get("daily_slots", []) if isinstance(x, (int, float, str))]
     sent_slots = [int(x) for x in life.get("sent_slots", []) if isinstance(x, (int, float, str))]
     due = [slot for slot in sorted(daily_slots) if slot <= now_minute and slot not in sent_slots]
-    if not due:
-        return
 
     chat_id = _select_proactive_chat_id(memory, life)
     if chat_id is None:
+        if mood_changed:
+            save_memory(memory)
         return
 
-    text = await _generate_story_text(memory, proactive=True)
+    event = mood.get("current_event", {}) if isinstance(mood.get("current_event"), dict) else {}
+    chat_state = _ensure_mood_chat_state(mood, chat_id)
+    guard = float(mood.get("guard_level", 55.0))
+    openness = float(chat_state.get("openness", 50.0))
+    privacy = int(event.get("privacy_level", 1)) if event else 1
+    proactive_bias = _clamp_float(event.get("proactive_share_bias", 0.35) if event else 0.35, 0.0, 1.0, 0.35)
+    event_share_score = (100.0 - guard) * 0.45 + openness * 0.35 + max(0, 3 - privacy) * 8.0
+    should_share_event_now = bool(rolled_event) and (random.random() < proactive_bias) and (event_share_score >= 42.0)
+
+    if not due and not should_share_event_now:
+        if mood_changed:
+            save_memory(memory)
+        return
+
+    text = await _generate_story_text(memory, proactive=True, chat_id=chat_id)
     text = enforce_reply_guardrails(text)
     if not text:
+        if mood_changed:
+            save_memory(memory)
         return
 
     await application.bot.send_message(chat_id=chat_id, text=text)
-    slot = due[0]
-    sent_slots.append(slot)
-    life["sent_slots"] = sorted(set(sent_slots))
+    if due:
+        slot = due[0]
+        sent_slots.append(slot)
+        life["sent_slots"] = sorted(set(sent_slots))
+    else:
+        slot = -1
     chat_last_emit = life.setdefault("chat_last_emit", {})
     if not isinstance(chat_last_emit, dict):
         chat_last_emit = {}
@@ -1908,9 +2511,11 @@ async def _emit_proactive_story(application: Any) -> None:
     chat_last_emit[str(chat_id)] = now_utc.isoformat()
     life["last_emit_ts"] = now_utc.isoformat()
     life["last_emit_chat_id"] = chat_id
-    _append_story_log(memory, text, source="proactive", chat_id=chat_id)
+    source = "proactive_event" if should_share_event_now else "proactive"
+    _append_story_log(memory, text, source=source, chat_id=chat_id)
     save_memory(memory)
-    logger.info("Проактивная история отправлена: chat_id=%s slot=%s", chat_id, _minute_to_hhmm(slot))
+    slot_label = _minute_to_hhmm(slot) if slot >= 0 else "event"
+    logger.info("Проактивная история отправлена: chat_id=%s slot=%s", chat_id, slot_label)
 
 
 async def _life_loop(application: Any) -> None:
@@ -2323,6 +2928,86 @@ async def _handle_text_feedback(update: Update, memory: Dict[str, Any]) -> bool:
     if not rating:
         return False
     _apply_feedback_to_reply(memory, message, rating, source="reply_text")
+    return True
+
+
+async def _handle_mood_probe(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    memory: Dict[str, Any],
+) -> bool:
+    message = update.effective_message
+    if not message:
+        return False
+
+    text = _extract_message_text(message)
+    if not _looks_like_mood_probe(text):
+        return False
+
+    changed, mood, _ = _sync_mood_state(memory, allow_event_roll=True)
+    event = mood.get("current_event", {}) if isinstance(mood.get("current_event"), dict) else {}
+    chat_state = _ensure_mood_chat_state(mood, message.chat_id)
+    event_privacy = int(max(0, min(3, int(event.get("privacy_level", 0) or 0)))) if event else 0
+
+    score, uncertain = _score_probe_attempt_rule(text)
+    if uncertain and event and event_privacy >= 2:
+        llm_score = await _score_probe_attempt_llm(text, event)
+        if llm_score is not None:
+            score = llm_score
+
+    attempts_required = int(max(2, min(4, int(event.get("required_attempts", random.randint(2, 4)) or 2)))) if event else 2
+    chat_state["attempts_total"] = int(chat_state.get("attempts_total", 0)) + 1
+    if score >= 62:
+        chat_state["qualified_attempts"] = int(chat_state.get("qualified_attempts", 0)) + 1
+        chat_state["progress"] = float(chat_state.get("progress", 0.0)) + 1.0
+        chat_state["trust"] = _clamp_float(float(chat_state.get("trust", 50.0)) + 4.0, 0.0, 100.0, 50.0)
+        chat_state["openness"] = _clamp_float(float(chat_state.get("openness", 50.0)) + 3.0, 0.0, 100.0, 50.0)
+    elif score <= 35:
+        chat_state["progress"] = max(0.0, float(chat_state.get("progress", 0.0)) - 0.8)
+        chat_state["trust"] = _clamp_float(float(chat_state.get("trust", 50.0)) - 6.0, 0.0, 100.0, 50.0)
+        chat_state["openness"] = _clamp_float(float(chat_state.get("openness", 50.0)) - 4.0, 0.0, 100.0, 50.0)
+        mood["guard_level"] = _clamp_float(float(mood.get("guard_level", 55.0)) + 5.0, 0.0, 100.0, 55.0)
+        mood["valence"] = _clamp_float(float(mood.get("valence", 0.0)) - 4.0, -100.0, 100.0, 0.0)
+        mood["energy"] = _clamp_float(float(mood.get("energy", 50.0)) + 3.0, 0.0, 100.0, 50.0)
+    else:
+        chat_state["progress"] = float(chat_state.get("progress", 0.0)) + 0.45
+        chat_state["trust"] = _clamp_float(float(chat_state.get("trust", 50.0)) + 1.0, 0.0, 100.0, 50.0)
+
+    required_score = attempts_required * (0.95 + event_privacy * 0.2)
+    qualified = int(chat_state.get("qualified_attempts", 0))
+    progress = float(chat_state.get("progress", 0.0))
+    can_reveal = (event_privacy == 0) or (qualified >= attempts_required and progress >= required_score)
+    if event_privacy >= 3 and can_reveal and qualified < (attempts_required + 1):
+        can_reveal = False
+
+    near_reveal = (not can_reveal) and (qualified >= max(1, attempts_required - 1))
+    reply_text = _mood_probe_reply_text(
+        can_reveal=can_reveal,
+        privacy=event_privacy,
+        score=score,
+        event=event,
+        near_reveal=near_reveal,
+    )
+
+    if can_reveal:
+        chat_state["revealed_level"] = max(int(chat_state.get("revealed_level", 0)), min(3, event_privacy + 1))
+        mood["guard_level"] = _clamp_float(float(mood.get("guard_level", 55.0)) - 4.0, 0.0, 100.0, 55.0)
+    chat_state["last_probe_ts"] = datetime.utcnow().isoformat()
+    attempt_log = chat_state.setdefault("attempt_log", [])
+    attempt_log.append(
+        {
+            "ts": datetime.utcnow().isoformat(),
+            "score": round(score, 2),
+            "qualified": bool(score >= 62),
+            "revealed": can_reveal,
+        }
+    )
+    if len(attempt_log) > MOOD_ATTEMPT_LOG_LIMIT:
+        del attempt_log[:-MOOD_ATTEMPT_LOG_LIMIT]
+
+    del changed
+    save_memory(memory)
+    await send_reply_with_style(update, context, memory, reply_text, humor_plan=None)
     return True
 
 
@@ -2974,6 +3659,9 @@ def build_miniapp_launch_url(memory: Dict[str, Any], chat_id: int) -> str:
     if not MINIAPP_URL:
         return ""
     cfg = memory.setdefault("config", {})
+    mood = _ensure_mood_config(cfg)
+    mood_chat = _ensure_mood_chat_state(mood, chat_id)
+    mood_event = mood.get("current_event", {}) if isinstance(mood.get("current_event"), dict) else {}
     members = _miniapp_members(memory, chat_id)
     payload = {
         "chatId": chat_id,
@@ -2982,6 +3670,14 @@ def build_miniapp_launch_url(memory: Dict[str, Any], chat_id: int) -> str:
             "heat": get_toxicity_level(memory),
             "previewText": PERSONA_MODES.get(get_active_mode(memory), ""),
             "personas": _miniapp_persona_cards(),
+            "mood": {
+                "valence": round(float(mood.get("valence", 0.0)), 2),
+                "energy": round(float(mood.get("energy", 50.0)), 2),
+                "guard": round(float(mood.get("guard_level", 55.0)), 2),
+                "openness": round(float(mood_chat.get("openness", 50.0)), 2),
+                "eventPrivacy": int(mood_event.get("privacy_level", 0)) if mood_event else 0,
+                "eventPublic": str(mood_event.get("public_text", "")) if mood_event else "",
+            },
         },
         "memory": {
             "members": members,
@@ -3990,6 +4686,7 @@ async def story_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     memory = load_memory()
+    changed, _, _ = _sync_mood_state(memory, allow_event_roll=True)
     parts = (message.text or "").split(" ", 1)
     arg = parts[1].strip().lower() if len(parts) > 1 else ""
     force_new = arg in {"new", "новая", "новую", "fresh"}
@@ -4001,9 +4698,11 @@ async def story_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         story_text = await _run_with_typing(
             context,
             message.chat_id,
-            _generate_story_text(memory, proactive=False),
+            _generate_story_text(memory, proactive=False, chat_id=message.chat_id),
         )
         _append_story_log(memory, story_text, source="command", chat_id=message.chat_id)
+        save_memory(memory)
+    if entry and changed:
         save_memory(memory)
 
     story_text = enforce_reply_guardrails(story_text)
@@ -4045,6 +4744,9 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             return
         _mark_processed_event(chat_mem, event_key)
         update_memory_with_message(memory, message)
+        if _apply_message_mood_impact(memory, message):
+            save_memory(memory)
+        _sync_mood_state(memory, allow_event_roll=True)
 
         user_text = _extract_message_text(message)
         if _looks_like_story_request(user_text):
@@ -4055,11 +4757,14 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 story_text = await _run_with_typing(
                     context,
                     message.chat_id,
-                    _generate_story_text(memory, proactive=False),
+                    _generate_story_text(memory, proactive=False, chat_id=message.chat_id),
                 )
                 _append_story_log(memory, story_text, source="on_demand", chat_id=message.chat_id)
                 save_memory(memory)
             await send_reply_with_style(update, context, memory, story_text, humor_plan=None)
+            return
+
+        if await _handle_mood_probe(update, context, memory):
             return
 
         bot_id = (await context.bot.get_me()).id
@@ -4119,6 +4824,9 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             return
         _mark_processed_event(chat_mem, event_key)
         update_memory_with_message(memory, message)
+        if _apply_message_mood_impact(memory, message):
+            save_memory(memory)
+        _sync_mood_state(memory, allow_event_roll=True)
 
         bot_id = (await context.bot.get_me()).id
 
@@ -4207,6 +4915,167 @@ def _format_invoice_rows(invoices: List[Dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _format_mood_status(memory: Dict[str, Any], chat_id: int) -> str:
+    cfg = memory.setdefault("config", {})
+    mood = _ensure_mood_config(cfg)
+    chat_state = _ensure_mood_chat_state(mood, chat_id)
+    event = mood.get("current_event", {}) if isinstance(mood.get("current_event"), dict) else {}
+    lines = [
+        f"mood enabled={bool(mood.get('enabled', True))}",
+        f"valence={float(mood.get('valence', 0.0)):.1f}",
+        f"energy={float(mood.get('energy', 50.0)):.1f}",
+        f"guard={float(mood.get('guard_level', 55.0)):.1f}",
+        f"chat openness={float(chat_state.get('openness', 50.0)):.1f}",
+        f"chat trust={float(chat_state.get('trust', 50.0)):.1f}",
+        f"chat progress={float(chat_state.get('progress', 0.0)):.2f}",
+        f"qualified_attempts={int(chat_state.get('qualified_attempts', 0))}",
+        f"attempts_total={int(chat_state.get('attempts_total', 0))}",
+    ]
+    if event:
+        lines.extend(
+            [
+                f"event id={event.get('id')} key={event.get('key')}",
+                f"privacy={event.get('privacy_level')} seriousness={event.get('seriousness')} absurdity={event.get('absurdity')}",
+                f"required_attempts={event.get('required_attempts')}",
+                f"public={event.get('public_text')}",
+                f"private={event.get('private_text')}",
+            ]
+        )
+    else:
+        lines.append("event: none")
+    lines.append(f"next_event_after={mood.get('next_event_after_ts')}")
+    lines.append(f"last_update_ts={mood.get('last_update_ts')}")
+    return "\n".join(lines)
+
+
+@owner_only
+async def mood_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    del context
+    message = update.message
+    if not message:
+        return
+    memory = load_memory()
+    changed, _, _ = _sync_mood_state(memory, allow_event_roll=False)
+    if changed:
+        save_memory(memory)
+    await message.reply_text(_format_mood_status(memory, message.chat_id))
+
+
+@owner_only
+async def moodevent_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    del context
+    message = update.message
+    if not message:
+        return
+    memory = load_memory()
+    cfg = memory.setdefault("config", {})
+    mood = _ensure_mood_config(cfg)
+    now_utc = datetime.utcnow()
+    event = _roll_mood_event(memory, now_utc)
+    save_memory(memory)
+    if not event:
+        await message.reply_text("не удалось создать событие mood")
+        return
+    await message.reply_text(
+        "новое событие создано\n"
+        f"id={event['id']} key={event['key']} privacy={event['privacy_level']}\n"
+        f"public={event['public_text']}"
+    )
+
+
+@owner_only
+async def moodset_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    del context
+    message = update.message
+    if not message:
+        return
+    parts = (message.text or "").strip().split()
+    if len(parts) < 3:
+        await message.reply_text("использование: /moodset <valence -100..100> <energy 0..100>")
+        return
+    try:
+        valence = float(parts[1])
+        energy = float(parts[2])
+    except Exception:
+        await message.reply_text("нужны числа: /moodset <valence> <energy>")
+        return
+    memory = load_memory()
+    cfg = memory.setdefault("config", {})
+    mood = _ensure_mood_config(cfg)
+    mood["valence"] = _clamp_float(valence, -100.0, 100.0, 0.0)
+    mood["energy"] = _clamp_float(energy, 0.0, 100.0, 50.0)
+    mood["last_update_ts"] = datetime.utcnow().isoformat()
+    save_memory(memory)
+    await message.reply_text(f"mood set: valence={mood['valence']:.1f} energy={mood['energy']:.1f}")
+
+
+@owner_only
+async def moodguard_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    del context
+    message = update.message
+    if not message:
+        return
+    parts = (message.text or "").strip().split()
+    if len(parts) < 2:
+        await message.reply_text("использование: /moodguard <0..100>")
+        return
+    try:
+        guard = float(parts[1])
+    except Exception:
+        await message.reply_text("нужно число 0..100")
+        return
+    memory = load_memory()
+    cfg = memory.setdefault("config", {})
+    mood = _ensure_mood_config(cfg)
+    mood["guard_level"] = _clamp_float(guard, 0.0, 100.0, 55.0)
+    mood["last_update_ts"] = datetime.utcnow().isoformat()
+    save_memory(memory)
+    await message.reply_text(f"guard set: {mood['guard_level']:.1f}")
+
+
+@owner_only
+async def moodopen_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    del context
+    message = update.message
+    if not message:
+        return
+    parts = (message.text or "").strip().split()
+    if len(parts) < 2:
+        await message.reply_text("использование: /moodopen <0..100>")
+        return
+    try:
+        openness = float(parts[1])
+    except Exception:
+        await message.reply_text("нужно число 0..100")
+        return
+    memory = load_memory()
+    cfg = memory.setdefault("config", {})
+    mood = _ensure_mood_config(cfg)
+    chat_state = _ensure_mood_chat_state(mood, message.chat_id)
+    chat_state["openness"] = _clamp_float(openness, 0.0, 100.0, 50.0)
+    save_memory(memory)
+    await message.reply_text(f"chat openness set: {chat_state['openness']:.1f}")
+
+
+@owner_only
+async def moodreset_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    del context
+    message = update.message
+    if not message:
+        return
+    memory = load_memory()
+    cfg = memory.setdefault("config", {})
+    mood = _ensure_mood_config(cfg)
+    chat_state = _ensure_mood_chat_state(mood, message.chat_id)
+    chat_state["qualified_attempts"] = 0
+    chat_state["attempts_total"] = 0
+    chat_state["progress"] = 0.0
+    chat_state["revealed_level"] = 0
+    chat_state["attempt_log"] = []
+    save_memory(memory)
+    await message.reply_text("chat disclosure state reset")
+
+
 @owner_only
 async def billhelp_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     del context
@@ -4222,7 +5091,9 @@ async def billhelp_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/billabuse — отчет по антиабузу\n"
         "/billref create [commission_pct] [months]\n"
         "/billref apply <CODE>\n"
-        "/billref balance [user_id]"
+        "/billref balance [user_id]\n"
+        "mood debug:\n"
+        "/mood | /moodevent | /moodset <v> <e> | /moodguard <0..100> | /moodopen <0..100> | /moodreset"
     )
     await update.message.reply_text(text)
 

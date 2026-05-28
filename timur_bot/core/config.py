@@ -72,6 +72,7 @@ class AppConfig:
     default_active_mode: str
     funny_scan_defaults: Dict[str, Any]
     funny_scan_lexicon: Dict[str, Any]
+    mood_events_catalog: Dict[str, Any]
 
 
 def _read_yaml(path: Path) -> Dict[str, Any]:
@@ -85,6 +86,12 @@ def _read_yaml(path: Path) -> Dict[str, Any]:
     if not isinstance(data, dict):
         raise ConfigError(f"Config file must contain mapping object: {path}")
     return data
+
+
+def _read_yaml_optional(path: Path) -> Dict[str, Any]:
+    if not path.exists():
+        return {}
+    return _read_yaml(path)
 
 
 def _coerce_set(items: Any, key: str) -> Set[str]:
@@ -196,6 +203,44 @@ def _normalize_funny_scan_lexicon(raw: Any) -> Dict[str, Any]:
     }
 
 
+def _default_mood_events_catalog() -> Dict[str, Any]:
+    return {
+        "defaults": {
+            "event_interval_hours_min": 3,
+            "event_interval_hours_max": 6,
+            "decay_hours_min": 4,
+            "decay_hours_max": 8,
+            "baseline_valence": 8,
+            "baseline_energy": 52,
+            "default_guard_level": 55,
+            "default_chat_openness": 50,
+        },
+        "events": [],
+    }
+
+
+def _normalize_mood_events_catalog(raw: Any) -> Dict[str, Any]:
+    base = _default_mood_events_catalog()
+    if not isinstance(raw, dict):
+        return base
+    defaults = raw.get("defaults") if isinstance(raw.get("defaults"), dict) else {}
+    merged_defaults = dict(base["defaults"])
+    merged_defaults.update(defaults)
+    events = raw.get("events") if isinstance(raw.get("events"), list) else []
+    normalized_events: List[Dict[str, Any]] = []
+    for item in events:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("key", "")).strip()
+        if not key:
+            continue
+        normalized_events.append(item)
+    return {
+        "defaults": merged_defaults,
+        "events": normalized_events,
+    }
+
+
 def load_app_config(base_dir: Path | None = None) -> AppConfig:
     root = (base_dir or Path(__file__).resolve().parents[2]).resolve()
     load_dotenv(root / ".env")
@@ -203,6 +248,7 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
     persona = _read_yaml(root / "config" / "persona.yaml")
     lexicon = _read_yaml(root / "config" / "lexicon.yaml")
     runtime = _read_yaml(root / "config" / "runtime.yaml")
+    mood_events_raw = _read_yaml_optional(root / "config" / "mood_events.yaml")
 
     telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
@@ -235,6 +281,7 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
     models = runtime.get("models") or {}
     funny_scan_defaults = _normalize_funny_scan_defaults(runtime.get("funny_scan"))
     funny_scan_lexicon = _normalize_funny_scan_lexicon(lexicon.get("funny_scan_lexicon"))
+    mood_events_catalog = _normalize_mood_events_catalog(mood_events_raw)
 
     active_mode = str(defaults.get("active_mode", "default"))
     if active_mode not in modes:
@@ -308,4 +355,5 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
         default_active_mode=active_mode,
         funny_scan_defaults=funny_scan_defaults,
         funny_scan_lexicon=funny_scan_lexicon,
+        mood_events_catalog=mood_events_catalog,
     )

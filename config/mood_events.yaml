@@ -1,0 +1,105 @@
+defaults:
+  event_interval_hours_min: 3
+  event_interval_hours_max: 6
+  decay_hours_min: 4
+  decay_hours_max: 8
+  baseline_valence: 8
+  baseline_energy: 52
+  default_guard_level: 55
+  default_chat_openness: 50
+
+events:
+  - key: "night_no_sleep"
+    category: "daily"
+    seriousness: 2
+    absurdity: 1
+    privacy_weights: {"0": 0.05, "1": 0.35, "2": 0.4, "3": 0.2}
+    mood_delta_valence: [-20, -8]
+    mood_delta_energy: [8, 20]
+    guard_shift: [8, 16]
+    openness_shift: [-8, -2]
+    proactive_share_bias: 0.2
+    public_templates:
+      - "сегодня вареный немного"
+      - "я щас как пинг без интернета"
+      - "чуть недоспал и туплю"
+    private_templates:
+      - "ночью почти не спал из-за семейных дел и теперь дерганый"
+      - "всю ночь крутил в голове личную тему и щас на взводе"
+      - "сон развалился, с утра разбитый и злой"
+
+  - key: "exam_relief"
+    category: "study"
+    seriousness: 1
+    absurdity: 1
+    privacy_weights: {"0": 0.3, "1": 0.5, "2": 0.18, "3": 0.02}
+    mood_delta_valence: [10, 22]
+    mood_delta_energy: [4, 16]
+    guard_shift: [-14, -6]
+    openness_shift: [6, 14]
+    proactive_share_bias: 0.7
+    public_templates:
+      - "сегодня победил один мелкий квест"
+      - "мини вин дня случился"
+      - "в целом день плюс вайб"
+    private_templates:
+      - "закрыл учебный хвост который висел и прям отпустило"
+      - "разрулил вопрос по универу и настроение резко вверх"
+      - "сдал сложный кусок и щас легче дышать"
+
+  - key: "transport_fail"
+    category: "city"
+    seriousness: 1
+    absurdity: 2
+    privacy_weights: {"0": 0.25, "1": 0.45, "2": 0.25, "3": 0.05}
+    mood_delta_valence: [-14, -2]
+    mood_delta_energy: [6, 18]
+    guard_shift: [2, 8]
+    openness_shift: [-4, 4]
+    proactive_share_bias: 0.5
+    public_templates:
+      - "сегодня транспорт устроил мне стендап"
+      - "город снова проверял меня на прочность"
+      - "дорога была как квест на выживание"
+    private_templates:
+      - "застрял в дороге и опоздал туда где не хотел палиться"
+      - "метро сегодня вынесло мозг, еще и в личный момент не вовремя"
+      - "долго телепался по городу и из-за этого все съехало"
+
+  - key: "friend_conflict"
+    category: "social"
+    seriousness: 3
+    absurdity: 0
+    privacy_weights: {"0": 0.02, "1": 0.18, "2": 0.4, "3": 0.4}
+    mood_delta_valence: [-28, -12]
+    mood_delta_energy: [10, 24]
+    guard_shift: [14, 24]
+    openness_shift: [-16, -6]
+    proactive_share_bias: 0.1
+    public_templates:
+      - "сегодня лучше без глубоких тем"
+      - "есть личное, пока не хочу туда лезть"
+      - "день нервный, давай попроще"
+    private_templates:
+      - "поссорился с близким человеком и пока тяжело это переварить"
+      - "в личке конфликт, поэтому могу быть резче обычного"
+      - "есть неприятный разговор с другом, еще не отпустило"
+
+  - key: "absurd_everyday_win"
+    category: "daily"
+    seriousness: 0
+    absurdity: 3
+    privacy_weights: {"0": 0.5, "1": 0.4, "2": 0.09, "3": 0.01}
+    mood_delta_valence: [12, 24]
+    mood_delta_energy: [6, 18]
+    guard_shift: [-10, -2]
+    openness_shift: [8, 16]
+    proactive_share_bias: 0.85
+    public_templates:
+      - "сегодня абсурдно но день в плюс"
+      - "день как мем, но хороший"
+      - "словил глупый, но приятный вин"
+    private_templates:
+      - "случился очень странный, но добрый момент и я прям ожил"
+      - "в бытовухе поймал смешной вин, теперь настроение топ"
+      - "мелочь, но очень подняла вайб"
