@@ -636,28 +636,67 @@ def _draw_secure_overlay(
 
 
 def _draw_red_marker(draw: ImageDraw.ImageDraw, x: int, y: int, w: int, h: int) -> None:
-    stroke = max(6, int(max(w, h) * 0.08))
-    left = x + int(w * 0.1)
-    top = y + int(h * 0.12)
-    right = x + int(w * 0.9)
-    bottom = y + int(h * 0.88)
+    rng = random.Random()
+    cx = x + w * 0.5
+    cy = y + h * 0.5
+    half_w = w * 0.52
+    half_h = h * 0.56
+    base_width = max(8, int(min(w, h) * 0.16))
+    stroke_count = max(7, min(18, int((w * h) / 5000) + 7))
 
-    draw.ellipse(
-        (left, top, right, bottom),
-        fill=(225, 22, 22, 75),
-        outline=(245, 0, 0, 235),
-        width=stroke,
-    )
+    for _ in range(stroke_count):
+        angle = rng.uniform(-0.45, 0.45)
+        direction = -1 if rng.random() < 0.5 else 1
+        # Чередуем горизонтальные и более вертикальные штрихи для "грязной" маркерной фактуры.
+        if rng.random() < 0.3:
+            angle += direction * rng.uniform(0.6, 1.25)
 
-    line_count = 5
-    for idx in range(line_count):
-        t = idx / max(1, line_count - 1)
-        y_line = int(top + (bottom - top) * t)
-        wobble = int((h * 0.04) * (-1 if idx % 2 else 1))
-        draw.line(
-            (left - stroke, y_line + wobble, right + stroke, y_line - wobble),
-            fill=(240, 0, 0, 145),
-            width=max(2, stroke // 2),
+        length = rng.uniform(min(w, h) * 0.7, max(w, h) * 1.35)
+        offset_x = rng.uniform(-half_w * 0.6, half_w * 0.6)
+        offset_y = rng.uniform(-half_h * 0.6, half_h * 0.6)
+        px = cx + offset_x
+        py = cy + offset_y
+        dx = (length * 0.5) * np.cos(angle)
+        dy = (length * 0.5) * np.sin(angle)
+
+        x0 = int(round(px - dx))
+        y0 = int(round(py - dy))
+        x1 = int(round(px + dx))
+        y1 = int(round(py + dy))
+
+        width = max(5, int(base_width * rng.uniform(0.65, 1.28)))
+        alpha = int(rng.uniform(160, 232))
+        color = (
+            int(rng.uniform(228, 250)),
+            int(rng.uniform(25, 70)),
+            int(rng.uniform(22, 62)),
+            alpha,
+        )
+        draw.line((x0, y0, x1, y1), fill=color, width=width)
+        # Скругляем концы, чтобы штрих был как от фломастера.
+        radius = max(2, width // 2)
+        draw.ellipse((x0 - radius, y0 - radius, x0 + radius, y0 + radius), fill=color)
+        draw.ellipse((x1 - radius, y1 - radius, x1 + radius, y1 + radius), fill=color)
+
+    # Пара дополнительных пятен с низкой альфой даёт эффект многократного прохода маркером.
+    for _ in range(rng.randint(2, 4)):
+        blob_w = rng.uniform(w * 0.18, w * 0.42)
+        blob_h = rng.uniform(h * 0.16, h * 0.38)
+        bx = cx + rng.uniform(-half_w * 0.55, half_w * 0.55)
+        by = cy + rng.uniform(-half_h * 0.55, half_h * 0.55)
+        draw.ellipse(
+            (
+                int(round(bx - blob_w * 0.5)),
+                int(round(by - blob_h * 0.5)),
+                int(round(bx + blob_w * 0.5)),
+                int(round(by + blob_h * 0.5)),
+            ),
+            fill=(
+                int(rng.uniform(232, 252)),
+                int(rng.uniform(25, 62)),
+                int(rng.uniform(20, 58)),
+                int(rng.uniform(95, 155)),
+            ),
         )
 
 

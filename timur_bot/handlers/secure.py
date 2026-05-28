@@ -45,11 +45,7 @@ async def _run_secure_task(
                 if result.detected_faces <= 0:
                     text = "Лицо на фото не обнаружено. Попробуй кадр, где лицо крупнее и без сильного наклона."
                 else:
-                    best = f"{result.best_distance:.1f}" if result.best_distance is not None else "n/a"
-                    text = (
-                        "Лицо найдено, но не прошло порог совпадения. "
-                        f"(best_distance={best})"
-                    )
+                    text = "а че secure то?"
                 logger.info(
                     "/secure no match: detected_faces=%s best_distance=%s",
                     result.detected_faces,
