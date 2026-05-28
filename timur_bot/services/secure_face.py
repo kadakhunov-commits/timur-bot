@@ -39,6 +39,11 @@ class SecureFaceSettings:
     match_threshold: float
     emoji_chance: float
     min_ref_samples: int
+    max_matches: int
+    second_best_margin: float
+    context_expand_side: float
+    context_expand_top: float
+    context_expand_bottom: float
     cascade_path: Path | None
     emoji_choices: Tuple[str, ...]
 
@@ -52,6 +57,11 @@ class SecureFaceSettings:
             round(self.match_threshold, 6),
             round(self.emoji_chance, 6),
             self.min_ref_samples,
+            self.max_matches,
+            round(self.second_best_margin, 6),
+            round(self.context_expand_side, 6),
+            round(self.context_expand_top, 6),
+            round(self.context_expand_bottom, 6),
             str(self.cascade_path.resolve()) if self.cascade_path else "",
             self.emoji_choices,
         )
@@ -93,7 +103,8 @@ def warmup_secure_face_model() -> str:
     return (
         "ready "
         f"(cache_hit={meta.get('cache_hit')} refs_total={meta.get('refs_total')} "
-        f"refs_with_face={meta.get('samples')} threshold={meta.get('match_threshold')})"
+        f"refs_with_face={meta.get('samples')} threshold={meta.get('match_threshold')} "
+        f"context={meta.get('context')})"
     )
 
 
@@ -123,6 +134,11 @@ def _load_settings() -> SecureFaceSettings:
         match_threshold=_clamp_float(os.getenv("SECURE_FACE_MATCH_THRESHOLD", "92"), 20.0, 180.0, 92.0),
         emoji_chance=_clamp_float(os.getenv("SECURE_FACE_EMOJI_CHANCE", "0.12"), 0.0, 1.0, 0.12),
         min_ref_samples=_clamp_int(os.getenv("SECURE_FACE_MIN_REF_SAMPLES", "3"), 2, 5000, 3),
+        max_matches=_clamp_int(os.getenv("SECURE_FACE_MAX_MATCHES", "1"), 1, 5, 1),
+        second_best_margin=_clamp_float(os.getenv("SECURE_FACE_SECOND_BEST_MARGIN", "9"), 0.0, 100.0, 9.0),
+        context_expand_side=_clamp_float(os.getenv("SECURE_FACE_CONTEXT_EXPAND_SIDE", "0.22"), 0.0, 1.5, 0.22),
+        context_expand_top=_clamp_float(os.getenv("SECURE_FACE_CONTEXT_EXPAND_TOP", "0.35"), 0.0, 1.8, 0.35),
+        context_expand_bottom=_clamp_float(os.getenv("SECURE_FACE_CONTEXT_EXPAND_BOTTOM", "0.12"), 0.0, 1.2, 0.12),
         cascade_path=cascade_path,
         emoji_choices=emoji_choices,
     )
@@ -174,24 +190,38 @@ class _SecureFaceEngine:
         gray = self._cv2.cvtColor(analysis_arr, self._cv2.COLOR_RGB2GRAY)
         faces = self._detect_faces(gray)
 
-        matched_boxes: List[tuple[int, int, int, int]] = []
+        matched_candidates: List[tuple[float, tuple[int, int, int, int]]] = []
         distances: List[float] = []
         for bbox in faces:
-            face_img = _extract_face(gray, bbox)
+            face_img = _extract_face_with_context(
+                gray,
+                bbox,
+                all_boxes=faces,
+                settings=self.settings,
+            )
             if face_img is None:
                 continue
             label, confidence = recognizer.predict(face_img)
             distance = float(confidence)
             distances.append(distance)
             if int(label) == _TARGET_LABEL and distance <= self.settings.match_threshold:
-                matched_boxes.append(_scale_bbox_to_original(bbox, scale, original.width, original.height))
+                matched_candidates.append(
+                    (
+                        distance,
+                        _scale_bbox_to_original(bbox, scale, original.width, original.height),
+                    )
+                )
         best_distance = min(distances) if distances else None
+        matched_boxes = self._select_final_matches(matched_candidates, len(faces))
+        top_distances = ",".join(f"{d:.1f}" for d in sorted(distances)[:5]) if distances else "n/a"
         logger.info(
-            "/secure inference: detected_faces=%s matched_faces=%s best_distance=%s threshold=%.2f max_side=%s",
+            "/secure inference: detected_faces=%s matched_faces=%s candidate_matches=%s best_distance=%s threshold=%.2f top_distances=%s max_side=%s",
             len(faces),
             len(matched_boxes),
+            len(matched_candidates),
             f"{best_distance:.2f}" if best_distance is not None else "n/a",
             self.settings.match_threshold,
+            top_distances,
             self.settings.max_side,
         )
 
@@ -223,6 +253,33 @@ class _SecureFaceEngine:
             best_distance=best_distance,
         )
 
+    def _select_final_matches(
+        self,
+        matched_candidates: Sequence[tuple[float, tuple[int, int, int, int]]],
+        detected_faces: int,
+    ) -> List[tuple[int, int, int, int]]:
+        if not matched_candidates:
+            return []
+        sorted_candidates = sorted(matched_candidates, key=lambda item: item[0])
+
+        if self.settings.max_matches <= 1:
+            best_distance, best_box = sorted_candidates[0]
+            if detected_faces >= 2 and len(sorted_candidates) >= 2 and self.settings.second_best_margin > 0:
+                second_distance = sorted_candidates[1][0]
+                margin = second_distance - best_distance
+                if margin < self.settings.second_best_margin:
+                    logger.info(
+                        "/secure rejected as ambiguous: best=%.2f second=%.2f margin=%.2f required=%.2f",
+                        best_distance,
+                        second_distance,
+                        margin,
+                        self.settings.second_best_margin,
+                    )
+                    return []
+            return [best_box]
+
+        return [box for _, box in sorted_candidates[: self.settings.max_matches]]
+
     def _ensure_model(self):
         if self._recognizer is not None:
             return self._recognizer
@@ -243,6 +300,8 @@ class _SecureFaceEngine:
                 continue
             for box in boxes:
                 candidate = tuple(int(v) for v in box)
+                if not _looks_like_face_box(candidate, gray_img.shape):
+                    continue
                 if _is_new_box(candidate, out):
                     out.append(candidate)
         return out
@@ -272,10 +331,12 @@ class _SecureFaceEngine:
         meta_path = self.settings.cache_dir / "meta.json"
 
         meta = _read_json(meta_path)
+        context_meta = self._context_meta()
         if (
             model_path.exists()
             and meta.get("fingerprint") == fingerprint
             and int(meta.get("min_ref_samples", 0)) == self.settings.min_ref_samples
+            and dict(meta.get("context") or {}) == context_meta
         ):
             recognizer = self._create_recognizer()
             recognizer.read(str(model_path))
@@ -284,6 +345,7 @@ class _SecureFaceEngine:
                 "refs_total": len(images),
                 "samples": int(meta.get("sample_count", 0)),
                 "match_threshold": self.settings.match_threshold,
+                "context": context_meta,
             }
             logger.info(
                 "/secure model cache hit: refs_total=%s refs_with_face=%s threshold=%.2f cache_dir=%s",
@@ -318,6 +380,7 @@ class _SecureFaceEngine:
                 "created_at_utc": datetime.now(timezone.utc).isoformat(),
                 "sample_count": len(samples),
                 "min_ref_samples": self.settings.min_ref_samples,
+                "context": context_meta,
             },
         )
         self._model_meta = {
@@ -325,6 +388,7 @@ class _SecureFaceEngine:
             "refs_total": len(images),
             "samples": len(samples),
             "match_threshold": self.settings.match_threshold,
+            "context": context_meta,
         }
         logger.info(
             "/secure model trained: refs_total=%s refs_with_face=%s threshold=%.2f cache_dir=%s",
@@ -334,6 +398,13 @@ class _SecureFaceEngine:
             self.settings.cache_dir,
         )
         return recognizer
+
+    def _context_meta(self) -> dict[str, float]:
+        return {
+            "expand_side": round(self.settings.context_expand_side, 6),
+            "expand_top": round(self.settings.context_expand_top, 6),
+            "expand_bottom": round(self.settings.context_expand_bottom, 6),
+        }
 
     def _extract_reference_sample(self, image_path: Path) -> np.ndarray | None:
         try:
@@ -347,7 +418,12 @@ class _SecureFaceEngine:
             return None
         # Для обучающих фото берём крупнейшее лицо как самое вероятное.
         box = max(boxes, key=lambda b: b[2] * b[3])
-        return _extract_face(gray, box)
+        return _extract_face_with_context(
+            gray,
+            box,
+            all_boxes=boxes,
+            settings=self.settings,
+        )
 
     def _create_recognizer(self):
         face_mod = getattr(self._cv2, "face", None)
@@ -404,6 +480,96 @@ def _extract_face(gray: np.ndarray, bbox: Sequence[int]) -> np.ndarray | None:
     normalized = cv2.equalizeHist(roi)
     face = cv2.resize(normalized, _FACE_SIZE, interpolation=cv2.INTER_AREA)
     return face
+
+
+def _extract_face_with_context(
+    gray: np.ndarray,
+    bbox: Sequence[int],
+    *,
+    all_boxes: Sequence[Sequence[int]],
+    settings: SecureFaceSettings,
+) -> np.ndarray | None:
+    expanded = _expand_bbox_without_overlap(
+        bbox,
+        all_boxes=all_boxes,
+        image_shape=gray.shape,
+        expand_side=settings.context_expand_side,
+        expand_top=settings.context_expand_top,
+        expand_bottom=settings.context_expand_bottom,
+    )
+    return _extract_face(gray, expanded)
+
+
+def _expand_bbox_without_overlap(
+    bbox: Sequence[int],
+    *,
+    all_boxes: Sequence[Sequence[int]],
+    image_shape: tuple[int, ...],
+    expand_side: float,
+    expand_top: float,
+    expand_bottom: float,
+) -> tuple[int, int, int, int]:
+    x, y, w, h = (int(v) for v in bbox[:4])
+    image_h, image_w = int(image_shape[0]), int(image_shape[1])
+    if w <= 0 or h <= 0 or image_h <= 0 or image_w <= 0:
+        return x, y, w, h
+
+    left = x - int(round(w * expand_side))
+    right = x + w + int(round(w * expand_side))
+    top = y - int(round(h * expand_top))
+    bottom = y + h + int(round(h * expand_bottom))
+
+    left_limit, right_limit = 0, image_w
+    top_limit, bottom_limit = 0, image_h
+    for other in all_boxes:
+        ox, oy, ow, oh = (int(v) for v in other[:4])
+        if ow <= 0 or oh <= 0:
+            continue
+        if ox == x and oy == y and ow == w and oh == h:
+            continue
+
+        if _overlap_len(y, y + h, oy, oy + oh) > max(1.0, 0.25 * min(h, oh)):
+            if ox + ow <= x:
+                left_limit = max(left_limit, ox + ow + 1)
+            elif ox >= x + w:
+                right_limit = min(right_limit, ox - 1)
+
+        if _overlap_len(x, x + w, ox, ox + ow) > max(1.0, 0.25 * min(w, ow)):
+            if oy + oh <= y:
+                top_limit = max(top_limit, oy + oh + 1)
+            elif oy >= y + h:
+                bottom_limit = min(bottom_limit, oy - 1)
+
+    left = max(left_limit, left)
+    right = min(right_limit, right)
+    top = max(top_limit, top)
+    bottom = min(bottom_limit, bottom)
+
+    left = max(0, min(image_w - 1, left))
+    top = max(0, min(image_h - 1, top))
+    right = max(left + 1, min(image_w, right))
+    bottom = max(top + 1, min(image_h, bottom))
+    return left, top, right - left, bottom - top
+
+
+def _overlap_len(a0: int, a1: int, b0: int, b1: int) -> float:
+    return float(max(0, min(a1, b1) - max(a0, b0)))
+
+
+def _looks_like_face_box(bbox: tuple[int, int, int, int], image_shape: tuple[int, int]) -> bool:
+    x, y, w, h = bbox
+    if w <= 0 or h <= 0:
+        return False
+    ratio = w / float(h)
+    if ratio < 0.6 or ratio > 1.55:
+        return False
+    image_h, image_w = image_shape[:2]
+    area_ratio = (w * h) / float(max(1, image_w * image_h))
+    if area_ratio < 0.0009:
+        return False
+    if y + h <= int(image_h * 0.12):
+        return False
+    return True
 
 
 def _is_new_box(candidate: tuple[int, int, int, int], existing: Sequence[tuple[int, int, int, int]]) -> bool:

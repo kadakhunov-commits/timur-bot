@@ -24,6 +24,11 @@ SECURE_FACE_MAX_SIDE=960
 SECURE_FACE_MATCH_THRESHOLD=92
 SECURE_FACE_EMOJI_CHANCE=0.12
 SECURE_FACE_MIN_REF_SAMPLES=3
+SECURE_FACE_MAX_MATCHES=1
+SECURE_FACE_SECOND_BEST_MARGIN=9
+SECURE_FACE_CONTEXT_EXPAND_SIDE=0.22
+SECURE_FACE_CONTEXT_EXPAND_TOP=0.35
+SECURE_FACE_CONTEXT_EXPAND_BOTTOM=0.12
 ```
 
 `OPENAI_BASE_URL` опционален. Если пустой, используется стандартный endpoint SDK.
@@ -32,6 +37,9 @@ SECURE_FACE_MIN_REF_SAMPLES=3
 `SECURE_FACE_REF_DIR` включает команду `/secure` (папка с референс-фото нужного человека).
 `SECURE_FACE_CACHE_DIR` (опционально) — папка кэша LBPH-модели и метаданных.
 `SECURE_FACE_MAX_SIDE`, `SECURE_FACE_MATCH_THRESHOLD`, `SECURE_FACE_EMOJI_CHANCE`, `SECURE_FACE_MIN_REF_SAMPLES` — тюнинг скорости/чувствительности `/secure`.
+`SECURE_FACE_MAX_MATCHES` (по умолчанию `1`) — сколько лиц максимум замазывать.
+`SECURE_FACE_SECOND_BEST_MARGIN` — минимальный отрыв лучшего кандидата от второго, иначе `/secure` считает результат неоднозначным и не срабатывает.
+`SECURE_FACE_CONTEXT_EXPAND_SIDE/TOP/BOTTOM` — насколько расширять кроп лица для сравнения (включая волосы/контур головы), при этом кроп не заходит на соседние face-boxes.
 
 3. Запусти бота:
 
