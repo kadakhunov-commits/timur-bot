@@ -98,6 +98,13 @@ from timur_bot.services.fact_recall import (
     build_fact_recall_bundle,
     build_miniapp_fact_map,
 )
+from timur_bot.services.summary import (
+    SUMMARY_MAX_MESSAGES,
+    build_summary_messages,
+    parse_summary_request,
+    select_summary_window,
+    usage_hint as summary_usage_hint,
+)
 from timur_bot.tools.import_telegram_html import import_messages as import_telegram_messages
 from timur_bot.tools.import_telegram_html import parse_export_dir as parse_telegram_export_dir
 
@@ -2277,6 +2284,21 @@ async def call_openai_text(messages: List[Dict[str, Any]]) -> str:
 
     except Exception as e:
         logger.error("Ошибка OpenAI при генерации текста: %s", e)
+        return ""
+
+
+async def call_openai_with_params(messages: List[Dict[str, Any]], *, max_tokens: int, temperature: float) -> str:
+    try:
+        response = await asyncio.to_thread(
+            client.chat.completions.create,
+            model=TEXT_MODEL,
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+        return (response.choices[0].message.content or "").strip()
+    except Exception as e:
+        logger.error("Ошибка OpenAI при генерации summary: %s", e)
         return ""
 
 
@@ -4709,6 +4731,73 @@ async def story_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not story_text:
         story_text = "сегодня без лора давай позже"
     await message.reply_text(story_text)
+
+
+async def summary_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.message
+    if not message:
+        return
+
+    memory = load_memory()
+    chat_mem = get_chat_mem(memory, message.chat_id)
+    history = chat_mem.get("history", [])
+
+    reply_message_id = None
+    if message.reply_to_message:
+        reply_message_id = message.reply_to_message.message_id
+
+    request, parse_error = parse_summary_request(
+        " ".join(context.args or []),
+        reply_message_id=reply_message_id,
+        tz_name=DEFAULT_LIFE_TIMEZONE,
+    )
+    if parse_error:
+        await message.reply_text(parse_error or summary_usage_hint())
+        return
+    if request is None:
+        await message.reply_text(summary_usage_hint())
+        return
+
+    window = select_summary_window(history, request, max_messages=SUMMARY_MAX_MESSAGES)
+    if window.status == "not_found":
+        await message.reply_text("не нашел это сообщение в моей памяти, возьми посвежее диапазон")
+        return
+    if window.status == "empty":
+        await message.reply_text("в этом диапазоне ловить особо нечего, тишина и пыль")
+        return
+    if window.status == "too_many":
+        await message.reply_text(
+            f"ты хочешь {window.selected_total} сообщений, а лимит {window.requested_limit}. "
+            "иди нах с таким объемом, я не буду это руками разгребать"
+        )
+        return
+
+    try:
+        summary_messages = await build_summary_messages(
+            text_messages=window.text_messages,
+            tz_name=DEFAULT_LIFE_TIMEZONE,
+            system_prompt=get_system_prompt(memory),
+            active_mode=get_active_mode(memory),
+            mode_prompt=get_mode_prompt(memory),
+            style_settings=get_style_settings(memory),
+            bio_settings=get_bio_settings(memory),
+            llm_call=lambda messages, max_tokens, temperature: call_openai_with_params(
+                messages, max_tokens=max_tokens, temperature=temperature
+            ),
+        )
+    except Exception as e:
+        logger.error("Ошибка подготовки summary: %s", e)
+        summary_messages = []
+
+    if not summary_messages:
+        await message.reply_text("короче по делу ничего весомого не накопали")
+        return
+
+    for item in summary_messages[:9]:
+        text = enforce_reply_guardrails(str(item))
+        if not text:
+            continue
+        await message.reply_text(text)
 
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

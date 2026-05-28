@@ -20,7 +20,7 @@ def test_register_handlers_smoke() -> None:
     app = DummyApp()
     register_handlers(app)
 
-    assert len(app.handlers) == 43
+    assert len(app.handlers) == 44
     assert any(isinstance(h, MessageReactionHandler) for h in app.handlers)
 
     commands = []
@@ -32,6 +32,7 @@ def test_register_handlers_smoke() -> None:
         [
             "start",
             "story",
+            "summary",
             "admin",
             "panel",
             "miniapp",
