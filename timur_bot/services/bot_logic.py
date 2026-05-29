@@ -89,6 +89,7 @@ from timur_bot.services.humor import (
     record_bot_output,
 )
 from timur_bot.services.fact_memory import (
+    build_fact_record,
     ensure_entity,
     ensure_fact_graph,
     extract_claim_facts,
@@ -184,6 +185,11 @@ TOXIC_REPLY_PATTERNS = (
 )
 PROCESSED_EVENT_KEYS_LIMIT = 400
 LIFE_STORY_LOG_LIMIT = 80
+LORE_ARCS_LIMIT = 24
+LORE_BEATS_PER_ARC_LIMIT = 14
+LORE_FACTS_PER_ARC_LIMIT = 24
+LORE_BRANCH_BASE_CHANCE = 0.12
+LORE_BRANCH_MAX_OPEN = 6
 MOOD_EVENT_HISTORY_LIMIT = 80
 MOOD_ATTEMPT_LOG_LIMIT = 80
 LIFE_LOOP_INTERVAL_SECONDS = 60
@@ -265,6 +271,13 @@ def _default_life_config() -> Dict[str, Any]:
         "chat_last_emit": {},
         "story_log": [],
         "last_story_id": 0,
+        "lore_arcs": [],
+        "last_lore_arc_id": 0,
+        "lore_profile": {
+            "university": "кфу мехмат",
+            "study_course": 3,
+            "total_courses": 4,
+        },
         "last_emit_ts": None,
         "last_emit_chat_id": None,
     }
@@ -279,7 +292,7 @@ def _ensure_life_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
             quiet.setdefault("start", value["start"])
             quiet.setdefault("end", value["end"])
             continue
-        if key in {"daily_slots", "sent_slots", "story_log"}:
+        if key in {"daily_slots", "sent_slots", "story_log", "lore_arcs"}:
             current = life.get(key)
             if not isinstance(current, list):
                 life[key] = list(value)
@@ -289,7 +302,16 @@ def _ensure_life_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
             if not isinstance(current, dict):
                 life[key] = dict(value)
             continue
+        if key == "lore_profile":
+            current = life.get(key)
+            if not isinstance(current, dict):
+                life[key] = dict(value)
+            else:
+                for p_key, p_value in value.items():
+                    current.setdefault(p_key, p_value)
+            continue
         life.setdefault(key, value)
+    _ensure_lore_arcs_schema(life)
     return life
 
 
@@ -1392,6 +1414,838 @@ def _refresh_life_daily_state(life: Dict[str, Any], now_local: datetime) -> None
     life["sent_slots"] = []
 
 
+def _clean_story_line(raw: Any, *, max_chars: int = 280) -> str:
+    text = re.sub(r"\s+", " ", str(raw or "")).strip()
+    if not text:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    short = text[:max_chars].rsplit(" ", 1)[0].strip()
+    return short or text[:max_chars]
+
+
+def _lore_safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+
+def _extract_json_object(raw: Any) -> Dict[str, Any]:
+    text = str(raw or "").strip()
+    if not text:
+        return {}
+    try:
+        parsed = json.loads(text)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        pass
+
+    start = text.find("{")
+    if start < 0:
+        return {}
+    depth = 0
+    for idx in range(start, len(text)):
+        ch = text[idx]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                candidate = text[start : idx + 1]
+                try:
+                    parsed = json.loads(candidate)
+                    return parsed if isinstance(parsed, dict) else {}
+                except Exception:
+                    return {}
+    return {}
+
+
+def _ensure_lore_arcs_schema(life: Dict[str, Any]) -> List[Dict[str, Any]]:
+    arcs = life.get("lore_arcs", [])
+    if not isinstance(arcs, list):
+        arcs = []
+    normalized: List[Dict[str, Any]] = []
+    max_arc_id = max(0, _lore_safe_int(life.get("last_lore_arc_id", 0), 0))
+
+    for raw_arc in arcs[-LORE_ARCS_LIMIT:]:
+        if not isinstance(raw_arc, dict):
+            continue
+        arc_id = max(0, _lore_safe_int(raw_arc.get("id", 0), 0))
+        if arc_id <= 0:
+            continue
+        max_arc_id = max(max_arc_id, arc_id)
+        beats = raw_arc.get("beats", [])
+        if not isinstance(beats, list):
+            beats = []
+        facts = raw_arc.get("facts", [])
+        if not isinstance(facts, list):
+            facts = []
+        normalized.append(
+            {
+                "id": arc_id,
+                "title": _clean_story_line(raw_arc.get("title", "неоформленная арка"), max_chars=90),
+                "summary": _clean_story_line(raw_arc.get("summary", ""), max_chars=240),
+                "status": str(raw_arc.get("status", "active") or "active"),
+                "arc_kind": str(raw_arc.get("arc_kind", "side") or "side"),
+                "parent_arc_id": max(0, _lore_safe_int(raw_arc.get("parent_arc_id", 0), 0)),
+                "seed_event_id": max(0, _lore_safe_int(raw_arc.get("seed_event_id", 0), 0)),
+                "seed_event_key": str(raw_arc.get("seed_event_key", "") or ""),
+                "base_privacy": int(max(0, min(3, _lore_safe_int(raw_arc.get("base_privacy", 1), 1)))),
+                "last_beat_id": max(0, _lore_safe_int(raw_arc.get("last_beat_id", 0), 0)),
+                "created_ts": str(raw_arc.get("created_ts", "") or ""),
+                "updated_ts": str(raw_arc.get("updated_ts", "") or ""),
+                "beats": beats[-LORE_BEATS_PER_ARC_LIMIT:],
+                "facts": facts[-LORE_FACTS_PER_ARC_LIMIT:],
+            }
+        )
+
+    life["lore_arcs"] = normalized[-LORE_ARCS_LIMIT:]
+    life["last_lore_arc_id"] = max_arc_id
+    return life["lore_arcs"]
+
+
+def _latest_lore_beat(arc: Dict[str, Any]) -> Dict[str, Any] | None:
+    beats = arc.get("beats", [])
+    if not isinstance(beats, list) or not beats:
+        return None
+    item = beats[-1]
+    return item if isinstance(item, dict) else None
+
+
+def _count_open_lore_arcs(life: Dict[str, Any]) -> int:
+    arcs = _ensure_lore_arcs_schema(life)
+    total = 0
+    for arc in arcs:
+        status = str(arc.get("status", "active") or "active")
+        if status in {"active", "dormant"}:
+            total += 1
+    return total
+
+
+def _ensure_main_lore_arc(life: Dict[str, Any], now_utc: datetime, event: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    arcs = _ensure_lore_arcs_schema(life)
+    for arc in arcs:
+        if str(arc.get("arc_kind", "side")) == "core":
+            return arc
+    summary = _clean_story_line((event or {}).get("public_text", ""), max_chars=180) or "учеба на мехмате и бытовые квесты"
+    has_active = any(str(arc.get("status", "active")) == "active" for arc in arcs)
+    return _start_new_lore_arc(
+        life,
+        event or {},
+        now_utc,
+        title="мехмат и бытовуха",
+        summary=summary,
+        arc_kind="core",
+        parent_arc_id=0,
+        force_status="dormant" if has_active else "active",
+    )
+
+
+def _select_dormant_lore_arc(life: Dict[str, Any]) -> Dict[str, Any] | None:
+    arcs = _ensure_lore_arcs_schema(life)
+    scored: List[Tuple[float, Dict[str, Any]]] = []
+    for arc in arcs:
+        if str(arc.get("status", "active") or "active") != "dormant":
+            continue
+        score = 0.0
+        if str(arc.get("arc_kind", "side") or "side") == "core":
+            score += 2.4
+        beats = arc.get("beats", [])
+        if isinstance(beats, list):
+            score += min(2.0, len(beats) * 0.2)
+        updated = _parse_iso_ts(str(arc.get("updated_ts", "")))
+        if updated:
+            hours = max(0.0, (datetime.utcnow() - updated).total_seconds() / 3600.0)
+            score += max(0.0, 1.8 - min(1.8, hours / 72.0))
+        scored.append((score, arc))
+    if not scored:
+        return None
+    scored.sort(key=lambda item: item[0], reverse=True)
+    return scored[0][1]
+
+
+def _get_active_lore_arc(life: Dict[str, Any]) -> Dict[str, Any] | None:
+    arcs = _ensure_lore_arcs_schema(life)
+    for arc in reversed(arcs):
+        if str(arc.get("status", "active")) == "active":
+            return arc
+    resumed = _select_dormant_lore_arc(life)
+    if resumed:
+        resumed["status"] = "active"
+        resumed["updated_ts"] = datetime.utcnow().isoformat()
+        return resumed
+    return None
+
+
+def _should_rotate_lore_arc(arc: Dict[str, Any], event: Dict[str, Any], now_utc: datetime) -> bool:
+    beats = arc.get("beats", [])
+    beat_count = len(beats) if isinstance(beats, list) else 0
+    if beat_count >= LORE_BEATS_PER_ARC_LIMIT:
+        return True
+
+    created_ts = _parse_iso_ts(str(arc.get("created_ts", "")))
+    if created_ts and (now_utc - created_ts) >= timedelta(hours=72) and beat_count >= 4:
+        return True
+
+    current_event_id = max(0, _lore_safe_int(event.get("id", 0), 0)) if event else 0
+    seed_event_id = max(0, _lore_safe_int(arc.get("seed_event_id", 0), 0))
+    current_key = str(event.get("key", "") or "") if event else ""
+    seed_key = str(arc.get("seed_event_key", "") or "")
+    if current_event_id and seed_event_id and current_event_id != seed_event_id and beat_count >= 5 and current_key and current_key != seed_key:
+        return True
+    return False
+
+
+def _start_new_lore_arc(
+    life: Dict[str, Any],
+    event: Dict[str, Any],
+    now_utc: datetime,
+    *,
+    title: str = "",
+    summary: str = "",
+    arc_kind: str = "side",
+    parent_arc_id: int = 0,
+    force_status: str = "active",
+) -> Dict[str, Any]:
+    _ensure_lore_arcs_schema(life)
+    next_arc_id = max(0, _lore_safe_int(life.get("last_lore_arc_id", 0), 0)) + 1
+    life["last_lore_arc_id"] = next_arc_id
+
+    seed_key = str(event.get("key", "") or "everyday_noise")
+    seed_title = seed_key.replace("_", " ").strip() or "everyday arc"
+    summary_text = _clean_story_line(summary, max_chars=220) or _clean_story_line(
+        event.get("private_text") or event.get("public_text") or "",
+        max_chars=220,
+    )
+    title_text = _clean_story_line(title, max_chars=90) or f"{seed_title} #{next_arc_id}"
+    arc = {
+        "id": next_arc_id,
+        "title": title_text,
+        "summary": summary_text,
+        "status": str(force_status or "active"),
+        "arc_kind": str(arc_kind or "side"),
+        "parent_arc_id": max(0, int(parent_arc_id or 0)),
+        "seed_event_id": max(0, _lore_safe_int(event.get("id", 0), 0)) if event else 0,
+        "seed_event_key": seed_key,
+        "base_privacy": int(max(0, min(3, _lore_safe_int(event.get("privacy_level", 1), 1)))) if event else 1,
+        "last_beat_id": 0,
+        "created_ts": now_utc.isoformat(),
+        "updated_ts": now_utc.isoformat(),
+        "beats": [],
+        "facts": [],
+    }
+    arcs = life.setdefault("lore_arcs", [])
+    if not isinstance(arcs, list):
+        arcs = []
+        life["lore_arcs"] = arcs
+    arcs.append(arc)
+    if len(arcs) > LORE_ARCS_LIMIT:
+        del arcs[:-LORE_ARCS_LIMIT]
+    return arc
+
+
+def _get_or_create_active_lore_arc(life: Dict[str, Any], event: Dict[str, Any], now_utc: datetime) -> Dict[str, Any]:
+    _ensure_main_lore_arc(life, now_utc, event)
+    arc = _get_active_lore_arc(life)
+    if not arc:
+        return _start_new_lore_arc(life, event, now_utc, title="мехмат и бытовуха", arc_kind="core")
+    if _should_rotate_lore_arc(arc, event, now_utc):
+        arc["status"] = "completed"
+        arc["updated_ts"] = now_utc.isoformat()
+        if str(arc.get("arc_kind", "side")) == "core":
+            return _start_new_lore_arc(life, event, now_utc, title="мехмат и бытовуха", arc_kind="core")
+        core = _ensure_main_lore_arc(life, now_utc, event)
+        core["status"] = "active"
+        core["updated_ts"] = now_utc.isoformat()
+        return core
+    if event and not _lore_safe_int(arc.get("seed_event_id", 0), 0):
+        arc["seed_event_id"] = max(0, _lore_safe_int(event.get("id", 0), 0))
+    if event and not str(arc.get("seed_event_key", "") or "").strip():
+        arc["seed_event_key"] = str(event.get("key", "") or "")
+    return arc
+
+
+def _lore_recent_chat_lines(memory: Dict[str, Any], chat_id: int, *, limit: int = 6) -> List[str]:
+    chat_mem = get_chat_mem(memory, chat_id)
+    history = chat_mem.get("history", [])
+    if not isinstance(history, list) or not history:
+        return []
+    lines: List[str] = []
+    for rec in history[-20:]:
+        if bool(rec.get("is_bot", False)):
+            continue
+        txt = _clean_story_line(rec.get("text", ""), max_chars=140)
+        if not txt:
+            continue
+        name = str(rec.get("name") or rec.get("username") or rec.get("user_id") or "user")
+        lines.append(f"- {name}: {txt}")
+    return lines[-limit:]
+
+
+def _lore_recent_story_texts(life: Dict[str, Any], *, limit: int = 10) -> List[str]:
+    log = life.get("story_log", [])
+    if not isinstance(log, list):
+        return []
+    texts: List[str] = []
+    for item in log[-max(limit, 1) :]:
+        text = _clean_story_line((item or {}).get("text", ""), max_chars=180) if isinstance(item, dict) else ""
+        if text:
+            texts.append(text)
+    return texts[-limit:]
+
+
+def _normalize_lore_fact_items(raw_facts: Any, *, base_privacy: int) -> List[Dict[str, Any]]:
+    if not isinstance(raw_facts, list):
+        return []
+    out: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in raw_facts[:6]:
+        if not isinstance(item, dict):
+            continue
+        attribute = normalize_token(str(item.get("attribute", "")).replace("-", "_"))
+        attribute = re.sub(r"[^a-zа-я0-9_ ]", "", attribute).strip().replace(" ", "_")
+        value = _clean_story_line(item.get("value", ""), max_chars=96)
+        if not attribute or not value:
+            continue
+        if len(attribute) > 28:
+            attribute = attribute[:28].rstrip("_")
+        privacy = int(max(0, min(3, _lore_safe_int(item.get("privacy", base_privacy), base_privacy))))
+        confidence = _clamp_float(item.get("confidence", 0.68), 0.2, 1.0, 0.68)
+        key = f"{attribute}|{normalize_token(value)}"
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(
+            {
+                "attribute": attribute or "lore_note",
+                "value": value,
+                "privacy": privacy,
+                "confidence": round(float(confidence), 3),
+            }
+        )
+    return out[:3]
+
+
+def _persist_lore_facts(memory: Dict[str, Any], chat_id: int, arc: Dict[str, Any], beat: Dict[str, Any]) -> None:
+    raw_facts = beat.get("facts", [])
+    facts = _normalize_lore_fact_items(raw_facts, base_privacy=int(arc.get("base_privacy", 1) or 1))
+    if not facts:
+        return
+
+    chat_mem = get_chat_mem(memory, chat_id)
+    built: List[Dict[str, Any]] = []
+    arc_title = _clean_story_line(arc.get("title", "лoр арка"), max_chars=80)
+    context_text = _clean_story_line(beat.get("private_story") or beat.get("public_story") or "", max_chars=180)
+
+    for item in facts:
+        record = build_fact_record(
+            entity_id="bot:self",
+            entity_title="тимур",
+            entity_kind="bot",
+            attribute=item["attribute"],
+            value=item["value"],
+            source="lore_arc",
+            confidence=float(item["confidence"]),
+            question_text=f"лoр: {arc_title}",
+            reply_text=context_text or f"{item['attribute']}: {item['value']}",
+        )
+        record["privacy_level"] = int(item["privacy"])
+        record["arc_id"] = _lore_safe_int(arc.get("id", 0), 0)
+        built.append(record)
+
+        arc_facts = arc.setdefault("facts", [])
+        if isinstance(arc_facts, list):
+            fact_key = f"{item['attribute']}|{normalize_token(item['value'])}"
+            if not any(
+                isinstance(existing, dict)
+                and f"{existing.get('attribute', '')}|{normalize_token(str(existing.get('value', '')))}" == fact_key
+                for existing in arc_facts
+            ):
+                arc_facts.append(
+                    {
+                        "attribute": item["attribute"],
+                        "value": item["value"],
+                        "privacy": int(item["privacy"]),
+                        "confidence": float(item["confidence"]),
+                        "ts": datetime.utcnow().isoformat(),
+                    }
+                )
+            if len(arc_facts) > LORE_FACTS_PER_ARC_LIMIT:
+                del arc_facts[:-LORE_FACTS_PER_ARC_LIMIT]
+
+    touched = upsert_claim_facts(chat_mem, built)
+    for fact in touched:
+        fact_text = str(fact.get("text", "")).strip()
+        if not fact_text:
+            continue
+        boost = max(0.55, float(fact.get("confidence", 0.55)))
+        _upsert_long_fact(
+            chat_mem,
+            fact_text=fact_text,
+            ts=datetime.now(timezone.utc).isoformat(),
+            boost=boost,
+        )
+
+
+def _infer_lore_study_profile(memory: Dict[str, Any], chat_id: int) -> Dict[str, Any]:
+    cfg = memory.setdefault("config", {})
+    life = _ensure_life_config(cfg)
+    profile = life.get("lore_profile", {})
+    if not isinstance(profile, dict):
+        profile = {}
+        life["lore_profile"] = profile
+
+    university = _clean_story_line(profile.get("university", "кфу мехмат"), max_chars=80) or "кфу мехмат"
+    course = max(1, _lore_safe_int(profile.get("study_course", 3), 3))
+    total_courses = max(course, _lore_safe_int(profile.get("total_courses", 4), 4))
+
+    chat_mem = get_chat_mem(memory, chat_id)
+    graph = ensure_fact_graph(chat_mem)
+    for fact in graph.get("facts", []):
+        if not isinstance(fact, dict):
+            continue
+        if str(fact.get("entity_id", "")) != "bot:self":
+            continue
+        attr = str(fact.get("attribute", "")).strip().lower()
+        value = str(fact.get("value", "")).strip()
+        if attr in {"university", "study_place", "faculty"} and value:
+            university = _clean_story_line(value, max_chars=80) or university
+        if attr in {"study_course", "course", "study_year"}:
+            parsed = _lore_safe_int(re.findall(r"\d+", value)[0], 0) if re.findall(r"\d+", value) else 0
+            if parsed > 0:
+                course = max(1, parsed)
+                total_courses = max(total_courses, course)
+        if attr in {"study_total_courses", "course_total"}:
+            parsed = _lore_safe_int(re.findall(r"\d+", value)[0], 0) if re.findall(r"\d+", value) else 0
+            if parsed > 0:
+                total_courses = max(1, parsed)
+
+    course = min(course, total_courses)
+    return {"university": university, "course": course, "total_courses": total_courses}
+
+
+def _contains_university_completion_claim(text: str) -> bool:
+    low = normalize_token(text)
+    patterns = (
+        "закончил универ",
+        "окончил универ",
+        "окончил кфу",
+        "закончил кфу",
+        "получил диплом",
+        "выпустился",
+        "выпускной",
+    )
+    return any(p in low for p in patterns)
+
+
+def _can_graduate_now(memory: Dict[str, Any], chat_id: int, now_utc: datetime) -> bool:
+    profile = _infer_lore_study_profile(memory, chat_id)
+    if int(profile["course"]) < int(profile["total_courses"]):
+        return False
+    if now_utc.month not in {5, 6, 7, 8}:
+        return False
+    return True
+
+
+def _sanitize_unrealistic_study_claims(text: str, *, allow_graduate: bool) -> str:
+    cleaned = str(text or "")
+    if allow_graduate:
+        return cleaned
+    replacements = [
+        (r"\b(закончил|окончил)\s+(универ|кфу)\b", "закрыл сложный учебный этап"),
+        (r"\bполучил\s+диплом\b", "закрыл серьезный модуль"),
+        (r"\bвыпустил[а-я]*\b", "почти вышел на новый этап"),
+        (r"\bвыпускн[а-я]*\b", "финальный зачетный период"),
+    ]
+    for pattern, repl in replacements:
+        cleaned = re.sub(pattern, repl, cleaned, flags=re.IGNORECASE)
+    return cleaned
+
+
+def _maybe_spawn_branch_arc(
+    *,
+    memory: Dict[str, Any],
+    chat_id: int,
+    life: Dict[str, Any],
+    current_arc: Dict[str, Any],
+    event: Dict[str, Any],
+    payload: Dict[str, Any],
+    now_utc: datetime,
+) -> Dict[str, Any]:
+    if _count_open_lore_arcs(life) >= LORE_BRANCH_MAX_OPEN:
+        return current_arc
+    if str(current_arc.get("status", "active")) != "active":
+        return current_arc
+
+    branch_hook = _clean_story_line(payload.get("branch_hook", ""), max_chars=120)
+    branch_title = _clean_story_line(payload.get("branch_title", ""), max_chars=90)
+    phase = str(payload.get("phase", "") or "").lower()
+    if not branch_hook and phase not in {"twist", "build"}:
+        return current_arc
+
+    cfg = memory.setdefault("config", {})
+    mood = _ensure_mood_config(cfg)
+    chat_state = _ensure_mood_chat_state(mood, chat_id)
+    openness = float(chat_state.get("openness", 50.0))
+    privacy = int(max(0, min(3, _lore_safe_int(event.get("privacy_level", 1), 1)))) if event else 1
+    chance = LORE_BRANCH_BASE_CHANCE + (0.06 if branch_hook else 0.0) + (0.05 if phase == "twist" else 0.02)
+    chance += max(0.0, min(0.08, (openness - 50.0) / 500.0))
+    chance += 0.03 if privacy <= 1 else 0.0
+    chance = max(0.05, min(0.35, chance))
+    if random.random() >= chance:
+        return current_arc
+
+    parent_id = _lore_safe_int(current_arc.get("id", 0), 0)
+    if not branch_title:
+        base = branch_hook or "новая побочка"
+        branch_title = _clean_story_line(base, max_chars=70)
+    summary = branch_hook or _clean_story_line(payload.get("arc_summary", ""), max_chars=180)
+    current_arc["status"] = "dormant"
+    current_arc["updated_ts"] = now_utc.isoformat()
+    return _start_new_lore_arc(
+        life,
+        event,
+        now_utc,
+        title=branch_title,
+        summary=summary,
+        arc_kind="branch",
+        parent_arc_id=parent_id,
+        force_status="active",
+    )
+
+
+def _compose_lore_prompt(
+    *,
+    memory: Dict[str, Any],
+    chat_id: int,
+    arc: Dict[str, Any],
+    event: Dict[str, Any],
+    proactive: bool,
+) -> str:
+    cfg = memory.setdefault("config", {})
+    mood = _ensure_mood_config(cfg)
+    chat_state = _ensure_mood_chat_state(mood, chat_id)
+    guard = float(mood.get("guard_level", 55.0))
+    openness = float(chat_state.get("openness", 50.0))
+    valence = float(mood.get("valence", 0.0))
+    energy = float(mood.get("energy", 50.0))
+    privacy = int(max(0, min(3, _lore_safe_int(event.get("privacy_level", arc.get("base_privacy", 1)), 1))))
+
+    beats = arc.get("beats", [])
+    if not isinstance(beats, list):
+        beats = []
+    recent_beats = beats[-4:]
+    beat_lines: List[str] = []
+    for idx, beat in enumerate(recent_beats, start=1):
+        if not isinstance(beat, dict):
+            continue
+        phase = str(beat.get("phase", "beat") or "beat")
+        pub = _clean_story_line(beat.get("public_story", ""), max_chars=150)
+        prv = _clean_story_line(beat.get("private_story", ""), max_chars=150)
+        if pub or prv:
+            beat_lines.append(f"- step{idx} phase={phase}; public={pub or '-'}; private={prv or '-'}")
+
+    recent_story_texts = _lore_recent_story_texts(_ensure_life_config(cfg), limit=10)
+    recent_chat = _lore_recent_chat_lines(memory, chat_id, limit=6)
+    public_hint = _clean_story_line(event.get("public_text", ""), max_chars=120)
+    private_hint = _clean_story_line(event.get("private_text", ""), max_chars=120)
+    study_profile = _infer_lore_study_profile(memory, chat_id)
+    now_utc = datetime.utcnow()
+
+    prompt_lines = [
+        "сгенерируй следующий эпизод личного лора тимура как продолжение сюжетной арки",
+        "эпизод должен быть конкретным и логичным: место/действие/последствие",
+        "не используй заезженные заготовки и не повторяй прошлые формулировки",
+        "держи стиль живым, коротким, разговорным, без эмодзи",
+        "если privacy/guard высокие, public_story только намек без деталей",
+        "private_story может быть подробнее, но все равно кратко",
+        "верни только json без пояснений",
+        "json schema:",
+        "{",
+        '  "arc_title": "string",',
+        '  "arc_summary": "string",',
+        '  "phase": "hook|build|twist|fallout|payoff",',
+        '  "public_story": "1-3 короткие фразы",',
+        '  "private_story": "1-3 короткие фразы",',
+        '  "cover_story": "маскирующая бытовая версия (если private слишком личное)",',
+        '  "hook_question": "краткий вопрос в чат или пусто",',
+        '  "branch_hook": "если назревает новая ветка - короткий хук, иначе пусто",',
+        '  "branch_title": "название новой ветки или пусто",',
+        '  "rare_shock": false,',
+        '  "facts": [{"attribute":"string","value":"string","confidence":0.0,"privacy":0}]',
+        "}",
+        f"arc_id={_lore_safe_int(arc.get('id', 0), 0)} title={_clean_story_line(arc.get('title', ''), max_chars=90)}",
+        f"arc_kind={arc.get('arc_kind', 'side')} parent_arc_id={_lore_safe_int(arc.get('parent_arc_id', 0), 0)}",
+        f"arc_summary={_clean_story_line(arc.get('summary', ''), max_chars=220)}",
+        f"mood valence={valence:.1f} energy={energy:.1f} guard={guard:.1f} openness={openness:.1f}",
+        f"event privacy={privacy}/3 key={event.get('key', '')} public_hint={public_hint or '-'} private_hint={private_hint or '-'}",
+        (
+            f"reality constraints: today_utc={now_utc.date().isoformat()}, "
+            f"timur still studies at {study_profile['university']}, course={study_profile['course']}/{study_profile['total_courses']}. "
+            "нельзя завершать универ раньше времени; резкие события (отчисление/выпуск/брак/переезд) крайне редкие."
+        ),
+    ]
+    if beat_lines:
+        prompt_lines.append("последние эпизоды арки:")
+        prompt_lines.extend(beat_lines)
+    if recent_story_texts:
+        prompt_lines.append("не повторяй эти недавние формулировки:")
+        prompt_lines.extend(f"- {line}" for line in recent_story_texts[-8:])
+    if recent_chat:
+        prompt_lines.append("контекст живого чата (для конкретики):")
+        prompt_lines.extend(recent_chat)
+    if proactive:
+        prompt_lines.append("это проактивная публикация: hook_question может быть уместным, но коротким")
+    else:
+        prompt_lines.append("это ответ на запрос истории: можно чуть содержательнее")
+    return "\n".join(prompt_lines)
+
+
+async def _call_openai_lore_episode_payload(
+    memory: Dict[str, Any],
+    *,
+    proactive: bool,
+    chat_id: int,
+) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+    cfg = memory.setdefault("config", {})
+    mood = _ensure_mood_config(cfg)
+    event = mood.get("current_event", {}) if isinstance(mood.get("current_event"), dict) else {}
+    life = _ensure_life_config(cfg)
+    now_utc = datetime.utcnow()
+    arc = _get_or_create_active_lore_arc(life, event, now_utc)
+    prompt = _compose_lore_prompt(
+        memory=memory,
+        chat_id=chat_id,
+        arc=arc,
+        event=event if isinstance(event, dict) else {},
+        proactive=proactive,
+    )
+    try:
+        response = await asyncio.to_thread(
+            client.chat.completions.create,
+            model=TEXT_MODEL,
+            messages=[
+                {"role": "system", "content": get_system_prompt(memory)},
+                {"role": "user", "content": prompt},
+            ],
+            max_tokens=280,
+            temperature=0.92,
+        )
+        raw = (response.choices[0].message.content or "").strip()
+        payload = _extract_json_object(raw)
+        if payload:
+            return payload, arc, event if isinstance(event, dict) else {}
+    except Exception as e:
+        logger.error("Ошибка lore-генерации эпизода: %s", e)
+    return {}, arc, event if isinstance(event, dict) else {}
+
+
+def _compute_lore_disclosure_level(memory: Dict[str, Any], chat_id: int, event: Dict[str, Any], *, proactive: bool) -> str:
+    cfg = memory.setdefault("config", {})
+    mood = _ensure_mood_config(cfg)
+    chat_state = _ensure_mood_chat_state(mood, chat_id)
+    guard = float(mood.get("guard_level", 55.0))
+    openness = float(chat_state.get("openness", 50.0))
+    trust = float(chat_state.get("trust", 50.0))
+    progress = float(chat_state.get("progress", 0.0))
+    qualified = int(chat_state.get("qualified_attempts", 0))
+    privacy = int(max(0, min(3, _lore_safe_int(event.get("privacy_level", 1), 1)))) if event else 1
+    score = openness * 0.42 + (100.0 - guard) * 0.34 + trust * 0.14 + min(10.0, progress) * 1.0 + max(0, 3 - privacy) * 8.5
+    if qualified >= 2:
+        score += 5.0
+    if proactive:
+        score -= 4.0
+
+    if privacy >= 3:
+        return "hint" if score < 82 else "public"
+    if score < 46:
+        return "hint"
+    if score < 68:
+        return "public"
+    return "private"
+
+
+def _apply_lore_payload_to_arc(
+    *,
+    memory: Dict[str, Any],
+    chat_id: int,
+    arc: Dict[str, Any],
+    event: Dict[str, Any],
+    payload: Dict[str, Any],
+    proactive: bool,
+) -> Dict[str, Any]:
+    now_utc = datetime.utcnow()
+    phase = str(payload.get("phase", "build") or "build").strip().lower()
+    if phase not in {"hook", "build", "twist", "fallout", "payoff"}:
+        phase = "build"
+
+    public_story = _clean_story_line(payload.get("public_story", ""), max_chars=260)
+    private_story = _clean_story_line(payload.get("private_story", ""), max_chars=260)
+    cover_story = _clean_story_line(payload.get("cover_story", ""), max_chars=220)
+    hook_question = _clean_story_line(payload.get("hook_question", ""), max_chars=120)
+    rare_shock = bool(payload.get("rare_shock", False))
+
+    if not public_story:
+        public_story = _clean_story_line(event.get("public_text", "") or "есть тема, позже разверну", max_chars=180)
+    if not private_story:
+        private_story = _clean_story_line(event.get("private_text", "") or public_story, max_chars=220)
+    if not cover_story:
+        cover_story = public_story
+
+    allow_graduate = _can_graduate_now(memory, chat_id, now_utc) or (rare_shock and random.random() < 0.05)
+    public_story = _sanitize_unrealistic_study_claims(public_story, allow_graduate=allow_graduate)
+    private_story = _sanitize_unrealistic_study_claims(private_story, allow_graduate=allow_graduate)
+    cover_story = _sanitize_unrealistic_study_claims(cover_story, allow_graduate=allow_graduate)
+    if (phase == "payoff" or _contains_university_completion_claim(public_story) or _contains_university_completion_claim(private_story)) and not allow_graduate:
+        phase = "fallout" if len(arc.get("beats", [])) >= 2 else "build"
+
+    new_title = _clean_story_line(payload.get("arc_title", ""), max_chars=90)
+    if new_title:
+        arc["title"] = new_title
+    new_summary = _clean_story_line(payload.get("arc_summary", ""), max_chars=220)
+    if new_summary:
+        arc["summary"] = new_summary
+    arc["updated_ts"] = now_utc.isoformat()
+
+    beat_id = int(max(0, int(arc.get("last_beat_id", 0) or 0))) + 1
+    arc["last_beat_id"] = beat_id
+    beat = {
+        "id": beat_id,
+        "phase": phase,
+        "ts": now_utc.isoformat(),
+        "public_story": public_story,
+        "private_story": private_story,
+        "cover_story": cover_story,
+        "hook_question": hook_question,
+        "facts": _normalize_lore_fact_items(payload.get("facts", []), base_privacy=int(arc.get("base_privacy", 1) or 1)),
+        "event_id": max(0, _lore_safe_int(event.get("id", 0), 0)) if event else 0,
+        "event_key": str(event.get("key", "") or "") if event else "",
+    }
+    beats = arc.setdefault("beats", [])
+    if not isinstance(beats, list):
+        beats = []
+        arc["beats"] = beats
+    beats.append(beat)
+    if len(beats) > LORE_BEATS_PER_ARC_LIMIT:
+        del beats[:-LORE_BEATS_PER_ARC_LIMIT]
+
+    if phase == "payoff" and len(beats) >= (7 if str(arc.get("arc_kind", "side")) == "core" else 4):
+        arc["status"] = "completed"
+    elif len(beats) >= LORE_BEATS_PER_ARC_LIMIT:
+        arc["status"] = "completed"
+
+    _persist_lore_facts(memory, chat_id, arc, beat)
+    disclosure = _compute_lore_disclosure_level(memory, chat_id, event, proactive=proactive)
+    privacy = int(max(0, min(3, _lore_safe_int(event.get("privacy_level", arc.get("base_privacy", 1)), 1)))) if event else 1
+
+    story_text = ""
+    if disclosure == "private":
+        story_text = private_story or public_story
+    elif disclosure == "public":
+        if privacy >= 3 and cover_story:
+            story_text = cover_story
+        else:
+            story_text = public_story or private_story
+    else:
+        hint_source = cover_story if privacy >= 2 and cover_story else (public_story or private_story)
+        hint_source = _clean_story_line(hint_source.split(".")[0], max_chars=130)
+        if hint_source:
+            story_text = f"{hint_source} пока без деталей"
+        else:
+            story_text = "есть тема, позже разверну"
+
+    if proactive and hook_question:
+        story_text = f"{story_text}\n{hook_question}"
+
+    clean = enforce_reply_guardrails(_clean_story_line(story_text, max_chars=300))
+    beat["disclosure"] = disclosure
+    beat["output_text"] = clean
+
+    cfg = memory.setdefault("config", {})
+    life = _ensure_life_config(cfg)
+    active_arc = _maybe_spawn_branch_arc(
+        memory=memory,
+        chat_id=chat_id,
+        life=life,
+        current_arc=arc,
+        event=event,
+        payload=payload,
+        now_utc=now_utc,
+    )
+    if active_arc is not arc:
+        beat["spawned_branch_arc_id"] = _lore_safe_int(active_arc.get("id", 0), 0)
+        beat["spawned_branch_arc_title"] = _clean_story_line(active_arc.get("title", ""), max_chars=90)
+    return beat
+
+
+def _fallback_lore_story_text(memory: Dict[str, Any], chat_id: int, event: Dict[str, Any], *, proactive: bool) -> str:
+    cfg = memory.setdefault("config", {})
+    life = _ensure_life_config(cfg)
+    arc = _get_active_lore_arc(life)
+    if arc:
+        beat = _latest_lore_beat(arc)
+        if beat and isinstance(beat, dict):
+            disclosure = _compute_lore_disclosure_level(memory, chat_id, event, proactive=proactive)
+            public_story = _clean_story_line(beat.get("public_story", ""), max_chars=220)
+            private_story = _clean_story_line(beat.get("private_story", ""), max_chars=220)
+            cover_story = _clean_story_line(beat.get("cover_story", ""), max_chars=220)
+            privacy = int(max(0, min(3, _lore_safe_int(event.get("privacy_level", 1), 1)))) if event else 1
+            if disclosure == "private" and private_story:
+                text = private_story
+            elif privacy >= 3 and cover_story:
+                text = cover_story
+            elif public_story:
+                text = public_story
+            else:
+                text = private_story
+            if disclosure == "hint":
+                hint_base = cover_story if privacy >= 2 and cover_story else text
+                text = _clean_story_line(hint_base.split(".")[0], max_chars=130)
+                text = f"{text} пока без деталей" if text else "есть тема, позже разверну"
+            hook = _clean_story_line(beat.get("hook_question", ""), max_chars=120)
+            if proactive and hook:
+                text = f"{text}\n{hook}"
+            clean = enforce_reply_guardrails(text)
+            if clean:
+                return clean
+
+    privacy = int(max(0, min(3, _lore_safe_int(event.get("privacy_level", 1), 1)))) if event else 1
+    public_hint = _clean_story_line(event.get("public_text", "") or "есть небольшой жизненный квест", max_chars=160)
+    private_hint = _clean_story_line(event.get("private_text", "") or public_hint, max_chars=180)
+    cover_hint = "обычный бытовой фейл, ничего серьезного"
+    disclosure = _compute_lore_disclosure_level(memory, chat_id, event, proactive=proactive)
+    if disclosure == "private" and privacy <= 1:
+        text = private_hint
+    elif privacy >= 3:
+        text = cover_hint
+    elif disclosure == "hint":
+        text = f"{public_hint} пока без деталей"
+    else:
+        text = public_hint
+    if proactive:
+        text += "\nу вас как с этим обычно"
+    clean = enforce_reply_guardrails(text)
+    return clean or "сегодня без лора давай позже"
+
+
+def _latest_lore_story_meta(memory: Dict[str, Any]) -> Dict[str, Any]:
+    cfg = memory.setdefault("config", {})
+    life = _ensure_life_config(cfg)
+    arc = _get_active_lore_arc(life)
+    if not arc:
+        return {}
+    beat = _latest_lore_beat(arc)
+    if not beat:
+        return {}
+    return {
+        "arc_id": _lore_safe_int(arc.get("id", 0), 0),
+        "arc_title": _clean_story_line(arc.get("title", ""), max_chars=90),
+        "arc_phase": str(beat.get("phase", "") or ""),
+        "arc_disclosure": str(beat.get("disclosure", "") or ""),
+    }
+
+
 def _append_story_log(memory: Dict[str, Any], text: str, *, source: str, chat_id: int | None) -> Dict[str, Any]:
     cfg = memory.setdefault("config", {})
     life = _ensure_life_config(cfg)
@@ -1404,6 +2258,7 @@ def _append_story_log(memory: Dict[str, Any], text: str, *, source: str, chat_id
         "chat_id": chat_id,
         "ts": datetime.utcnow().isoformat(),
     }
+    entry.update(_latest_lore_story_meta(memory))
     log = life.setdefault("story_log", [])
     if not isinstance(log, list):
         log = []
@@ -2395,82 +3250,31 @@ async def _run_with_typing(
             pass
 
 
-async def _call_openai_story_text(memory: Dict[str, Any], *, proactive: bool = False, chat_id: int | None = None) -> str:
-    cfg = memory.setdefault("config", {})
-    mood = _ensure_mood_config(cfg)
-    valence = float(mood.get("valence", 0.0))
-    energy = float(mood.get("energy", 50.0))
-    guard = float(mood.get("guard_level", 55.0))
-    event = mood.get("current_event", {}) if isinstance(mood.get("current_event"), dict) else {}
-    chat_state = _ensure_mood_chat_state(mood, int(chat_id or 0))
-    openness = float(chat_state.get("openness", 50.0))
-    privacy = int(event.get("privacy_level", 0)) if event else 0
-    public_text = str(event.get("public_text", "")).strip()
-    private_text = str(event.get("private_text", "")).strip()
-    format_variants = [
-        "формат дневника: наблюдение -> короткий добив",
-        "формат мини-сцены: 2 реплики, будто момент из жизни",
-        "формат сухой панч: 1-2 очень коротких фразы",
-        "формат самоиронии: сначала фейл, потом добив",
-        "формат микро-признания: честно и коротко",
-    ]
-    variant = random.choice(format_variants)
-    recent_story_log = []
-    life = _ensure_life_config(cfg)
-    for item in list(life.get("story_log", []))[-6:]:
-        text = str(item.get("text", "")).strip()
-        if text:
-            recent_story_log.append(text)
-
-    prompt = (
-        "придумай короткую историю из жизни тимура на сейчас.\n"
-        "обязательно сделай формат отличным от предыдущих повторов.\n"
-        "1-2 очень короткие фразы, без эмодзи.\n"
-        f"выбранный формат: {variant}\n"
-        f"mood: valence={valence:.1f}, energy={energy:.1f}, guard={guard:.1f}, openness={openness:.1f}\n"
-    )
-    if event:
-        prompt += (
-            f"текущее событие privacy={privacy}/3, public_hint={public_text or '-'}, private_hint={private_text or '-'}\n"
-            "если guard высокий или privacy высокий - говори намеками.\n"
-            "если guard низкий - можно рассказать подробнее.\n"
-        )
-    if recent_story_log:
-        prompt += "не повторяй буквально эти недавние истории:\n" + "\n".join(f"- {x}" for x in recent_story_log)
-    if proactive:
-        prompt += "\nесли уместно, добавь короткий вопрос в чат в конце."
-    try:
-        response = await asyncio.to_thread(
-            client.chat.completions.create,
-            model=TEXT_MODEL,
-            messages=[
-                {"role": "system", "content": get_system_prompt(memory)},
-                {"role": "user", "content": prompt},
-            ],
-            max_tokens=100,
-            temperature=0.95,
-        )
-        return (response.choices[0].message.content or "").strip()
-    except Exception as e:
-        logger.error("Ошибка генерации истории: %s", e)
-        return ""
-
-
 async def _generate_story_text(memory: Dict[str, Any], *, proactive: bool = False, chat_id: int | None = None) -> str:
-    raw = await _call_openai_story_text(memory, proactive=proactive, chat_id=chat_id)
-    clean = enforce_reply_guardrails(raw)
-    if clean:
-        return clean
-    # Fallback only for provider failures/empty output.
-    fallback = [
-        "сегодня чуть не уехал без кроссовка в метро",
-        "пока искал зарядку понял что держал ее в руке",
-        "вышел за хлебом и вернулся с какой-то ерундой вместо него",
-    ]
-    text = random.choice(fallback)
-    if proactive:
-        text += "\nу вас день лучше идет?"
-    return text
+    target_chat_id = int(chat_id or 0)
+    payload, arc, event = await _call_openai_lore_episode_payload(
+        memory,
+        proactive=proactive,
+        chat_id=target_chat_id,
+    )
+    if payload:
+        beat = _apply_lore_payload_to_arc(
+            memory=memory,
+            chat_id=target_chat_id,
+            arc=arc,
+            event=event,
+            payload=payload,
+            proactive=proactive,
+        )
+        text = enforce_reply_guardrails(str(beat.get("output_text", "")).strip())
+        if text:
+            return text
+    return _fallback_lore_story_text(
+        memory,
+        target_chat_id,
+        event if isinstance(event, dict) else {},
+        proactive=proactive,
+    )
 
 
 async def _emit_proactive_story(application: Any) -> None:
@@ -5103,6 +5907,9 @@ def _format_mood_status(memory: Dict[str, Any], chat_id: int) -> str:
     mood = _ensure_mood_config(cfg)
     chat_state = _ensure_mood_chat_state(mood, chat_id)
     event = mood.get("current_event", {}) if isinstance(mood.get("current_event"), dict) else {}
+    life = _ensure_life_config(cfg)
+    arc = _get_active_lore_arc(life)
+    beat = _latest_lore_beat(arc) if arc else None
     lines = [
         f"mood enabled={bool(mood.get('enabled', True))}",
         f"valence={float(mood.get('valence', 0.0)):.1f}",
@@ -5126,6 +5933,17 @@ def _format_mood_status(memory: Dict[str, Any], chat_id: int) -> str:
         )
     else:
         lines.append("event: none")
+    if arc:
+        lines.extend(
+            [
+                f"lore_arc id={_lore_safe_int(arc.get('id', 0), 0)} title={_clean_story_line(arc.get('title', ''), max_chars=80)}",
+                f"lore_arc kind={arc.get('arc_kind', 'side')} parent={_lore_safe_int(arc.get('parent_arc_id', 0), 0)}",
+                f"lore_arc status={arc.get('status')} beats={len(arc.get('beats', [])) if isinstance(arc.get('beats', []), list) else 0}",
+                f"lore_arc phase={str((beat or {}).get('phase', '-'))}",
+            ]
+        )
+    else:
+        lines.append("lore_arc: none")
     lines.append(f"next_event_after={mood.get('next_event_after_ts')}")
     lines.append(f"last_update_ts={mood.get('last_update_ts')}")
     return "\n".join(lines)

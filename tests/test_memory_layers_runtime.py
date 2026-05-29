@@ -71,6 +71,8 @@ def test_default_memory_contains_life_config() -> None:
     assert life["enabled"] is True
     assert life["daily_target"] == 3
     assert life["timezone"] == "Europe/Moscow"
+    assert isinstance(life.get("lore_arcs"), list)
+    assert int(life.get("last_lore_arc_id", 0)) == 0
 
     funny_scan = memory["config"]["funny_scan"]
     assert funny_scan["enabled"] is False
@@ -219,3 +221,98 @@ def test_store_bot_claim_memory_writes_fact_graph_and_long_fact() -> None:
     assert graph["facts"][0]["attribute"] == "surname"
     assert graph["facts"][0]["value"] == "ахметов"
     assert any("surname" in str(item.get("text", "")) for item in chat_mem["memory_layers"]["long_facts"])
+
+
+def test_apply_lore_payload_appends_arc_and_persists_facts() -> None:
+    memory = runtime.default_memory()
+    cfg = memory["config"]
+    mood = runtime._ensure_mood_config(cfg)
+    mood["current_event"] = {
+        "id": 7,
+        "key": "transport_fail",
+        "privacy_level": 1,
+        "public_text": "транспорт снова устроил цирк",
+        "private_text": "опоздал на пару из-за трамвая и выслушал препода",
+    }
+    life = runtime._ensure_life_config(cfg)
+    arc = runtime._get_or_create_active_lore_arc(life, mood["current_event"], datetime.utcnow())
+
+    beat = runtime._apply_lore_payload_to_arc(
+        memory=memory,
+        chat_id=1,
+        arc=arc,
+        event=mood["current_event"],
+        payload={
+            "phase": "build",
+            "public_story": "сегодня на входе в универ турникет завис и собрал очередь",
+            "private_story": "я полез перепрыгивать турникет и почти уронил рюкзак с тетрадями",
+            "hook_question": "у вас тоже турникеты живут своей жизнью",
+            "facts": [
+                {"attribute": "habit", "value": "в стрессовые дни перескакивает через турникет", "confidence": 0.8, "privacy": 1}
+            ],
+        },
+        proactive=False,
+    )
+
+    assert beat["output_text"]
+    assert arc["beats"]
+    chat_mem = runtime.get_chat_mem(memory, 1)
+    graph = chat_mem["memory_layers"]["fact_graph"]
+    assert any(str(f.get("source")) == "lore_arc" for f in graph.get("facts", []))
+    assert any(str(f.get("attribute")) == "habit" for f in graph.get("facts", []))
+
+
+def test_lore_fallback_uses_event_hint() -> None:
+    memory = runtime.default_memory()
+    event = {
+        "id": 1,
+        "key": "night_no_sleep",
+        "privacy_level": 2,
+        "public_text": "уникальный намек про ночь без сна",
+        "private_text": "сложная личная причина бессонницы",
+    }
+
+    text = runtime._fallback_lore_story_text(memory, 1, event, proactive=True)
+
+    assert "уникальный намек" in text or "сложная личная причина" in text
+
+
+def test_get_or_create_lore_arc_bootstraps_core_arc() -> None:
+    memory = runtime.default_memory()
+    life = runtime._ensure_life_config(memory["config"])
+    arc = runtime._get_or_create_active_lore_arc(life, {}, datetime.utcnow())
+
+    assert arc["arc_kind"] == "core"
+    assert "мехмат" in str(arc["title"]).lower()
+
+
+def test_lore_private_event_can_use_cover_story() -> None:
+    memory = runtime.default_memory()
+    cfg = memory["config"]
+    mood = runtime._ensure_mood_config(cfg)
+    mood["current_event"] = {
+        "id": 9,
+        "key": "friend_conflict",
+        "privacy_level": 3,
+        "public_text": "день нервный",
+        "private_text": "серьезный конфликт с близким",
+    }
+    life = runtime._ensure_life_config(cfg)
+    arc = runtime._get_or_create_active_lore_arc(life, mood["current_event"], datetime.utcnow())
+
+    beat = runtime._apply_lore_payload_to_arc(
+        memory=memory,
+        chat_id=1,
+        arc=arc,
+        event=mood["current_event"],
+        payload={
+            "phase": "build",
+            "public_story": "сегодня без деталей",
+            "private_story": "в личке разнос",
+            "cover_story": "забыл кошелек дома и бегал обратно",
+            "facts": [],
+        },
+        proactive=False,
+    )
+
+    assert beat["output_text"]
