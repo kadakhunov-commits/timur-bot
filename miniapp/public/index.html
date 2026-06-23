@@ -489,13 +489,69 @@
       .bubble-wrap { min-height: 420px; border-radius: 20px; }
       #cloudCanvas { height: 420px; }
     }
+
+    .self-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+
+    .self-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .self-slot {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 10px 12px;
+      background: color-mix(in srgb, var(--card) 84%, transparent);
+      display: flex; flex-direction: column; gap: 3px;
+    }
+    .self-slot.canon { border-color: rgba(46, 230, 255, 0.45); }
+    .self-key { font-size: 9px; letter-spacing: .6px; text-transform: uppercase; color: var(--hint); font-weight: 800; display: flex; align-items: center; gap: 5px; }
+    .self-val { font-size: 13px; font-weight: 700; color: var(--text); }
+    .self-tag { font-size: 8px; padding: 1px 6px; border-radius: 999px; font-weight: 800; letter-spacing: .4px; }
+    .self-tag.canon { background: rgba(46, 230, 255, 0.16); color: var(--cyan); }
+    .self-tag.learned { background: rgba(94, 72, 245, 0.2); color: #b9acff; }
+
+    .episode-feed { display: flex; flex-direction: column; gap: 8px; }
+    .episode {
+      border: 1px solid var(--line);
+      border-left: 3px solid var(--violet);
+      border-radius: 0 14px 14px 0;
+      padding: 9px 12px;
+      background: color-mix(in srgb, var(--card) 82%, transparent);
+    }
+    .episode.warm { border-left-color: #2ee6a8; }
+    .episode.tense { border-left-color: #ff6b8a; }
+    .episode .ep-actor { font-size: 11px; font-weight: 800; color: var(--text); }
+    .episode .ep-text { font-size: 12px; color: color-mix(in srgb, var(--text) 84%, var(--hint)); line-height: 1.45; margin-top: 2px; }
+
+    .tier-card { border-color: rgba(94, 72, 245, 0.4); }
+    .tier-pill {
+      padding: 5px 14px; border-radius: 999px; font-weight: 900; font-size: 12px;
+      letter-spacing: .6px; text-transform: uppercase; background: var(--gradient); color: #0a0b11;
+    }
+    .tier-pill.free { background: color-mix(in srgb, var(--card) 70%, transparent); color: var(--hint); border: 1px solid var(--line); }
+    .feature-matrix { display: flex; flex-direction: column; gap: 7px; }
+    .feat-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; }
+    .feat-name { color: color-mix(in srgb, var(--text) 88%, var(--hint)); font-weight: 600; }
+    .feat-val { font-weight: 800; font-size: 12px; }
+    .feat-val.on { color: #2ee6a8; }
+    .feat-val.off { color: var(--hint); }
+
+    .plan-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+    .plan {
+      border: 1px solid var(--line); border-radius: 18px; padding: 12px 10px;
+      background: var(--card); display: flex; flex-direction: column; gap: 6px; text-align: center;
+    }
+    .plan.current { border-color: var(--cyan); box-shadow: 0 0 0 1px rgba(46, 230, 255, 0.4) inset; }
+    .plan-name { font-weight: 900; font-size: 13px; letter-spacing: .4px; text-transform: uppercase; }
+    .plan-name.plus { background: var(--gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .plan-price { font-size: 11px; color: var(--hint); font-weight: 700; }
+    .plan-feats { font-size: 10px; color: color-mix(in srgb, var(--text) 78%, var(--hint)); line-height: 1.5; }
+    .plan-cmd { font-family: ui-monospace, monospace; font-size: 10px; color: var(--cyan); margin-top: 2px; }
   </style>
 </head>
 <body>
   <nav>
     <button type="button" class="tab-btn active" data-tab="settings">Настройки</button>
+    <button type="button" class="tab-btn" data-tab="identity">Личность</button>
     <button type="button" class="tab-btn" data-tab="memory">Память</button>
-    <button type="button" class="tab-btn" data-tab="billing">Оплата</button>
+    <button type="button" class="tab-btn" data-tab="billing">Подписка</button>
   </nav>
 
   <main class="container">
@@ -527,6 +583,20 @@
         <div id="moodProbeMeta" class="small" style="margin-top:10px"></div>
         <div class="label" style="margin-top:12px">Последние внутренние события</div>
         <div id="moodEvents" class="mood-events"></div>
+      </div>
+    </section>
+
+    <section id="identity" class="section">
+      <div class="eyebrow">кто такой тимур</div>
+      <h1 class="logo">self.<span class="grad">model</span></h1>
+      <p class="lede">это его устойчивая личность. <b>канон</b> заблокирован и не меняется, <b>выученное</b> бот подобрал из чата. противоречий он себе не позволяет.</p>
+      <div class="card">
+        <div class="self-head">
+          <span class="label" style="margin:0">кто я</span>
+          <span id="selfCount" class="graph-badge">0 фактов</span>
+        </div>
+        <div id="selfCard" class="self-grid"></div>
+        <div class="small" id="selfGuardNote" style="margin-top:12px"></div>
       </div>
     </section>
 
@@ -573,12 +643,31 @@
           </div>
         </div>
       </div>
+      <div class="card">
+        <div class="self-head">
+          <span class="label" style="margin:0">общая история · «помнишь как…»</span>
+          <span id="episodeCount" class="graph-badge">0 моментов</span>
+        </div>
+        <div id="episodeFeed" class="episode-feed"></div>
+      </div>
     </section>
 
     <section id="billing" class="section">
-      <div class="eyebrow">billing preview</div>
+      <div class="eyebrow">подписка и тариф</div>
       <h1 class="logo">pay.<span class="grad">hub</span></h1>
-      <p class="lede">это честный preview биллинга, не экран мгновенной оплаты. здесь мы считаем схему и при желании отправляем квоту обратно в чат.</p>
+      <p class="lede">тариф решает, насколько <b>живой</b> тимур в этом чате. глубина памяти — то, за что платят. оплата пока мок, активация — командами бота.</p>
+
+      <div class="card tier-card">
+        <div class="self-head">
+          <span class="label" style="margin:0">текущий тариф</span>
+          <span id="tierBadge" class="tier-pill">free</span>
+        </div>
+        <div id="tierExpiry" class="small" style="margin-bottom:12px"></div>
+        <div id="featureMatrix" class="feature-matrix"></div>
+      </div>
+
+      <div class="plan-grid" id="planGrid"></div>
+
       <div class="card">
         <span class="label">Схема оплаты</span>
         <div class="mode-grid">
@@ -814,6 +903,9 @@
         ["quotes", "QUOTES"]
       ],
       members: launchState.memory?.members || [],
+      self: Array.isArray(launchState.settings?.self) ? launchState.settings.self : [],
+      episodes: Array.isArray(launchState.memory?.episodes) ? launchState.memory.episodes : [],
+      subscription: launchState.subscription || null,
       mood: {
         valence: Number(launchState.settings?.mood?.valence ?? 0),
         energy: Number(launchState.settings?.mood?.energy ?? 50),
@@ -1429,6 +1521,99 @@
       }
     }
 
+    function escapeHtml(str) {
+      return String(str ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+
+    const SELF_LABELS = {
+      name: "имя", surname: "фамилия", full_name: "полное имя", age: "возраст",
+      city: "город", residence: "живёт", origin: "родом", birth_place: "родился",
+      school: "школа", university: "универ", faculty: "факультет", work: "работа", job: "работа"
+    };
+
+    function renderIdentity() {
+      const grid = document.getElementById("selfCard");
+      if (!grid) return;
+      const slots = state.self || [];
+      document.getElementById("selfCount").textContent = slots.length + " фактов";
+      grid.innerHTML = "";
+      if (!slots.length) {
+        grid.innerHTML = '<div class="small">self-card пуст</div>';
+      } else {
+        slots.forEach(s => {
+          const canon = s.source === "canon" || s.locked;
+          const el = document.createElement("div");
+          el.className = "self-slot" + (canon ? " canon" : "");
+          const label = SELF_LABELS[s.attribute] || s.attribute;
+          const tag = canon ? '<span class="self-tag canon">🔒 канон</span>' : '<span class="self-tag learned">выучено</span>';
+          el.innerHTML = `<div class="self-key">${escapeHtml(label)} ${tag}</div><div class="self-val">${escapeHtml(s.value)}</div>`;
+          grid.appendChild(el);
+        });
+      }
+      const canonCount = slots.filter(s => s.source === "canon" || s.locked).length;
+      document.getElementById("selfGuardNote").textContent =
+        `канон (${canonCount}) заблокирован — бот не даст переписать себе возраст, город или вуз. выученное принимает, только если не противоречит известному.`;
+    }
+
+    function renderEpisodes() {
+      const feed = document.getElementById("episodeFeed");
+      if (!feed) return;
+      const eps = state.episodes || [];
+      document.getElementById("episodeCount").textContent = eps.length + " моментов";
+      feed.innerHTML = "";
+      if (!eps.length) {
+        feed.innerHTML = '<div class="small">пока нет ярких моментов. бот сам запомнит эмоциональные сообщения.</div>';
+        return;
+      }
+      eps.forEach(ep => {
+        const v = Number(ep.valence || 0);
+        const tone = v >= 0 ? "warm" : "tense";
+        const el = document.createElement("div");
+        el.className = "episode " + tone;
+        el.innerHTML = `<div class="ep-actor">${escapeHtml(ep.actor)} · ${v >= 0 ? "тепло" : "на нервах"}</div><div class="ep-text">${escapeHtml(ep.summary)}</div>`;
+        feed.appendChild(el);
+      });
+    }
+
+    const TIER_LABELS = { free_promo: "free", group_standard: "standard", group_plus: "plus" };
+    const DEPTH_LABELS = { short: "короткая", standard: "стандарт", full: "полная" };
+    function onoff(v) { return v ? '<span class="feat-val on">есть</span>' : '<span class="feat-val off">нет</span>'; }
+
+    function renderSubscription() {
+      const badge = document.getElementById("tierBadge");
+      const matrix = document.getElementById("featureMatrix");
+      if (!badge || !matrix) return;
+      const sub = state.subscription || {};
+      const tier = sub.tier || "free_promo";
+      badge.textContent = TIER_LABELS[tier] || "free";
+      badge.className = "tier-pill" + (tier === "free_promo" ? " free" : "");
+      document.getElementById("tierExpiry").textContent =
+        sub.expiresAt ? ("активно до " + String(sub.expiresAt).slice(0, 10)) : "бесплатный тариф по умолчанию";
+      const depth = DEPTH_LABELS[sub.memoryDepth || "short"] || "короткая";
+      matrix.innerHTML = `
+        <div class="feat-row"><span class="feat-name">глубина памяти</span><span class="feat-val on">${depth}</span></div>
+        <div class="feat-row"><span class="feat-name">досье на друзей</span>${onoff(sub.friendDossiers)}</div>
+        <div class="feat-row"><span class="feat-name">эпизоды «помнишь как…»</span>${onoff(sub.episodicMemory)}</div>
+        <div class="feat-row"><span class="feat-name">голос / кружки</span>${onoff(sub.voice)}</div>
+        <div class="feat-row"><span class="feat-name">ответов в день</span><span class="feat-val on">${sub.maxDailyReplies ?? 30}</span></div>
+        <div class="feat-row"><span class="feat-name">watermark</span>${sub.watermark ? '<span class="feat-val off">да</span>' : '<span class="feat-val on">нет</span>'}</div>`;
+      const planGrid = document.getElementById("planGrid");
+      if (planGrid) {
+        const plans = [
+          { id: "free_promo", name: "free", cls: "", price: "0 ₽", feats: "короткая память · 30/день", cmd: "" },
+          { id: "group_standard", name: "standard", cls: "", price: "199–1490 ₽", feats: "+ досье · долгая память · 1200/день", cmd: "/subscribe standard" },
+          { id: "group_plus", name: "plus", cls: "plus", price: "490–3490 ₽", feats: "+ эпизоды · голос · все режимы · 3000/день", cmd: "/subscribe plus" }
+        ];
+        planGrid.innerHTML = "";
+        plans.forEach(p => {
+          const el = document.createElement("div");
+          el.className = "plan" + (p.id === tier ? " current" : "");
+          el.innerHTML = `<div class="plan-name ${p.cls}">${p.name}</div><div class="plan-price">${p.price}</div><div class="plan-feats">${p.feats}</div>${p.cmd ? `<div class="plan-cmd">${p.cmd}</div>` : ""}`;
+          planGrid.appendChild(el);
+        });
+      }
+    }
+
     function bindFallbackButton() {
       document.getElementById("saveBtn").onclick = () => {
         if (state.currentTab === "memory") {
@@ -1457,7 +1642,10 @@
       syncViewportVars();
       renderTabs();
       renderSettings();
+      renderIdentity();
       renderMembers();
+      renderEpisodes();
+      renderSubscription();
       renderBilling();
       bindFallbackButton();
       bindTelegramChrome();

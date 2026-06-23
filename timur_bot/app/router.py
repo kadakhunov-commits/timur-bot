@@ -16,6 +16,7 @@ from timur_bot.handlers.billing import (
     billref_cmd,
     billsetup_cmd,
     billstatus_cmd,
+    subscribe_cmd,
 )
 from timur_bot.handlers.chat import command_memory_tap, photo_handler, reaction_handler, start_cmd, story_cmd, summary_cmd, text_handler
 from timur_bot.handlers.noire import noire_cmd
@@ -68,6 +69,7 @@ def register_handlers(application) -> None:
     application.add_handler(CommandHandler("billpay", billpay_cmd))
     application.add_handler(CommandHandler("billabuse", billabuse_cmd))
     application.add_handler(CommandHandler("billref", billref_cmd))
+    application.add_handler(CommandHandler("subscribe", subscribe_cmd))
     application.add_handler(CommandHandler("setprompt", setprompt_cmd))
     application.add_handler(CommandHandler("appendprompt", appendprompt_cmd))
     application.add_handler(CommandHandler("showprompt", showprompt_cmd))

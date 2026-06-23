@@ -99,6 +99,23 @@ from timur_bot.services.fact_recall import (
     build_fact_recall_bundle,
     build_miniapp_fact_map,
 )
+from timur_bot.services.episodes import (
+    build_episodes_block,
+    maybe_log_episode,
+    message_valence,
+    recall_episodes,
+)
+from timur_bot.services import feature_gate
+from timur_bot.services.participant_memory import (
+    build_participant_dossier,
+    learn_participant_facts,
+    update_rapport,
+)
+from timur_bot.services.self_model import (
+    build_self_card_prompt,
+    ensure_self_profile,
+    register_self_claim,
+)
 from timur_bot.services.summary import (
     SUMMARY_MAX_MESSAGES,
     SummaryWindow,
@@ -410,7 +427,7 @@ def _ensure_funny_scan_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
 def default_memory() -> Dict[str, Any]:
     default_life = _default_life_config()
     default_mood = _default_mood_config()
-    return {
+    memory = {
         "chats": {},
         "users": {},
         "config": {
@@ -428,6 +445,8 @@ def default_memory() -> Dict[str, Any]:
             "funny_scan": _ensure_funny_scan_config({}).copy(),
         },
     }
+    ensure_self_profile(memory)
+    return memory
 
 
 def _ensure_chat_schema(chat: Dict[str, Any]) -> Dict[str, Any]:
@@ -444,6 +463,7 @@ def _ensure_chat_schema(chat: Dict[str, Any]) -> Dict[str, Any]:
     layers.setdefault("summary", {"chat": "", "updated_at": None})
     layers.setdefault("imported_message_keys", [])
     layers.setdefault("processed_event_keys", [])
+    chat.setdefault("episodes", [])
     ensure_humor_schema(chat)
     ensure_fact_graph(chat)
     ensure_entity(chat, entity_id="bot:self", title="тимур", kind="bot", aliases=["тимур"])
@@ -1178,6 +1198,7 @@ def load_memory() -> Dict[str, Any]:
         _ensure_life_config(cfg)
         _ensure_mood_config(cfg)
         _ensure_funny_scan_config(cfg)
+        ensure_self_profile(data)
 
         for _, chat in data["chats"].items():
             _ensure_chat_schema(chat)
@@ -2517,6 +2538,25 @@ def update_memory_with_message(memory: Dict[str, Any], message: Message) -> None
         )
         _update_association_graph(chat_mem, user_id=user_id, message=message, text=text, user_keywords=keywords)
 
+        if not user_is_bot:
+            # Learn what friends say about themselves and remember vivid moments,
+            # so тимур builds a real dossier on each participant (Phase 1).
+            learn_participant_facts(
+                chat_mem,
+                user_id=user_id,
+                name=user_mem["name"],
+                username=user_mem["username"],
+                text=text,
+            )
+            update_rapport(chat_mem, user_id, text)
+            maybe_log_episode(
+                chat_mem,
+                actor=user_mem["name"] or user_mem["username"] or str(user_id),
+                text=text,
+                valence=message_valence(text),
+                ts=rec["ts"],
+            )
+
     save_memory(memory)
     try:
         billing.register_activity(
@@ -2580,6 +2620,9 @@ def increase_vision_counters(memory: Dict[str, Any], chat_id: int, user_id: int)
 
 
 def can_send_voice(memory: Dict[str, Any], chat_id: int) -> bool:
+    if not feature_gate.voice_allowed(get_chat_features(chat_id)):
+        return False
+
     cfg = memory.setdefault("config", {})
     vu = cfg.setdefault("voice_usage", {})
 
@@ -2785,6 +2828,15 @@ def enforce_reply_guardrails(reply_text: str) -> str:
         logger.warning("Смягчаю токсичный ответ LLM")
         return "ок без наездов давай по сути"
     return clean
+
+
+def get_chat_features(chat_id: int) -> Dict[str, Any]:
+    """Subscription-resolved feature flags for a chat (free defaults on error)."""
+    try:
+        return billing.effective_features(chat_id)
+    except Exception as e:
+        logger.error("Не удалось получить фичи биллинга для чата %s: %s", chat_id, e)
+        return dict(feature_gate.FREE_FEATURES)
 
 
 def get_active_mode(memory: Dict[str, Any]) -> str:
@@ -3030,6 +3082,21 @@ def build_humor_plan(memory: Dict[str, Any], message: Message) -> Dict[str, Any]
     )
 
 
+def _lines_relevant_to_text(lines: List[str], text: str, *, min_overlap: int = 1) -> bool:
+    """Deterministic relevance: does any line share a keyword with the message?
+
+    Replaces the old coin-flip gating so recall fires when it actually matters
+    instead of at random.
+    """
+    keys = set(extract_keywords(text))
+    if not keys:
+        return False
+    for line in lines:
+        if len(keys & set(extract_keywords(str(line)))) >= min_overlap:
+            return True
+    return False
+
+
 def build_chat_messages(
     memory: Dict[str, Any],
     message: Message,
@@ -3048,6 +3115,18 @@ def build_chat_messages(
     random_memories = select_old_random_memories(memory, message.chat_id)
     association_context = build_association_context(memory, message.chat_id, tg_user.id)
     fact_bundle = build_fact_recall_bundle(chat_mem, user_text)
+
+    # Subscription gating: tier decides how deep тимур's memory may reach and
+    # which persona modes are unlocked for this chat.
+    features = get_chat_features(message.chat_id)
+    active_mode = get_active_mode(memory)
+    effective_mode = feature_gate.gate_mode(features, active_mode)
+    mode_prompt = (
+        get_mode_prompt(memory)
+        if effective_mode == active_mode
+        else PERSONA_MODES.get(effective_mode, PERSONA_MODES["default"])
+    )
+    deep_memory = feature_gate.depth_at_least(features, feature_gate.MEMORY_STANDARD)
 
     hist_lines = []
     for rec in chat_history:
@@ -3070,13 +3149,18 @@ def build_chat_messages(
         "- не зацикливайся на одном и том же старом факте, чаще меняй тему\n"
         "- не делай длинные объяснения, лучше коротко и по делу\n"
     )
-    if get_active_mode(memory) == "chill":
+
+    self_card = build_self_card_prompt(memory)
+    if self_card:
+        full_system += "\n" + self_card + "\n"
+
+    if effective_mode == "chill":
         full_system += "- режим chill: без грубости, без прожарки, только мягкий дружеский тон\n"
 
     toxicity = get_effective_toxicity_level(memory)
     full_system += f"\nуровень прожарки: {toxicity}/100\n"
-    full_system += f"активный режим личности: {get_active_mode(memory)}\n"
-    full_system += "инструкция режима: " + get_mode_prompt(memory) + "\n"
+    full_system += f"активный режим личности: {effective_mode}\n"
+    full_system += "инструкция режима: " + mode_prompt + "\n"
     full_system += "\n" + _build_mood_prompt_context(memory, message.chat_id, user_text) + "\n"
 
     if humor_plan:
@@ -3090,10 +3174,23 @@ def build_chat_messages(
     if bio_settings:
         full_system += "\nбио тимура от владельца:\n" + bio_settings + "\n"
 
-    if user_profile and random.random() < 0.6:
+    if user_profile:
         full_system += "\nинфа о собеседнике:\n" + user_profile
 
-    if association_context and _should_include_association_context(
+    # First-person dossiers: what тимур remembers about the speaker and about
+    # anyone they mention, so he talks like a friend who knows these people.
+    # Gated by tier — the free тимур does not keep dossiers on people.
+    if feature_gate.friend_dossiers_allowed(features):
+        speaker_dossier = build_participant_dossier(chat_mem, tg_user.id)
+        if speaker_dossier:
+            full_system += "\n\n" + speaker_dossier + "\n"
+
+        for mentioned_id in _extract_user_mentions_by_text(chat_mem, user_text, tg_user.id)[:1]:
+            mentioned_dossier = build_participant_dossier(chat_mem, mentioned_id)
+            if mentioned_dossier:
+                full_system += "\n\n" + mentioned_dossier + "\n"
+
+    if deep_memory and association_context and _should_include_association_context(
         user_text,
         memory_requested=memory_requested,
         fact_bundle=fact_bundle,
@@ -3101,18 +3198,24 @@ def build_chat_messages(
     ):
         full_system += "\n\nкарта персонажей и ассоциаций:\n" + association_context
 
-    if fact_bundle.get("prompt"):
-        full_system += "\n\nбыстрые факты из долгой памяти:\n" + str(fact_bundle["prompt"]) + "\n"
+    if deep_memory and fact_bundle.get("prompt"):
+        full_system += "\n\nчто я помню из долгой памяти:\n" + str(fact_bundle["prompt"]) + "\n"
+
+    if feature_gate.episodic_memory_allowed(features):
+        episode_lines = recall_episodes(chat_mem, user_text)
+        episodes_block = build_episodes_block(episode_lines)
+        if episodes_block:
+            full_system += "\n\n" + episodes_block + "\n"
 
     if hist_lines:
         full_system += "\n\nпоследние сообщения в чате:\n" + "\n".join(hist_lines)
 
-    if recent_facts and (memory_requested or random.random() < 0.4):
-        full_system += "\n\nнедавние факты беседы (приоритет):\n"
+    if deep_memory and recent_facts and (memory_requested or _lines_relevant_to_text(recent_facts, user_text)):
+        full_system += "\n\nчто мы недавно обсуждали (помню):\n"
         for line in recent_facts[:2]:
             full_system += f"- {line}\n"
 
-    if random_memories and memory_requested:
+    if feature_gate.depth_at_least(features, feature_gate.MEMORY_FULL) and random_memories and memory_requested:
         full_system += "\n\nдалекие факты беседы (редкие точечные отсылки):\n"
         for line in random_memories[:1]:
             full_system += f"- {line}\n"
@@ -3735,7 +3838,32 @@ def _store_bot_claim_memory(memory: Dict[str, Any], message: Message, reply_text
     if not facts:
         return
 
-    touched = upsert_claim_facts(chat_mem, facts)
+    # Route self-claims through the consistency guard (M2). A claim that
+    # contradicts canon or an established slot is rejected and never reaches the
+    # chat fact graph, so тимур stays self-consistent across chats.
+    kept_facts: List[Dict[str, Any]] = []
+    for fact in facts:
+        if str(fact.get("entity_id")) == "bot:self":
+            result = register_self_claim(
+                memory,
+                str(fact.get("attribute") or ""),
+                str(fact.get("value") or ""),
+                confidence=float(fact.get("confidence", 0.5)),
+            )
+            if result.get("status") == "rejected":
+                logger.info(
+                    "self-claim rejected (%s): keep '%s' over '%s'",
+                    result.get("reason"),
+                    result.get("kept"),
+                    fact.get("value"),
+                )
+                continue
+        kept_facts.append(fact)
+
+    if not kept_facts:
+        return
+
+    touched = upsert_claim_facts(chat_mem, kept_facts)
     for fact in touched:
         fact_text = str(fact.get("text", "")).strip()
         if fact_text:
@@ -3916,6 +4044,18 @@ async def send_reply_with_style(
     if not reply_text:
         logger.info("Ответ после очистки пустой, пропускаю отправку")
         return
+
+    # Daily reply quota by tier: a free chat hits a wall and тимур goes quiet,
+    # which is the nudge to upgrade. Counted in one place per actual reply.
+    try:
+        features = get_chat_features(message.chat_id)
+        used_today = billing.bot_replies_today(message.chat_id)
+        if not feature_gate.within_daily_reply_cap(features, used_today):
+            logger.info("Дневной лимит ответов исчерпан для чата %s (tier=%s)", message.chat_id, features.get("tier"))
+            return
+        billing.register_bot_reply(message.chat_id)
+    except Exception as e:
+        logger.error("Ошибка проверки дневного лимита ответов: %s", e)
 
     fact_memory_text = reply_text
 
@@ -4453,9 +4593,73 @@ def _miniapp_members(memory: Dict[str, Any], chat_id: int) -> List[Dict[str, Any
                 "links": rel_names or ["пока без связей"],
                 "facts": fact_map.get("facts", []),
                 "mind_map": fact_map,
+                "rapport": round(float(p.get("rapport", 0.0)), 1),
             }
         )
     return members
+
+
+def _miniapp_self_card(memory: Dict[str, Any]) -> List[Dict[str, Any]]:
+    profile = ensure_self_profile(memory)
+    slots = profile.get("slots", {})
+    order = [
+        "name", "surname", "full_name", "age", "city", "residence",
+        "origin", "birth_place", "school", "university", "faculty", "work", "job",
+    ]
+    keys = [k for k in order if k in slots] + [k for k in slots if k not in order]
+    out: List[Dict[str, Any]] = []
+    for attr in keys:
+        slot = slots.get(attr) or {}
+        value = str(slot.get("value", "")).strip()
+        if not value:
+            continue
+        out.append(
+            {
+                "attribute": attr,
+                "value": value,
+                "source": str(slot.get("source", "learned")),
+                "locked": bool(slot.get("locked", False)),
+                "confidence": round(float(slot.get("confidence", 0.0)), 2),
+            }
+        )
+    return out
+
+
+def _miniapp_episodes(chat_mem: Dict[str, Any], *, limit: int = 8) -> List[Dict[str, Any]]:
+    episodes = chat_mem.get("episodes", [])
+    if not isinstance(episodes, list) or not episodes:
+        return []
+    out: List[Dict[str, Any]] = []
+    for ep in reversed(episodes[-limit:]):
+        if not isinstance(ep, dict):
+            continue
+        out.append(
+            {
+                "actor": str(ep.get("actor", "кто-то")),
+                "summary": str(ep.get("summary", "")),
+                "valence": round(float(ep.get("valence", 0.0)), 1),
+                "ts": str(ep.get("ts", "")),
+            }
+        )
+    return out
+
+
+def _miniapp_subscription(chat_id: int) -> Dict[str, Any]:
+    try:
+        feats = billing.effective_features(chat_id)
+    except Exception as e:
+        logger.error("Не удалось получить фичи подписки для miniapp: %s", e)
+        feats = dict(feature_gate.FREE_FEATURES)
+    return {
+        "tier": str(feats.get("tier", "free_promo")),
+        "memoryDepth": str(feats.get("memory_depth", "short")),
+        "voice": bool(feats.get("voice", False)),
+        "friendDossiers": bool(feats.get("friend_dossiers", False)),
+        "episodicMemory": bool(feats.get("episodic_memory", False)),
+        "maxDailyReplies": int(feats.get("max_daily_replies", 30)),
+        "watermark": bool(feats.get("watermark", True)),
+        "expiresAt": str(feats.get("expires_at") or ""),
+    }
 
 
 def _miniapp_billing_state(chat_id: int) -> Dict[str, Any]:
@@ -4536,11 +4740,14 @@ def build_miniapp_launch_url(memory: Dict[str, Any], chat_id: int) -> str:
                 "eventAbsurdity": int(mood_event.get("absurdity", 0) or 0) if mood_event else 0,
                 "recentEvents": _miniapp_mood_events(mood, limit=8),
             },
+            "self": _miniapp_self_card(memory),
         },
         "memory": {
             "members": members,
             "selectedMember": members[0]["id"] if members else "",
+            "episodes": _miniapp_episodes(get_chat_mem(memory, chat_id), limit=8),
         },
+        "subscription": _miniapp_subscription(chat_id),
         "billing": _miniapp_billing_state(chat_id),
         "meta": {
             "systemPromptSet": bool(str(cfg.get("system_prompt") or "").strip()),
@@ -6242,6 +6449,62 @@ async def billpay_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if sub.get("status") == "active":
         lines.append(f"activated until {sub.get('expires_at')}")
     await message.reply_text("\n".join(lines))
+
+
+_SUBSCRIBE_TIER_ALIASES = {
+    "free": "free_promo",
+    "standard": "group_standard",
+    "plus": "group_plus",
+}
+
+
+@owner_only
+async def subscribe_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Plans view + mock activation. Real Stars/YooKassa payment drops in later."""
+    del context
+    message = update.message
+    if not message or not message.from_user:
+        return
+
+    parts = (message.text or "").strip().split()
+    arg = parts[1].strip().lower() if len(parts) >= 2 else ""
+
+    if arg in ("", "plans", "status"):
+        feats = billing.effective_features(message.chat_id)
+        ent = billing.get_chat_entitlement(message.chat_id)
+        lines = [
+            "тарифы тимура (оплата пока мок):",
+            "- free: короткая память, 30 ответов/день, режимы default/chill, watermark",
+            "- standard: + досье на друзей и долгая память, 1200 ответов/день, без watermark",
+            "- plus: + эпизоды «помнишь как…», голос, все режимы, 3000 ответов/день",
+            "",
+            f"сейчас: tier={feats.get('tier')}, память={feats.get('memory_depth')}, до {(ent or {}).get('expires_at', '-')}",
+            "включить (мок): /subscribe standard | /subscribe plus | /subscribe trial",
+        ]
+        await message.reply_text("\n".join(lines))
+        return
+
+    if arg == "trial":
+        try:
+            result = billing.start_trial(message.chat_id, message.from_user.id)
+        except BillingError as e:
+            await message.reply_text(f"billing error: {e}")
+            return
+        ent = result.get("entitlement") or {}
+        await message.reply_text(f"триал plus включен (мок) до {ent.get('expires_at')}")
+        return
+
+    tier = _SUBSCRIBE_TIER_ALIASES.get(arg, arg)
+    if tier == "free_promo":
+        await message.reply_text("free активен по умолчанию, отдельная активация не нужна")
+        return
+    if tier not in ("group_standard", "group_plus"):
+        await message.reply_text("использование: /subscribe [plans|standard|plus|trial]")
+        return
+
+    result = billing.activate_mock(message.chat_id, message.from_user.id, tier=tier)
+    ent = result.get("entitlement") or {}
+    await message.reply_text(f"подписка активирована (мок): {tier}, до {ent.get('expires_at')}")
 
 
 @owner_only

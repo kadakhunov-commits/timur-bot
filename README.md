@@ -18,6 +18,7 @@ OPENAI_API_KEY=...
 OPENAI_BASE_URL=
 GEMINI_API_KEY=
 MINIAPP_URL=
+TIMUR_VERSION=
 SECURE_FACE_REF_DIR=
 SECURE_FACE_CACHE_DIR=
 SECURE_FACE_MAX_SIDE=960
@@ -36,6 +37,7 @@ SECURE_FACE_CONTEXT_EXPAND_BOTTOM=0.12
 `OPENAI_BASE_URL` опционален. Если пустой, используется стандартный endpoint SDK.
 `GEMINI_API_KEY` нужен для voice/TTS.
 `MINIAPP_URL` нужен для запуска Telegram Mini App из `/admin` и `/miniapp`.
+`TIMUR_VERSION` опционален: если задан, попадает в miniapp/admin как версия деплоя; иначе runtime попробует взять короткий `git sha`.
 `SECURE_FACE_REF_DIR` включает команду `/secure` (папка с референс-фото нужного человека).
 `SECURE_FACE_CACHE_DIR` (опционально) — папка кэша LBPH-модели и метаданных.
 `SECURE_FACE_MAX_SIDE`, `SECURE_FACE_MATCH_THRESHOLD`, `SECURE_FACE_EMOJI_CHANCE`, `SECURE_FACE_MIN_REF_SAMPLES` — тюнинг скорости/чувствительности `/secure`.
@@ -59,20 +61,51 @@ python3 timur_bot.py
 
 ## Динамическая Mini App на Amvera
 
-Для админ-панели добавлен отдельный динамический web-runtime (не static hosting):
+В репозитории есть два готовых entrypoint-а под Amvera:
 
-- Entry point: `python3 -m timur_bot.web.admin_panel`
-- Amvera-конфиг: `amvera-miniapp.yaml`
-- Основная страница: `/miniapp`
-- Healthcheck: `/healthz`
+- `amvera.yaml` — основной продовый runtime, который поднимает и бота, и admin miniapp через [run_combined.py](run_combined.py).
+- `amvera-miniapp.yaml` — отдельный admin-only runtime для preview/отладки через [timur_bot/web/admin_panel.py](timur_bot/web/admin_panel.py).
 
-Этот runtime отдает `miniapp/public/index.html` через Flask и отключает кеш HTML (`Cache-Control: no-store`), чтобы state для разных чатов не залипал.
+Оба runtime отдают `miniapp/public/index.html` через Flask и отключают кеш HTML (`Cache-Control: no-store`), чтобы state для разных чатов не залипал.
 
-После деплоя на Amvera укажи домен в боте:
+### Git -> Amvera -> Mini App
+
+Рекомендуемый flow для одного приложения:
+
+1. В Amvera подключи GitHub-репозиторий и ветку `main`.
+2. В `Конфигурация` используй `amvera.yaml`:
+   `scriptName: run_combined.py`
+3. В `Домены` создай публичный `https://...amvera.io`.
+4. В `.env`/переменных Amvera задай:
 
 ```env
 MINIAPP_URL=https://<your-amvera-domain>/miniapp
+TIMUR_VERSION=
 ```
+
+5. После каждого push в `main`:
+   если в `Контроль версий`/deploy settings у проекта включен auto deploy, Amvera сама подтянет свежий commit;
+   если auto deploy в твоем тарифе или UI не включен, достаточно нажать `Обновить из репозитория` и пересобрать приложение.
+
+Идея простая: miniapp не живет отдельно от Git. Ее HTML лежит в репозитории, Flask отдает его прямо из рабочего дерева, а Amvera берет это рабочее дерево из ветки, привязанной к приложению.
+
+### Версия miniapp/admin
+
+Runtime публикует версию сразу в трех местах:
+
+- badge в самой miniapp;
+- `GET /healthz` — быстрый healthcheck с `version`;
+- `GET /version` — подробный JSON с `version`, `source`, `deployed_at`.
+
+Порядок определения версии такой:
+
+1. `TIMUR_VERSION`
+2. `AMVERA_GIT_SHA`
+3. `GIT_COMMIT`
+4. короткий `git rev-parse --short HEAD`
+5. fallback `dev`
+
+Это удобно для проверки, что Amvera реально подняла новый commit после push.
 
 ## Конфигурация
 

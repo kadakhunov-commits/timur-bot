@@ -889,14 +889,21 @@ class BillingEngine:
         }
 
     def tier_features(self, tier: str, mode: str) -> Dict[str, Any]:
-        # mock but future-ready feature flags
+        # mock but future-ready feature flags.
+        # memory_depth is the monetization wedge: how "aware" тимур is allowed to
+        # be — short = self-card + basic chat; standard = + friend dossiers and
+        # long memory; full = + episodic "помнишь как..." callbacks.
         if tier == "free_promo" or mode == "free":
             return {
                 "max_daily_replies": 30,
                 "persona_modes": ["default", "chill"],
                 "meme_generator": False,
                 "voice_circles": False,
+                "voice": False,
                 "mini_games": False,
+                "friend_dossiers": False,
+                "episodic_memory": False,
+                "memory_depth": "short",
                 "watermark": True,
             }
         if tier == "group_plus":
@@ -905,7 +912,11 @@ class BillingEngine:
                 "persona_modes": ["default", "savage", "chill", "poet", "npc", "quotes"],
                 "meme_generator": True,
                 "voice_circles": True,
+                "voice": True,
                 "mini_games": True,
+                "friend_dossiers": True,
+                "episodic_memory": True,
+                "memory_depth": "full",
                 "watermark": False,
             }
         return {
@@ -913,6 +924,101 @@ class BillingEngine:
             "persona_modes": ["default", "savage", "chill", "npc", "quotes"],
             "meme_generator": True,
             "voice_circles": False,
+            "voice": False,
             "mini_games": False,
+            "friend_dossiers": True,
+            "episodic_memory": False,
+            "memory_depth": "standard",
             "watermark": False,
         }
+
+    def effective_features(self, chat_id: int) -> Dict[str, Any]:
+        """Resolve the feature set a chat currently gets (entitlement or free)."""
+        ent = self.get_chat_entitlement(chat_id)
+        if ent and ent.get("status") == "active":
+            tier = str(ent.get("tier") or "free_promo")
+            mode = str(ent.get("mode") or "owner")
+        else:
+            tier, mode = "free_promo", "free"
+        features = self.tier_features(tier, mode)
+        features["tier"] = tier
+        features["entitlement_status"] = (ent or {}).get("status")
+        features["expires_at"] = (ent or {}).get("expires_at")
+        return features
+
+    def bot_replies_today(self, chat_id: int) -> int:
+        state = self._load()
+        chat = self._chat(state, chat_id)
+        totals = chat.setdefault("metrics", {}).setdefault("reply_total", {})
+        return int(totals.get(self._today(), 0))
+
+    def register_bot_reply(self, chat_id: int) -> int:
+        """Count one bot reply for today's quota; returns the new total."""
+        state = self._load()
+        chat = self._chat(state, chat_id)
+        totals = chat.setdefault("metrics", {}).setdefault("reply_total", {})
+        today = self._today()
+        totals[today] = int(totals.get(today, 0)) + 1
+        self._save(state)
+        return int(totals[today])
+
+    def activate_mock(
+        self,
+        chat_id: int,
+        user_id: int,
+        *,
+        tier: str = "group_plus",
+        days: int = 30,
+        source: str = "mock",
+    ) -> Dict[str, Any]:
+        """Fake-activate a paid subscription without a real payment (test/sales demo).
+
+        Mirrors what a real successful_payment callback would do: create an active
+        subscription + entitlement. Real Stars/YooKassa rails drop in here later.
+        """
+        state = self._load()
+        sub_id = self._gen_id("sub")
+        sub = {
+            "subscription_id": sub_id,
+            "chat_id": int(chat_id),
+            "initiated_by": int(user_id),
+            "mode": "owner",
+            "provider": source,
+            "tier": tier,
+            "status": "active",
+            "total_rub": 0,
+            "payer_ids": [int(user_id)],
+            "invoice_ids": [],
+            "activation_ratio": 1.0,
+            "created_at": iso_now(),
+            "activated_at": iso_now(),
+            "expires_at": self._month_end(days),
+            "features": self.tier_features(tier, "owner"),
+        }
+        state["subscriptions"][sub_id] = sub
+        self._create_entitlement(state, int(chat_id), sub)
+        self._append_ledger(
+            state,
+            {
+                "type": "subscription_activated",
+                "subscription_id": sub_id,
+                "chat_id": int(chat_id),
+                "mode": "owner",
+                "provider": source,
+                "amount_rub": 0,
+                "ts": iso_now(),
+            },
+        )
+        self._save(state)
+        return {"subscription": sub, "entitlement": self.get_chat_entitlement(chat_id)}
+
+    def start_trial(self, chat_id: int, user_id: int, *, tier: str = "group_plus", days: int = 7) -> Dict[str, Any]:
+        """Grant a one-time free trial of a paid tier (conversion lever)."""
+        chat = self._chat(self._load(), chat_id)
+        if chat.get("trial_used"):
+            raise BillingError("триал уже был использован")
+        result = self.activate_mock(chat_id, user_id, tier=tier, days=days, source="trial")
+        state = self._load()
+        self._chat(state, chat_id)["trial_used"] = True
+        self._save(state)
+        return result

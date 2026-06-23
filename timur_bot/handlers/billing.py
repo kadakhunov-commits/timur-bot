@@ -7,6 +7,7 @@ from timur_bot.services.bot_logic import (
     billref_cmd,
     billsetup_cmd,
     billstatus_cmd,
+    subscribe_cmd,
 )
 
 __all__ = [
@@ -18,4 +19,5 @@ __all__ = [
     "billpay_cmd",
     "billabuse_cmd",
     "billref_cmd",
+    "subscribe_cmd",
 ]
