@@ -222,6 +222,30 @@ def test_run_with_typing_sends_chat_action() -> None:
     assert context.bot.calls >= 1
 
 
+def test_run_with_typing_stops_after_timeout() -> None:
+    class DummyBot:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def send_chat_action(self, chat_id: int, action: str) -> None:
+            del chat_id, action
+            self.calls += 1
+
+    class DummyContext:
+        def __init__(self) -> None:
+            self.bot = DummyBot()
+
+    async def _slow_task() -> str:
+        await asyncio.sleep(0.05)
+        return "too late"
+
+    context = DummyContext()
+    result = asyncio.run(runtime._run_with_typing(context, 1, _slow_task(), timeout_seconds=0.01))
+
+    assert result == ""
+    assert context.bot.calls >= 1
+
+
 def test_store_bot_claim_memory_writes_fact_graph_and_long_fact() -> None:
     memory = runtime.default_memory()
     chat_mem = runtime.get_chat_mem(memory, 77)

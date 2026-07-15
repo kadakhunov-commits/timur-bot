@@ -3367,10 +3367,8 @@ async def _maybe_send_adaptive_snipe(
 
     history = list(chat_mem.get("history", []))[-8:]
     _adaptive_metric(chat_mem, "opportunities_checked")
-    opportunity_raw = await _run_with_typing(
-        context,
-        message.chat_id,
-        call_openai_with_params(opportunity_messages(history), max_tokens=80, temperature=0.0),
+    opportunity_raw = await call_openai_with_params(
+        opportunity_messages(history), max_tokens=80, temperature=0.0
     )
     opportunity_score = parse_opportunity(opportunity_raw)
     if opportunity_score < int(settings["opportunity_threshold"]):
@@ -3379,23 +3377,17 @@ async def _maybe_send_adaptive_snipe(
         return False
 
     plan = build_humor_plan(memory, message)
-    generated_raw = await _run_with_typing(
-        context,
-        message.chat_id,
-        call_openai_with_params(
-            candidates_messages(history, format_humor_prompt(plan), count=int(settings["candidate_count"])),
-            max_tokens=260,
-            temperature=0.9,
-        ),
+    generated_raw = await call_openai_with_params(
+        candidates_messages(history, format_humor_prompt(plan), count=int(settings["candidate_count"])),
+        max_tokens=260,
+        temperature=0.9,
     )
     candidates = parse_candidates(generated_raw, limit=int(settings["candidate_count"]))
     if not candidates:
         _adaptive_metric(chat_mem, "generation_abstain")
         return False
-    judgement_raw = await _run_with_typing(
-        context,
-        message.chat_id,
-        call_openai_with_params(judge_messages(history, candidates), max_tokens=100, temperature=0.0),
+    judgement_raw = await call_openai_with_params(
+        judge_messages(history, candidates), max_tokens=100, temperature=0.0
     )
     candidate_score, winner = parse_judgement(judgement_raw)
     if (
@@ -3484,7 +3476,9 @@ async def _run_with_typing(
     context: ContextTypes.DEFAULT_TYPE,
     chat_id: int,
     task_coro: Any,
-) -> str:
+    *,
+    timeout_seconds: float = 25.0,
+) -> Any:
     stop_event = asyncio.Event()
 
     async def _typing_pulse() -> None:
@@ -3500,8 +3494,10 @@ async def _run_with_typing(
 
     pulse_task = asyncio.create_task(_typing_pulse())
     try:
-        result = await task_coro
-        return str(result or "")
+        return await asyncio.wait_for(task_coro, timeout=max(0.01, float(timeout_seconds)))
+    except asyncio.TimeoutError:
+        logger.warning("Операция в чате %s превысила %.1f с и была отменена", chat_id, timeout_seconds)
+        return ""
     finally:
         stop_event.set()
         try:
@@ -6203,7 +6199,12 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         decision = should_reply_decision(memory, message, bot_id)
         _log_reply_decision("тексту", decision)
         if not decision.should_reply:
-            await _maybe_send_adaptive_snipe(update, context, memory)
+            await _run_with_typing(
+                context,
+                message.chat_id,
+                _maybe_send_adaptive_snipe(update, context, memory),
+                timeout_seconds=12.0,
+            )
             return
 
         logger.info(
