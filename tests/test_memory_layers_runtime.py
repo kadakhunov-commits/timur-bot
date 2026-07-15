@@ -167,7 +167,7 @@ def test_generate_daily_slots_uses_daily_target_outside_quiet_hours() -> None:
     assert all(not runtime._is_quiet_minute(s, quiet_start, quiet_end) for s in slots)
 
 
-def test_ordinary_participation_uses_configured_activity_after_gap() -> None:
+def test_ordinary_participation_is_left_to_the_quality_filter_after_gap() -> None:
     memory = runtime.default_memory()
     memory["config"]["adaptive_humor"]["participation_rate"] = 0.3
     chat = runtime.get_chat_mem(memory, 55)
@@ -184,11 +184,10 @@ def test_ordinary_participation_uses_configured_activity_after_gap() -> None:
         from_user = DummyUser()
         reply_to_message = None
 
-    with patch.object(runtime.random, "random", return_value=0.2):
-        decision = runtime.should_reply_decision(memory, DummyMessage(), bot_id=999)
+    decision = runtime.should_reply_decision(memory, DummyMessage(), bot_id=999)
 
-    assert decision.should_reply is True
-    assert decision.reason == "обычное участие в беседе"
+    assert decision.should_reply is False
+    assert "качественному фильтру" in decision.reason
 
 
 def test_processed_event_cache_marks_duplicate() -> None:

@@ -2788,16 +2788,7 @@ def should_reply_decision(memory: Dict[str, Any], message: Message, bot_id: int)
     ):
         return ReplyDecision(True, "сообщение продолжает активный диалог с Тимуром")
 
-    if settings.get("enabled") and ordinary_reply_allowed(
-        chat_mem,
-        min_human_messages=int(settings["min_human_messages_between_replies"]),
-    ):
-        roll = random.random()
-        threshold = float(settings["participation_rate"])
-        if roll < threshold:
-            return ReplyDecision(True, "обычное участие в беседе", threshold=threshold, roll=roll)
-
-    return ReplyDecision(False, "обычный случай: жду следующий ход или сильный момент")
+    return ReplyDecision(False, "обычный случай: передаю активность качественному фильтру")
 
 
 def should_reply(memory: Dict[str, Any], message: Message, bot_id: int) -> bool:
@@ -3215,6 +3206,8 @@ def build_chat_messages(
         "- хорошая шутка = точное наблюдение + неожиданный образ + короткий добив\n"
         "- не используй заезженные шаблоны типа iq комнатной температуры или мои нейроны плавятся\n"
         "- если нет нормальной шутки, выбери сухую реакцию вместо натянутой прожарки\n"
+        "- не делай каламбур из одного последнего слова и не пересказывай его с новой вывеской\n"
+        "- не шути о том, умеешь ли ты шутить, и не оценивай собственный юмор\n"
         "- не зацикливайся на одном и том же старом факте, чаще меняй тему\n"
         "- не делай длинные объяснения, лучше коротко и по делу\n"
     )
@@ -3357,11 +3350,18 @@ async def _maybe_send_adaptive_snipe(
     if not settings.get("enabled") or not settings.get("live_snipe_enabled"):
         _adaptive_metric(chat_mem, "disabled")
         return False
-    if not snipe_allowed(
+    regular_eligible = ordinary_reply_allowed(
+        chat_mem,
+        min_human_messages=int(settings["min_human_messages_between_replies"]),
+    )
+    regular_roll = random.random() if regular_eligible else 1.0
+    regular_participation = regular_eligible and regular_roll < float(settings["participation_rate"])
+    rare_snipe = snipe_allowed(
         chat_mem,
         cooldown_minutes=int(settings["snipe_cooldown_minutes"]),
         min_human_messages=int(settings["min_human_messages"]),
-    ):
+    )
+    if not regular_participation and not rare_snipe:
         _adaptive_metric(chat_mem, "cooldown_abstain")
         return False
 
@@ -3375,7 +3375,7 @@ async def _maybe_send_adaptive_snipe(
     opportunity_score = parse_opportunity(opportunity_raw)
     if opportunity_score < int(settings["opportunity_threshold"]):
         _adaptive_metric(chat_mem, "quality_abstain")
-        logger.info("adaptive snipe skipped: opportunity=%s", opportunity_score)
+        logger.info("adaptive interjection skipped: opportunity=%s", opportunity_score)
         return False
 
     plan = build_humor_plan(memory, message)
@@ -3404,12 +3404,17 @@ async def _maybe_send_adaptive_snipe(
         or _is_repeated_snipe(chat_mem, winner)
     ):
         _adaptive_metric(chat_mem, "judge_abstain")
-        logger.info("adaptive snipe skipped: opportunity=%s candidate=%s", opportunity_score, candidate_score)
+        logger.info("adaptive interjection skipped: opportunity=%s candidate=%s", opportunity_score, candidate_score)
         return False
 
     _adaptive_metric(chat_mem, "sent")
-    logger.info("adaptive snipe sent: opportunity=%s candidate=%s", opportunity_score, candidate_score)
-    await send_reply_with_style(update, context, memory, winner, humor_plan=plan, is_snipe=True)
+    logger.info(
+        "adaptive interjection sent: type=%s opportunity=%s candidate=%s",
+        "rare_snipe" if rare_snipe else "regular_participation",
+        opportunity_score,
+        candidate_score,
+    )
+    await send_reply_with_style(update, context, memory, winner, humor_plan=plan, is_snipe=rare_snipe)
     return True
 
 
