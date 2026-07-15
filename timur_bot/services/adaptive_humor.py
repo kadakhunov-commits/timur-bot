@@ -33,85 +33,27 @@ def _json(text: str) -> Dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def opportunity_messages(history: Iterable[Dict[str, Any]]) -> List[Dict[str, str]]:
+def interjection_messages(history: Iterable[Dict[str, Any]], humor_hint: str) -> List[Dict[str, str]]:
     return [
         {
             "role": "system",
             "content": (
-                "Ты строгий редактор тайминга для живого чата. Оцени, стоит ли редкому участнику "
-                "вклиниться с коротким дружеским подъебом. Не предлагай реплику. Верни JSON "
-                '{"score":0..100,"reason":"до 120 символов"}. Высокий score только если без него '
-                "действительно теряется очевидная смешная добивка; иначе ставь ниже 85. Не повышай "
-                "оценку только потому, что в сообщении есть смешное слово, оговорка или мем."
+                "Ты одновременно автор и строгий редактор короткой реплики для живого русского чата. "
+                "Мысленно придумай три варианта и верни только лучший в JSON "
+                '{"score":0..100,"reply":"текст или пусто"}. Score выше 85 — только если реплика '
+                "точная, контекстная и лучше молчания. Не повторяй последнее слово или оговорку, не "
+                "пересказывай контекст, не шути о качестве своего юмора и не упоминай ИИ. Если сильной "
+                "реплики нет, reply должен быть пустым."
             ),
         },
-        {"role": "user", "content": "чат:\n" + _compact_history(history)},
+        {"role": "user", "content": f"чат:\n{_compact_history(history)}\n\nориентиры вкуса:\n{humor_hint}"},
     ]
 
 
-def candidates_messages(history: Iterable[Dict[str, Any]], humor_hint: str, *, count: int) -> List[Dict[str, str]]:
-    return [
-        {
-            "role": "system",
-            "content": (
-                "Ты пишешь редкую меткую реплику для дружеского русского чата. Верни только JSON "
-                '{"candidates":["..."]}. Нужны разные короткие варианты: строчные буквы, без эмодзи, '
-                "без объяснений и личного унижения. Не копируй старые шутки дословно. Не повторяй "
-                "буквально слово, оговорку или тему из последнего сообщения; добавь новый образ или "
-                "поворот. Никогда не шути о том, умеешь ли ты шутить, и не делай шутки про ИИ."
-            ),
-        },
-        {
-            "role": "user",
-            "content": f"контекст:\n{_compact_history(history)}\n\nориентиры вкуса:\n{humor_hint}\n\nвариантов: {count}",
-        },
-    ]
-
-
-def judge_messages(history: Iterable[Dict[str, Any]], candidates: Iterable[str]) -> List[Dict[str, str]]:
-    return [
-        {
-            "role": "system",
-            "content": (
-                "Ты строгий судья юмора конкретного чата. Выбери максимум один вариант, только если он "
-                "контекстный, короткий, не повторяет старый мем и действительно лучше молчания. Верни JSON "
-                '{"score":0..100,"winner":"точный текст или пусто","reason":"до 120 символов"}. '
-                "Отклоняй каламбуры, которые просто повторяют последнее слово, пересказ контекста и "
-                "самоиронию о качестве юмора. Если ни один не тянет, winner должен быть пустой строкой."
-            ),
-        },
-        {
-            "role": "user",
-            "content": "чат:\n" + _compact_history(history) + "\n\nварианты:\n" + "\n".join(f"- {x}" for x in candidates),
-        },
-    ]
-
-
-def parse_opportunity(text: str) -> int:
-    try:
-        return max(0, min(100, int(_json(text).get("score", 0))))
-    except (TypeError, ValueError):
-        return 0
-
-
-def parse_candidates(text: str, *, limit: int) -> List[str]:
-    raw = _json(text).get("candidates", [])
-    if not isinstance(raw, list):
-        return []
-    out = []
-    for item in raw:
-        cleaned = re.sub(r"\s+", " ", str(item or "")).strip()
-        if cleaned and cleaned not in out:
-            out.append(cleaned[:280])
-        if len(out) >= limit:
-            break
-    return out
-
-
-def parse_judgement(text: str) -> tuple[int, str]:
+def parse_interjection(text: str) -> tuple[int, str]:
     payload = _json(text)
     try:
         score = max(0, min(100, int(payload.get("score", 0))))
     except (TypeError, ValueError):
         score = 0
-    return score, re.sub(r"\s+", " ", str(payload.get("winner", ""))).strip()[:280]
+    return score, re.sub(r"\s+", " ", str(payload.get("reply", ""))).strip()[:280]

@@ -3,6 +3,8 @@ from datetime import datetime, timedelta
 from timur_bot.services.conversation_policy import (
     activate_dialogue,
     continue_dialogue,
+    interjection_check_allowed,
+    mark_interjection_checked,
     mark_reply_sent,
     mark_snipe_sent,
     note_human_message,
@@ -41,3 +43,17 @@ def test_snipe_requires_both_time_and_new_human_messages() -> None:
 
     assert not snipe_allowed(chat, cooldown_minutes=30, min_human_messages=12, now=now + timedelta(minutes=29))
     assert snipe_allowed(chat, cooldown_minutes=30, min_human_messages=12, now=now + timedelta(minutes=30))
+
+
+def test_snipe_and_quality_checks_are_bounded_by_new_messages() -> None:
+    chat = {}
+    for _ in range(4):
+        note_human_message(chat)
+
+    assert not snipe_allowed(chat, cooldown_minutes=30, min_human_messages=12)
+    assert not interjection_check_allowed(chat, min_human_messages=5)
+
+    note_human_message(chat)
+    assert interjection_check_allowed(chat, min_human_messages=5)
+    mark_interjection_checked(chat)
+    assert not interjection_check_allowed(chat, min_human_messages=5)

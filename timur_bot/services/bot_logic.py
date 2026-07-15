@@ -93,19 +93,18 @@ from timur_bot.services.humor import (
 from timur_bot.services.conversation_policy import (
     activate_dialogue,
     continue_dialogue,
+    interjection_check_allowed,
+    mark_interjection_checked,
     mark_reply_sent,
+    mark_snipe_attempt,
     mark_snipe_sent,
     note_human_message,
     ordinary_reply_allowed,
     snipe_allowed,
 )
 from timur_bot.services.adaptive_humor import (
-    candidates_messages,
-    judge_messages,
-    opportunity_messages,
-    parse_candidates,
-    parse_judgement,
-    parse_opportunity,
+    interjection_messages,
+    parse_interjection,
 )
 from timur_bot.services.fact_memory import (
     build_fact_record,
@@ -235,6 +234,7 @@ LONG_FACT_USAGE_TRACK_LIMIT = 600
 FUNNY_SCAN_STATE_PATH = ROOT_DIR / "data" / "funny_scan_state.json"
 FUNNY_SCAN_LOOP_INTERVAL_SECONDS = 60
 _INFLIGHT_EVENT_KEYS: set[str] = set()
+_CHAT_GENERATION_LOCKS: Dict[int, asyncio.Lock] = {}
 _LIFE_TASK: asyncio.Task[Any] | None = None
 _FUNNY_SCAN_TASK: asyncio.Task[Any] | None = None
 _FUNNY_SCAN_LOCK = asyncio.Lock()
@@ -459,6 +459,9 @@ def _adaptive_humor_settings(memory: Dict[str, Any]) -> Dict[str, Any]:
     for key, low, high in (
         ("participation_rate", 0, 1),
         ("min_human_messages_between_replies", 1, 50),
+        ("min_human_messages_between_checks", 1, 100),
+        ("interjection_timeout_seconds", 1, 10),
+        ("reply_timeout_seconds", 1, 15),
         ("dialogue_window_minutes", 1, 60),
         ("snipe_cooldown_minutes", 1, 24 * 60),
         ("min_human_messages", 1, 200),
@@ -3298,7 +3301,7 @@ async def call_openai_text(messages: List[Dict[str, Any]]) -> str:
             client.chat.completions.create,
             model=TEXT_MODEL,
             messages=messages,
-            max_tokens=150,
+            max_tokens=90,
             temperature=0.85,
         )
         return (response.choices[0].message.content or "").strip()
@@ -3350,13 +3353,17 @@ async def _maybe_send_adaptive_snipe(
     if not settings.get("enabled") or not settings.get("live_snipe_enabled"):
         _adaptive_metric(chat_mem, "disabled")
         return False
-    regular_eligible = ordinary_reply_allowed(
+    check_allowed = interjection_check_allowed(
+        chat_mem,
+        min_human_messages=int(settings["min_human_messages_between_checks"]),
+    )
+    regular_eligible = check_allowed and ordinary_reply_allowed(
         chat_mem,
         min_human_messages=int(settings["min_human_messages_between_replies"]),
     )
     regular_roll = random.random() if regular_eligible else 1.0
     regular_participation = regular_eligible and regular_roll < float(settings["participation_rate"])
-    rare_snipe = snipe_allowed(
+    rare_snipe = check_allowed and snipe_allowed(
         chat_mem,
         cooldown_minutes=int(settings["snipe_cooldown_minutes"]),
         min_human_messages=int(settings["min_human_messages"]),
@@ -3365,45 +3372,29 @@ async def _maybe_send_adaptive_snipe(
         _adaptive_metric(chat_mem, "cooldown_abstain")
         return False
 
+    mark_interjection_checked(chat_mem)
+    if rare_snipe:
+        mark_snipe_attempt(chat_mem)
     history = list(chat_mem.get("history", []))[-8:]
-    _adaptive_metric(chat_mem, "opportunities_checked")
-    opportunity_raw = await call_openai_with_params(
-        opportunity_messages(history), max_tokens=80, temperature=0.0
-    )
-    opportunity_score = parse_opportunity(opportunity_raw)
-    if opportunity_score < int(settings["opportunity_threshold"]):
-        _adaptive_metric(chat_mem, "quality_abstain")
-        logger.info("adaptive interjection skipped: opportunity=%s", opportunity_score)
-        return False
-
     plan = build_humor_plan(memory, message)
-    generated_raw = await call_openai_with_params(
-        candidates_messages(history, format_humor_prompt(plan), count=int(settings["candidate_count"])),
-        max_tokens=260,
-        temperature=0.9,
+    _adaptive_metric(chat_mem, "opportunities_checked")
+    raw = await call_openai_with_params(
+        interjection_messages(history, format_humor_prompt(plan)), max_tokens=90, temperature=0.7
     )
-    candidates = parse_candidates(generated_raw, limit=int(settings["candidate_count"]))
-    if not candidates:
-        _adaptive_metric(chat_mem, "generation_abstain")
-        return False
-    judgement_raw = await call_openai_with_params(
-        judge_messages(history, candidates), max_tokens=100, temperature=0.0
-    )
-    candidate_score, winner = parse_judgement(judgement_raw)
+    candidate_score, winner = parse_interjection(raw)
     if (
         candidate_score < int(settings["candidate_threshold"])
-        or winner not in candidates
+        or not winner
         or _is_repeated_snipe(chat_mem, winner)
     ):
         _adaptive_metric(chat_mem, "judge_abstain")
-        logger.info("adaptive interjection skipped: opportunity=%s candidate=%s", opportunity_score, candidate_score)
+        logger.info("adaptive interjection skipped: candidate=%s", candidate_score)
         return False
 
     _adaptive_metric(chat_mem, "sent")
     logger.info(
-        "adaptive interjection sent: type=%s opportunity=%s candidate=%s",
+        "adaptive interjection sent: type=%s candidate=%s",
         "rare_snipe" if rare_snipe else "regular_participation",
-        opportunity_score,
         candidate_score,
     )
     await send_reply_with_style(update, context, memory, winner, humor_plan=plan, is_snipe=rare_snipe)
@@ -3477,7 +3468,33 @@ async def _run_with_typing(
     chat_id: int,
     task_coro: Any,
     *,
-    timeout_seconds: float = 25.0,
+    timeout_seconds: float = 6.0,
+    show_typing: bool = True,
+) -> Any:
+    lock = _CHAT_GENERATION_LOCKS.setdefault(int(chat_id), asyncio.Lock())
+    if lock.locked():
+        logger.info("Пропускаю генерацию в чате %s: предыдущий ответ ещё не завершился", chat_id)
+        if hasattr(task_coro, "close"):
+            task_coro.close()
+        return ""
+
+    async with lock:
+        return await _run_with_typing_locked(
+            context,
+            chat_id,
+            task_coro,
+            timeout_seconds=timeout_seconds,
+            show_typing=show_typing,
+        )
+
+
+async def _run_with_typing_locked(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    task_coro: Any,
+    *,
+    timeout_seconds: float,
+    show_typing: bool,
 ) -> Any:
     stop_event = asyncio.Event()
 
@@ -3492,7 +3509,7 @@ async def _run_with_typing(
             except asyncio.TimeoutError:
                 continue
 
-    pulse_task = asyncio.create_task(_typing_pulse())
+    pulse_task = asyncio.create_task(_typing_pulse()) if show_typing else None
     try:
         return await asyncio.wait_for(task_coro, timeout=max(0.01, float(timeout_seconds)))
     except asyncio.TimeoutError:
@@ -3501,7 +3518,8 @@ async def _run_with_typing(
     finally:
         stop_event.set()
         try:
-            await pulse_task
+            if pulse_task:
+                await pulse_task
         except Exception:
             pass
 
@@ -6203,7 +6221,8 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 context,
                 message.chat_id,
                 _maybe_send_adaptive_snipe(update, context, memory),
-                timeout_seconds=12.0,
+                timeout_seconds=float(_adaptive_humor_settings(memory)["interjection_timeout_seconds"]),
+                show_typing=False,
             )
             return
 
@@ -6214,7 +6233,12 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
         humor_plan = build_humor_plan(memory, message)
         messages = build_chat_messages(memory, message, humor_plan=humor_plan)
-        reply_text = await _run_with_typing(context, message.chat_id, call_openai_text(messages))
+        reply_text = await _run_with_typing(
+            context,
+            message.chat_id,
+            call_openai_text(messages),
+            timeout_seconds=float(_adaptive_humor_settings(memory)["reply_timeout_seconds"]),
+        )
 
         force_voice = is_voice_codeword(user_text)
         await send_reply_with_style(

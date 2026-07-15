@@ -246,6 +246,47 @@ def test_run_with_typing_stops_after_timeout() -> None:
     assert context.bot.calls >= 1
 
 
+def test_run_with_typing_skips_overlapping_generation_in_same_chat() -> None:
+    class DummyBot:
+        async def send_chat_action(self, chat_id: int, action: str) -> None:
+            del chat_id, action
+
+    context = type("DummyContext", (), {"bot": DummyBot()})()
+
+    async def _slow_task() -> str:
+        await asyncio.sleep(0.05)
+        return "first"
+
+    async def _second_task() -> str:
+        return "second"
+
+    async def _run_pair() -> tuple[str, str]:
+        first = asyncio.create_task(runtime._run_with_typing(context, 90210, _slow_task(), timeout_seconds=1))
+        await asyncio.sleep(0.005)
+        second = await runtime._run_with_typing(context, 90210, _second_task(), timeout_seconds=1)
+        return await first, second
+
+    assert asyncio.run(_run_pair()) == ("first", "")
+
+
+def test_background_interjection_does_not_show_typing() -> None:
+    class DummyBot:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def send_chat_action(self, chat_id: int, action: str) -> None:
+            del chat_id, action
+            self.calls += 1
+
+    context = type("DummyContext", (), {"bot": DummyBot()})()
+
+    async def _quick_task() -> str:
+        return "ok"
+
+    assert asyncio.run(runtime._run_with_typing(context, 90211, _quick_task(), show_typing=False)) == "ok"
+    assert context.bot.calls == 0
+
+
 def test_store_bot_claim_memory_writes_fact_graph_and_long_fact() -> None:
     memory = runtime.default_memory()
     chat_mem = runtime.get_chat_mem(memory, 77)

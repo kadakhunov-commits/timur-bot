@@ -28,14 +28,18 @@ def ensure_policy_state(chat_mem: Dict[str, Any]) -> Dict[str, Any]:
     state.setdefault("dialogue", {})
     state.setdefault("last_snipe_ts", None)
     state.setdefault("human_messages_since_snipe", 0)
+    state.setdefault("human_messages_since_snipe_attempt", 0)
     state.setdefault("human_messages_since_reply", 0)
+    state.setdefault("human_messages_since_interjection_check", 0)
     return state
 
 
 def note_human_message(chat_mem: Dict[str, Any]) -> None:
     state = ensure_policy_state(chat_mem)
     state["human_messages_since_snipe"] = int(state.get("human_messages_since_snipe", 0)) + 1
+    state["human_messages_since_snipe_attempt"] = int(state.get("human_messages_since_snipe_attempt", 0)) + 1
     state["human_messages_since_reply"] = int(state.get("human_messages_since_reply", 0)) + 1
+    state["human_messages_since_interjection_check"] = int(state.get("human_messages_since_interjection_check", 0)) + 1
 
 
 def ordinary_reply_allowed(chat_mem: Dict[str, Any], *, min_human_messages: int) -> bool:
@@ -45,6 +49,15 @@ def ordinary_reply_allowed(chat_mem: Dict[str, Any], *, min_human_messages: int)
 
 def mark_reply_sent(chat_mem: Dict[str, Any]) -> None:
     ensure_policy_state(chat_mem)["human_messages_since_reply"] = 0
+
+
+def interjection_check_allowed(chat_mem: Dict[str, Any], *, min_human_messages: int) -> bool:
+    state = ensure_policy_state(chat_mem)
+    return int(state.get("human_messages_since_interjection_check", 0)) >= max(1, int(min_human_messages))
+
+
+def mark_interjection_checked(chat_mem: Dict[str, Any]) -> None:
+    ensure_policy_state(chat_mem)["human_messages_since_interjection_check"] = 0
 
 
 def activate_dialogue(
@@ -127,16 +140,24 @@ def snipe_allowed(
 ) -> bool:
     state = ensure_policy_state(chat_mem)
     last = _parse_ts(state.get("last_snipe_ts"))
+    attempts = int(state.get("human_messages_since_snipe_attempt", 0))
     if not last:
-        return True
+        return attempts >= max(1, int(min_human_messages))
     current = now or _now()
     elapsed = current - last
-    return elapsed >= timedelta(minutes=max(1, int(cooldown_minutes))) and int(
-        state.get("human_messages_since_snipe", 0)
-    ) >= max(1, int(min_human_messages))
+    return (
+        elapsed >= timedelta(minutes=max(1, int(cooldown_minutes)))
+        and int(state.get("human_messages_since_snipe", 0)) >= max(1, int(min_human_messages))
+        and attempts >= max(1, int(min_human_messages))
+    )
+
+
+def mark_snipe_attempt(chat_mem: Dict[str, Any]) -> None:
+    ensure_policy_state(chat_mem)["human_messages_since_snipe_attempt"] = 0
 
 
 def mark_snipe_sent(chat_mem: Dict[str, Any], *, now: datetime | None = None) -> None:
     state = ensure_policy_state(chat_mem)
     state["last_snipe_ts"] = (now or _now()).isoformat()
     state["human_messages_since_snipe"] = 0
+    state["human_messages_since_snipe_attempt"] = 0

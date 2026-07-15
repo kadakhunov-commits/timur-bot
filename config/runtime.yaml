@@ -38,6 +38,9 @@ adaptive_humor:
   live_snipe_enabled: true
   participation_rate: 0.30
   min_human_messages_between_replies: 2
+  min_human_messages_between_checks: 5
+  interjection_timeout_seconds: 3
+  reply_timeout_seconds: 6
   dialogue_window_minutes: 10
   snipe_cooldown_minutes: 30
   min_human_messages: 12
