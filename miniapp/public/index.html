@@ -569,6 +569,11 @@
           <b id="heatValue">82/100</b>
         </div>
         <input id="heatRange" type="range" min="0" max="100" value="82" style="width:100%; margin-top:8px; accent-color:#2ee6ff;">
+        <div class="row" style="margin-top:14px">
+          <span class="small">Активность в беседе</span>
+          <b id="participationValue">30%</b>
+        </div>
+        <input id="participationRange" type="range" min="0" max="100" value="30" style="width:100%; margin-top:8px; accent-color:#2ee6ff;">
         <div id="previewText" class="preview"></div>
       </div>
       <div class="card">
@@ -885,6 +890,7 @@
       currentTab: "settings",
       activeMode: launchState.settings?.activeMode || "default",
       heat: launchState.settings?.heat ?? 82,
+      participationRate: Number(launchState.settings?.participationRate ?? 0.30),
       billingMode: "owner",
       activeUsers30d: launchState.billing?.activeUsers30d ?? 0,
       payerCount: launchState.billing?.payerCountOwner ?? 0,
@@ -994,6 +1000,7 @@
         chat_id: state.chatId,
         active_mode: state.activeMode,
         heat: state.heat,
+        participation_rate: state.participationRate,
         selected_member: state.selectedMember,
         ts: new Date().toISOString()
       };
@@ -1114,6 +1121,14 @@
         markDirty();
       };
       document.getElementById("heatValue").textContent = state.heat + "/100";
+      const participationRange = document.getElementById("participationRange");
+      participationRange.value = String(Math.round(state.participationRate * 100));
+      participationRange.oninput = e => {
+        state.participationRate = Number(e.target.value) / 100;
+        document.getElementById("participationValue").textContent = Math.round(state.participationRate * 100) + "%";
+        markDirty();
+      };
+      document.getElementById("participationValue").textContent = Math.round(state.participationRate * 100) + "%";
       document.getElementById("previewText").textContent = state.previewText || "...";
       renderMoodPanel();
     }

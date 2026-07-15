@@ -70,6 +70,7 @@ class AppConfig:
     default_bio: str
     default_toxicity_level: int
     default_active_mode: str
+    adaptive_humor_defaults: Dict[str, Any]
     funny_scan_defaults: Dict[str, Any]
     funny_scan_lexicon: Dict[str, Any]
     mood_events_catalog: Dict[str, Any]
@@ -173,6 +174,23 @@ def _normalize_funny_scan_defaults(raw: Any) -> Dict[str, Any]:
     }
 
 
+def _normalize_adaptive_humor_defaults(raw: Any) -> Dict[str, Any]:
+    data = raw if isinstance(raw, dict) else {}
+    return {
+        "enabled": bool(data.get("enabled", True)),
+        "auto_learn": bool(data.get("auto_learn", True)),
+        "live_snipe_enabled": bool(data.get("live_snipe_enabled", True)),
+        "participation_rate": max(0.0, min(1.0, float(data.get("participation_rate", 0.30)))),
+        "min_human_messages_between_replies": max(1, int(data.get("min_human_messages_between_replies", 2))),
+        "dialogue_window_minutes": max(1, int(data.get("dialogue_window_minutes", 10))),
+        "snipe_cooldown_minutes": max(1, int(data.get("snipe_cooldown_minutes", 30))),
+        "min_human_messages": max(1, int(data.get("min_human_messages", 12))),
+        "opportunity_threshold": max(0, min(100, int(data.get("opportunity_threshold", 85)))),
+        "candidate_threshold": max(0, min(100, int(data.get("candidate_threshold", 85)))),
+        "candidate_count": max(1, min(5, int(data.get("candidate_count", 3)))),
+    }
+
+
 def _normalize_funny_scan_lexicon(raw: Any) -> Dict[str, Any]:
     data = raw if isinstance(raw, dict) else {}
     reaction_weights_raw = data.get("reaction_weights") if isinstance(data.get("reaction_weights"), dict) else {}
@@ -186,7 +204,7 @@ def _normalize_funny_scan_lexicon(raw: Any) -> Dict[str, Any]:
         "toxicity_markers": _coerce_str_list(data.get("toxicity_markers"))
         or ["сук", "бля", "хуй", "пизд", "еб", "идиот", "дебил"],
         "noise_markers": _coerce_str_list(data.get("noise_markers")) or ["кринж", "жесть", "мда"],
-        "heart_emojis": _coerce_str_list(data.get("heart_emojis")) or ["❤", "❤️", "💘", "💖", "💗", "💓", "💞", "💕"],
+        "heart_emojis": _coerce_str_list(data.get("heart_emojis")) or ["❤", "❤️"],
         "laugh_emojis": _coerce_str_list(data.get("laugh_emojis")) or ["😂", "🤣", "😹", "😆"],
         "extra_laugh_markers": _coerce_str_list(data.get("extra_laugh_markers")) or ["сука", "мука", "бля", "лол", "лоо"],
         "reaction_weights": {
@@ -280,6 +298,7 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
     probs = runtime.get("probabilities") or {}
     models = runtime.get("models") or {}
     funny_scan_defaults = _normalize_funny_scan_defaults(runtime.get("funny_scan"))
+    adaptive_humor_defaults = _normalize_adaptive_humor_defaults(runtime.get("adaptive_humor"))
     funny_scan_lexicon = _normalize_funny_scan_lexicon(lexicon.get("funny_scan_lexicon"))
     mood_events_catalog = _normalize_mood_events_catalog(mood_events_raw)
 
@@ -353,6 +372,7 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
         default_bio=str(defaults.get("bio", "")),
         default_toxicity_level=int(defaults.get("toxicity_level", 45)),
         default_active_mode=active_mode,
+        adaptive_humor_defaults=adaptive_humor_defaults,
         funny_scan_defaults=funny_scan_defaults,
         funny_scan_lexicon=funny_scan_lexicon,
         mood_events_catalog=mood_events_catalog,

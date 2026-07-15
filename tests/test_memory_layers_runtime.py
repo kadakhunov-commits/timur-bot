@@ -69,7 +69,7 @@ def test_default_memory_contains_life_config() -> None:
     memory = runtime.default_memory()
     life = memory["config"]["life"]
     assert life["enabled"] is True
-    assert life["daily_target"] == 3
+    assert life["daily_target"] == 1
     assert life["timezone"] == "Europe/Moscow"
     assert isinstance(life.get("lore_arcs"), list)
     assert int(life.get("last_lore_arc_id", 0)) == 0
@@ -159,12 +159,36 @@ def test_story_request_detection() -> None:
 
 def test_generate_daily_slots_uses_daily_target_outside_quiet_hours() -> None:
     life = runtime._default_life_config()
-    life["daily_target"] = 3
+    life["daily_target"] = 1
     slots = runtime._generate_daily_slots(life, day_seed=20260424)
-    assert len(slots) == 3
+    assert len(slots) == 1
     quiet_start = runtime._parse_hhmm_to_minute("00:00", 0)
     quiet_end = runtime._parse_hhmm_to_minute("10:00", 600)
     assert all(not runtime._is_quiet_minute(s, quiet_start, quiet_end) for s in slots)
+
+
+def test_ordinary_participation_uses_configured_activity_after_gap() -> None:
+    memory = runtime.default_memory()
+    memory["config"]["adaptive_humor"]["participation_rate"] = 0.3
+    chat = runtime.get_chat_mem(memory, 55)
+    runtime.note_human_message(chat)
+    runtime.note_human_message(chat)
+
+    class DummyUser:
+        id = 7
+
+    class DummyMessage:
+        chat_id = 55
+        text = "вот это у него план"
+        caption = None
+        from_user = DummyUser()
+        reply_to_message = None
+
+    with patch.object(runtime.random, "random", return_value=0.2):
+        decision = runtime.should_reply_decision(memory, DummyMessage(), bot_id=999)
+
+    assert decision.should_reply is True
+    assert decision.reason == "обычное участие в беседе"
 
 
 def test_processed_event_cache_marks_duplicate() -> None:

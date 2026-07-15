@@ -16,12 +16,13 @@ def test_apply_miniapp_admin_config_updates_memory(monkeypatch: pytest.MonkeyPat
     text = runtime.apply_miniapp_admin_config(
         memory,
         chat_id=123,
-        payload={"chat_id": 123, "active_mode": "chill", "heat": 27},
+        payload={"chat_id": 123, "active_mode": "chill", "heat": 27, "participation_rate": 0.45},
     )
 
     assert "режим: chill" in text
     assert runtime.get_active_mode(memory) == "chill"
     assert runtime.get_toxicity_level(memory) == 27
+    assert memory["config"]["adaptive_humor"]["participation_rate"] == 0.45
 
 
 def test_apply_miniapp_admin_config_rejects_unknown_mode(monkeypatch: pytest.MonkeyPatch) -> None:

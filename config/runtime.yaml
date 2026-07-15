@@ -32,6 +32,19 @@ probabilities:
   photo_random_reply_chance: 0.22
   voice_reply_chance: 0.015
 
+adaptive_humor:
+  enabled: true
+  auto_learn: true
+  live_snipe_enabled: true
+  participation_rate: 0.30
+  min_human_messages_between_replies: 2
+  dialogue_window_minutes: 10
+  snipe_cooldown_minutes: 30
+  min_human_messages: 12
+  opportunity_threshold: 85
+  candidate_threshold: 85
+  candidate_count: 3
+
 funny_scan:
   enabled: false
   gluboko_chat_id: 0

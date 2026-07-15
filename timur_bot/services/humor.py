@@ -13,25 +13,13 @@ HUMOR_MODES = (
     "parody",
     "serious",
 )
-FUNNY_REACTIONS = {"❤", "❤️", "💘", "💖", "💗", "💓", "💞", "💕", "🔥"}
+FUNNY_REACTIONS = {"❤", "❤️"}
 UNFUNNY_REACTIONS = {"💩", "👎"}
 FUNNY_TEXT = {"лол", "lol", "ахах", "ахаха", "хаха", "пхаха", "ору", "ор"}
 UNFUNNY_TEXT = {"несмешно", "не смешно", "кринж", "хуйня", "не смешной"}
-SERIOUS_MARKERS = {
-    "умер",
-    "смерть",
-    "болею",
-    "болезнь",
-    "больница",
-    "плохо",
-    "депресс",
-    "суиц",
-    "похорон",
-    "тревог",
-}
 MAX_JOKE_BANK = 180
 MAX_FUNNY_EXAMPLES = 240
-MAX_BOT_OUTPUTS = 80
+MAX_BOT_OUTPUTS = 200
 MAX_FEEDBACK_LOG = 120
 CALLBACK_COOLDOWN_USES = 3
 BLOCKED_CALLBACK_PATTERNS = (
@@ -75,6 +63,7 @@ def ensure_humor_schema(chat_mem: Dict[str, Any]) -> Dict[str, Any]:
     for mode in HUMOR_MODES:
         modes.setdefault(mode, {"uses": 0, "funny": 0, "unfunny": 0})
     stats.setdefault("feedback", [])
+    stats.setdefault("scene_metrics", {"learned": 0, "provisional": 0})
     return layers
 
 
@@ -130,6 +119,12 @@ def add_funny_example(
     tags: Optional[List[str]] = None,
     source: str = "curated",
     weight: float = 2.0,
+    after_context: Optional[List[Dict[str, str]]] = None,
+    mechanism: str = "",
+    signals: Optional[List[str]] = None,
+    confidence: float = 0.0,
+    source_message_id: int = 0,
+    provisional: bool = False,
 ) -> Optional[Dict[str, Any]]:
     layers = ensure_humor_schema(chat_mem)
     clean_reply = re.sub(r"\s+", " ", (good_reply or "").strip())
@@ -149,6 +144,10 @@ def add_funny_example(
     for example in examples:
         if example.get("id") == example_id:
             example["weight"] = float(example.get("weight", 1.0)) + weight
+            example["confidence"] = max(float(example.get("confidence", 0.0)), float(confidence))
+            example["last_reinforced_ts"] = datetime.utcnow().isoformat()
+            example["signals"] = list(dict.fromkeys([*example.get("signals", []), *(signals or [])]))[:12]
+            example["provisional"] = bool(example.get("provisional", False) and provisional)
             return example
     example = {
         "id": example_id,
@@ -158,11 +157,59 @@ def add_funny_example(
         "source": source,
         "weight": float(weight),
         "uses": 0,
+        "after_context": [
+            {
+                "author": str(item.get("author", ""))[:80],
+                "text": re.sub(r"\s+", " ", str(item.get("text", ""))).strip()[:220],
+            }
+            for item in (after_context or [])[:4]
+            if str(item.get("text", "")).strip()
+        ],
+        "mechanism": str(mechanism or "")[:80],
+        "signals": [str(item)[:60] for item in (signals or [])][:12],
+        "confidence": max(0.0, min(1.0, float(confidence))),
+        "source_message_id": int(source_message_id or 0),
+        "provisional": bool(provisional),
+        "created_ts": datetime.utcnow().isoformat(),
+        "last_reinforced_ts": datetime.utcnow().isoformat(),
     }
     examples.append(example)
     examples.sort(key=lambda x: (-float(x.get("weight", 0.0)), str(x.get("good_reply", ""))))
     if len(examples) > MAX_FUNNY_EXAMPLES:
         del examples[MAX_FUNNY_EXAMPLES:]
+    return example
+
+
+def learn_funny_scene(
+    chat_mem: Dict[str, Any],
+    *,
+    context: List[Dict[str, str]],
+    punchline: str,
+    after_context: List[Dict[str, str]],
+    signals: List[str],
+    mechanism: str = "",
+    confidence: float = 0.0,
+    source_message_id: int = 0,
+) -> Optional[Dict[str, Any]]:
+    """Store a chat comedy scene; one adjacent laugh stays provisional."""
+    confirmed = any(signal in {"heart", "direct_laugh"} for signal in signals)
+    example = add_funny_example(
+        chat_mem,
+        context=context,
+        good_reply=punchline,
+        after_context=after_context,
+        mechanism=mechanism,
+        signals=signals,
+        source="live_observed",
+        weight=3.0 if confirmed else 1.0,
+        confidence=confidence or (0.9 if confirmed else 0.55),
+        source_message_id=source_message_id,
+        provisional=not confirmed,
+    )
+    if example:
+        metrics = ensure_humor_schema(chat_mem).setdefault("humor_stats", {}).setdefault("scene_metrics", {})
+        key = "learned" if confirmed else "provisional"
+        metrics[key] = int(metrics.get(key, 0)) + 1
     return example
 
 
@@ -195,13 +242,23 @@ def classify_reactions(reactions: Iterable[Any]) -> Optional[str]:
     return None
 
 
-def looks_serious(text: str) -> bool:
-    low = (text or "").lower()
-    return any(marker in low for marker in SERIOUS_MARKERS)
-
-
 def _tokens(text: str) -> set[str]:
     return {t.lower() for t in re.findall(r"[a-zA-Zа-яА-ЯёЁ0-9]{3,}", text or "")}
+
+
+def infer_scene_mechanism(context: Iterable[Dict[str, Any]], punchline: str) -> str:
+    """Cheap, explainable label for a learned scene; generation still sees the scene itself."""
+    before = " ".join(str(item.get("text", "")) for item in context).lower()
+    clean = (punchline or "").lower()
+    if any(token in clean for token in ("как будто", "будто", "официально", "система")):
+        return "сухое переосмысление"
+    if len(clean) <= 45 and _tokens(clean) & _tokens(before):
+        return "короткий callback"
+    if any(token in clean for token in ("квест", "npc", "инструкция", "патч")):
+        return "абсурдная рамка"
+    if len(clean) <= 70:
+        return "сухая добивка"
+    return "контекстный поворот"
 
 
 def _mode_score(stats: Dict[str, Any], mode: str) -> float:
@@ -217,7 +274,12 @@ def select_joke_bit(chat_mem: Dict[str, Any], text: str) -> Optional[Dict[str, A
     bank = layers.get("joke_bank", [])
     if not bank:
         return None
-    bank = [bit for bit in bank if not _is_blocked_callback_text(str(bit.get("text", "")))]
+    bank = [
+        bit
+        for bit in bank
+        if not _is_blocked_callback_text(str(bit.get("text", "")))
+        and ("curated" not in str(bit.get("source", "")) or "callback" in set(bit.get("tags") or []))
+    ]
     if not bank:
         return None
 
@@ -275,30 +337,26 @@ def choose_humor_plan(
     layers = ensure_humor_schema(chat_mem)
     stats = layers.get("humor_stats", {})
 
-    if looks_serious(text):
-        mode = "serious"
-    else:
-        bit = select_joke_bit(chat_mem, text)
-        roast_requested = _wants_roast(text)
-        candidates = {
-            "deadpan": 1.2 + _mode_score(stats, "deadpan"),
-            "absurd_literal": 0.9 + _mode_score(stats, "absurd_literal"),
-            "roast_user": (0.5 if roast_requested else -0.3) + _mode_score(stats, "roast_user"),
-            "parody": 0.4 + _mode_score(stats, "parody"),
-            "callback": (0.75 if bit else 0.1) + _mode_score(stats, "callback"),
-        }
-        if "?" in text:
-            candidates["deadpan"] += 0.4
-        if len(text or "") < 35:
-            candidates["absurd_literal"] += 0.25
-        if bit and _tokens(text).intersection(_tokens(str(bit.get("text", "")))):
-            candidates["callback"] += 0.6
-        mode = max(candidates.items(), key=lambda x: (x[1], x[0]))[0]
-        if mode == "roast_user" and not roast_requested:
-            mode = "deadpan"
+    bit = select_joke_bit(chat_mem, text)
+    roast_requested = _wants_roast(text)
+    candidates = {
+        "deadpan": 1.2 + _mode_score(stats, "deadpan"),
+        "absurd_literal": 0.9 + _mode_score(stats, "absurd_literal"),
+        "roast_user": (0.5 if roast_requested else -0.3) + _mode_score(stats, "roast_user"),
+        "parody": 0.4 + _mode_score(stats, "parody"),
+        "callback": (0.75 if bit else 0.1) + _mode_score(stats, "callback"),
+    }
+    if "?" in text:
+        candidates["deadpan"] += 0.4
+    if len(text or "") < 35:
+        candidates["absurd_literal"] += 0.25
+    if bit and _tokens(text).intersection(_tokens(str(bit.get("text", "")))):
+        candidates["callback"] += 0.6
+    mode = max(candidates.items(), key=lambda x: (x[1], x[0]))[0]
+    if mode == "roast_user" and not roast_requested:
+        mode = "deadpan"
 
-    bit = None if mode == "serious" else select_joke_bit(chat_mem, text)
-    examples = [] if mode == "serious" else select_funny_examples(chat_mem, text, limit=2)
+    examples = select_funny_examples(chat_mem, text, limit=2)
     instruction_by_mode = {
         "deadpan": "сухая короткая добивка, будто это очевидный провал собеседника",
         "callback": "локальная отсылка к выбранному bit/fact, без объяснения шутки",

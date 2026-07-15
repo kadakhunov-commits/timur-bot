@@ -86,7 +86,26 @@ from timur_bot.services.humor import (
     ensure_humor_schema,
     format_bits,
     format_humor_prompt,
+    infer_scene_mechanism,
+    learn_funny_scene,
     record_bot_output,
+)
+from timur_bot.services.conversation_policy import (
+    activate_dialogue,
+    continue_dialogue,
+    mark_reply_sent,
+    mark_snipe_sent,
+    note_human_message,
+    ordinary_reply_allowed,
+    snipe_allowed,
+)
+from timur_bot.services.adaptive_humor import (
+    candidates_messages,
+    judge_messages,
+    opportunity_messages,
+    parse_candidates,
+    parse_judgement,
+    parse_opportunity,
 )
 from timur_bot.services.fact_memory import (
     build_fact_record,
@@ -185,6 +204,7 @@ PROFANITY_MARKERS = APP_CONFIG.profanity_markers
 ARCHETYPE_LEXICON = APP_CONFIG.archetype_lexicon
 PERSONA_MODES = APP_CONFIG.persona_modes
 FUNNY_SCAN_RUNTIME_DEFAULTS = APP_CONFIG.funny_scan_defaults
+ADAPTIVE_HUMOR_DEFAULTS = APP_CONFIG.adaptive_humor_defaults
 FUNNY_SCAN_LEXICON = APP_CONFIG.funny_scan_lexicon
 MOOD_EVENTS_CATALOG = APP_CONFIG.mood_events_catalog
 MOOD_DEFAULTS = (
@@ -279,7 +299,7 @@ def _default_life_config() -> Dict[str, Any]:
     return {
         "enabled": True,
         "timezone": DEFAULT_LIFE_TIMEZONE,
-        "daily_target": 3,
+        "daily_target": 1,
         "quiet_hours": {"start": "00:00", "end": "10:00"},
         "cooldown_per_chat_minutes": 360,
         "slots_date": "",
@@ -327,7 +347,11 @@ def _ensure_life_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
                 for p_key, p_value in value.items():
                     current.setdefault(p_key, p_value)
             continue
-        life.setdefault(key, value)
+        if key == "daily_target":
+            # Migrate older saved memories: the lore beat is a once-a-day signature.
+            life[key] = value
+        else:
+            life.setdefault(key, value)
     _ensure_lore_arcs_schema(life)
     return life
 
@@ -424,6 +448,37 @@ def _ensure_funny_scan_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     )
 
 
+def _adaptive_humor_settings(memory: Dict[str, Any]) -> Dict[str, Any]:
+    cfg = memory.setdefault("config", {})
+    settings = cfg.setdefault("adaptive_humor", {})
+    for key, value in ADAPTIVE_HUMOR_DEFAULTS.items():
+        settings.setdefault(key, value)
+    settings["enabled"] = bool(settings.get("enabled", True))
+    settings["auto_learn"] = bool(settings.get("auto_learn", True))
+    settings["live_snipe_enabled"] = bool(settings.get("live_snipe_enabled", True))
+    for key, low, high in (
+        ("participation_rate", 0, 1),
+        ("min_human_messages_between_replies", 1, 50),
+        ("dialogue_window_minutes", 1, 60),
+        ("snipe_cooldown_minutes", 1, 24 * 60),
+        ("min_human_messages", 1, 200),
+        ("opportunity_threshold", 0, 100),
+        ("candidate_threshold", 0, 100),
+        ("candidate_count", 1, 5),
+    ):
+        try:
+            parsed = float(settings.get(key, ADAPTIVE_HUMOR_DEFAULTS[key])) if key == "participation_rate" else int(settings.get(key, ADAPTIVE_HUMOR_DEFAULTS[key]))
+        except (TypeError, ValueError):
+            parsed = float(ADAPTIVE_HUMOR_DEFAULTS[key]) if key == "participation_rate" else int(ADAPTIVE_HUMOR_DEFAULTS[key])
+        settings[key] = max(low, min(high, parsed))
+    return settings
+
+
+def _is_main_chat(memory: Dict[str, Any], chat_id: int) -> bool:
+    settings = _ensure_funny_scan_config(memory.setdefault("config", {}))
+    return int(settings.get("main_chat_id", 0) or 0) == int(chat_id)
+
+
 def default_memory() -> Dict[str, Any]:
     default_life = _default_life_config()
     default_mood = _default_mood_config()
@@ -443,6 +498,7 @@ def default_memory() -> Dict[str, Any]:
             "life": default_life,
             "mood": default_mood,
             "funny_scan": _ensure_funny_scan_config({}).copy(),
+            "adaptive_humor": dict(ADAPTIVE_HUMOR_DEFAULTS),
         },
     }
     ensure_self_profile(memory)
@@ -2176,8 +2232,8 @@ def _apply_lore_payload_to_arc(
         else:
             story_text = "есть тема, позже разверну"
 
-    if proactive and hook_question:
-        story_text = f"{story_text}\n{hook_question}"
+    if proactive:
+        story_text = f"{story_text}\nу вас как с этим обычно"
 
     clean = enforce_reply_guardrails(_clean_story_line(story_text, max_chars=300))
     beat["disclosure"] = disclosure
@@ -2224,9 +2280,8 @@ def _fallback_lore_story_text(memory: Dict[str, Any], chat_id: int, event: Dict[
                 hint_base = cover_story if privacy >= 2 and cover_story else text
                 text = _clean_story_line(hint_base.split(".")[0], max_chars=130)
                 text = f"{text} пока без деталей" if text else "есть тема, позже разверну"
-            hook = _clean_story_line(beat.get("hook_question", ""), max_chars=120)
-            if proactive and hook:
-                text = f"{text}\n{hook}"
+            if proactive:
+                text = f"{text}\nу вас как с этим обычно"
             clean = enforce_reply_guardrails(text)
             if clean:
                 return clean
@@ -2539,6 +2594,7 @@ def update_memory_with_message(memory: Dict[str, Any], message: Message) -> None
         _update_association_graph(chat_mem, user_id=user_id, message=message, text=text, user_keywords=keywords)
 
         if not user_is_bot:
+            note_human_message(chat_mem)
             # Learn what friends say about themselves and remember vivid moments,
             # so тимур builds a real dossier on each participant (Phase 1).
             learn_participant_facts(
@@ -2697,7 +2753,6 @@ def is_voice_codeword(text: str) -> bool:
 
 
 def should_reply_decision(memory: Dict[str, Any], message: Message, bot_id: int) -> ReplyDecision:
-    del memory
     if not message.text and not message.caption:
         return ReplyDecision(False, "нет текста или подписи")
 
@@ -2721,22 +2776,28 @@ def should_reply_decision(memory: Dict[str, Any], message: Message, bot_id: int)
         return ReplyDecision(True, "пользователь спрашивает про состояние Тимура")
 
     if looks_like_address_to_bot(text):
-        chance = random.uniform(0.75, 1.0)
-        roll = random.random()
-        return ReplyDecision(
-            roll < chance,
-            "сообщение похоже на обращение к Тимуру",
-            threshold=chance,
-            roll=roll,
-        )
+        return ReplyDecision(True, "сообщение похоже на обращение к Тимуру")
 
-    roll = random.random()
-    return ReplyDecision(
-        roll < BASE_REPLY_CHANCE,
-        "обычный случай, применён базовый шанс ответа",
-        threshold=BASE_REPLY_CHANCE,
-        roll=roll,
-    )
+    settings = _adaptive_humor_settings(memory)
+    chat_mem = get_chat_mem(memory, message.chat_id)
+    if settings.get("enabled") and continue_dialogue(
+        chat_mem,
+        user_id=tg_user.id,
+        text=text,
+        window_minutes=int(settings["dialogue_window_minutes"]),
+    ):
+        return ReplyDecision(True, "сообщение продолжает активный диалог с Тимуром")
+
+    if settings.get("enabled") and ordinary_reply_allowed(
+        chat_mem,
+        min_human_messages=int(settings["min_human_messages_between_replies"]),
+    ):
+        roll = random.random()
+        threshold = float(settings["participation_rate"])
+        if roll < threshold:
+            return ReplyDecision(True, "обычное участие в беседе", threshold=threshold, roll=roll)
+
+    return ReplyDecision(False, "обычный случай: жду следующий ход или сильный момент")
 
 
 def should_reply(memory: Dict[str, Any], message: Message, bot_id: int) -> bool:
@@ -3119,6 +3180,14 @@ def build_chat_messages(
     # Subscription gating: tier decides how deep тимур's memory may reach and
     # which persona modes are unlocked for this chat.
     features = get_chat_features(message.chat_id)
+    if _is_main_chat(memory, message.chat_id):
+        features = {
+            **features,
+            "memory_depth": feature_gate.MEMORY_FULL,
+            "friend_dossiers": True,
+            "episodic_memory": True,
+            "persona_modes": list(PERSONA_MODES),
+        }
     active_mode = get_active_mode(memory)
     effective_mode = feature_gate.gate_mode(features, active_mode)
     mode_prompt = (
@@ -3259,6 +3328,89 @@ async def call_openai_with_params(messages: List[Dict[str, Any]], *, max_tokens:
     except Exception as e:
         logger.error("Ошибка OpenAI при генерации summary: %s", e)
         return ""
+
+
+def _adaptive_metric(chat_mem: Dict[str, Any], key: str) -> None:
+    state = chat_mem.setdefault("memory_layers", {}).setdefault("adaptive_humor", {})
+    metrics = state.setdefault("metrics", {})
+    metrics[key] = int(metrics.get(key, 0)) + 1
+
+
+def _is_repeated_snipe(chat_mem: Dict[str, Any], text: str) -> bool:
+    clean = normalize_token(text)
+    if not clean:
+        return True
+    outputs = ensure_humor_schema(chat_mem).get("bot_outputs", [])[-50:]
+    return any(normalize_token(str(item.get("text", ""))) == clean for item in outputs)
+
+
+async def _maybe_send_adaptive_snipe(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    memory: Dict[str, Any],
+) -> bool:
+    message = update.effective_message
+    if not message:
+        return False
+    settings = _adaptive_humor_settings(memory)
+    chat_mem = get_chat_mem(memory, message.chat_id)
+    if not settings.get("enabled") or not settings.get("live_snipe_enabled"):
+        _adaptive_metric(chat_mem, "disabled")
+        return False
+    if not snipe_allowed(
+        chat_mem,
+        cooldown_minutes=int(settings["snipe_cooldown_minutes"]),
+        min_human_messages=int(settings["min_human_messages"]),
+    ):
+        _adaptive_metric(chat_mem, "cooldown_abstain")
+        return False
+
+    history = list(chat_mem.get("history", []))[-8:]
+    _adaptive_metric(chat_mem, "opportunities_checked")
+    opportunity_raw = await _run_with_typing(
+        context,
+        message.chat_id,
+        call_openai_with_params(opportunity_messages(history), max_tokens=80, temperature=0.0),
+    )
+    opportunity_score = parse_opportunity(opportunity_raw)
+    if opportunity_score < int(settings["opportunity_threshold"]):
+        _adaptive_metric(chat_mem, "quality_abstain")
+        logger.info("adaptive snipe skipped: opportunity=%s", opportunity_score)
+        return False
+
+    plan = build_humor_plan(memory, message)
+    generated_raw = await _run_with_typing(
+        context,
+        message.chat_id,
+        call_openai_with_params(
+            candidates_messages(history, format_humor_prompt(plan), count=int(settings["candidate_count"])),
+            max_tokens=260,
+            temperature=0.9,
+        ),
+    )
+    candidates = parse_candidates(generated_raw, limit=int(settings["candidate_count"]))
+    if not candidates:
+        _adaptive_metric(chat_mem, "generation_abstain")
+        return False
+    judgement_raw = await _run_with_typing(
+        context,
+        message.chat_id,
+        call_openai_with_params(judge_messages(history, candidates), max_tokens=100, temperature=0.0),
+    )
+    candidate_score, winner = parse_judgement(judgement_raw)
+    if (
+        candidate_score < int(settings["candidate_threshold"])
+        or winner not in candidates
+        or _is_repeated_snipe(chat_mem, winner)
+    ):
+        _adaptive_metric(chat_mem, "judge_abstain")
+        logger.info("adaptive snipe skipped: opportunity=%s candidate=%s", opportunity_score, candidate_score)
+        return False
+
+    _adaptive_metric(chat_mem, "sent")
+    logger.info("adaptive snipe sent: opportunity=%s candidate=%s", opportunity_score, candidate_score)
+    await send_reply_with_style(update, context, memory, winner, humor_plan=plan, is_snipe=True)
+    return True
 
 
 async def call_openai_vision(
@@ -3413,9 +3565,8 @@ async def _emit_proactive_story(application: Any) -> None:
     privacy = int(event.get("privacy_level", 1)) if event else 1
     proactive_bias = _clamp_float(event.get("proactive_share_bias", 0.35) if event else 0.35, 0.0, 1.0, 0.35)
     event_share_score = (100.0 - guard) * 0.45 + openness * 0.35 + max(0, 3 - privacy) * 8.0
-    should_share_event_now = bool(rolled_event) and (random.random() < proactive_bias) and (event_share_score >= 42.0)
-
-    if not due and not should_share_event_now:
+    del rolled_event, proactive_bias, event_share_score
+    if not due:
         if mood_changed:
             save_memory(memory)
         return
@@ -3427,13 +3578,11 @@ async def _emit_proactive_story(application: Any) -> None:
             save_memory(memory)
         return
 
-    await application.bot.send_message(chat_id=chat_id, text=text)
-    if due:
-        slot = due[0]
-        sent_slots.append(slot)
-        life["sent_slots"] = sorted(set(sent_slots))
-    else:
-        slot = -1
+    sent = await application.bot.send_message(chat_id=chat_id, text=text)
+    slot = due[0]
+    sent_slots.append(slot)
+    life["sent_slots"] = sorted(set(sent_slots))
+    record_bot_output(get_chat_mem(memory, chat_id), message_id=sent.message_id, text=text, plan=None)
     chat_last_emit = life.setdefault("chat_last_emit", {})
     if not isinstance(chat_last_emit, dict):
         chat_last_emit = {}
@@ -3441,10 +3590,9 @@ async def _emit_proactive_story(application: Any) -> None:
     chat_last_emit[str(chat_id)] = now_utc.isoformat()
     life["last_emit_ts"] = now_utc.isoformat()
     life["last_emit_chat_id"] = chat_id
-    source = "proactive_event" if should_share_event_now else "proactive"
-    _append_story_log(memory, text, source=source, chat_id=chat_id)
+    _append_story_log(memory, text, source="proactive", chat_id=chat_id)
     save_memory(memory)
-    slot_label = _minute_to_hhmm(slot) if slot >= 0 else "event"
+    slot_label = _minute_to_hhmm(slot)
     logger.info("Проактивная история отправлена: chat_id=%s slot=%s", chat_id, slot_label)
 
 
@@ -3886,6 +4034,62 @@ async def _handle_text_feedback(update: Update, memory: Dict[str, Any]) -> bool:
     return True
 
 
+def _learn_scene_from_history(
+    chat_mem: Dict[str, Any],
+    *,
+    anchor_message_id: int,
+    signals: List[str],
+) -> None:
+    history = list(chat_mem.get("history", []))
+    index = next((idx for idx, row in enumerate(history) if int(row.get("message_id", 0) or 0) == int(anchor_message_id)), -1)
+    if index < 0:
+        return
+    anchor = history[index]
+    punchline = str(anchor.get("text", "")).strip()
+    if not punchline or bool(anchor.get("is_bot", False)):
+        return
+    context = [
+        {"author": str(row.get("name") or row.get("username") or row.get("user_id") or "кто-то"), "text": str(row.get("text", ""))}
+        for row in history[max(0, index - 6) : index]
+        if str(row.get("text", "")).strip()
+    ]
+    after_context = [
+        {"author": str(row.get("name") or row.get("username") or row.get("user_id") or "кто-то"), "text": str(row.get("text", ""))}
+        for row in history[index + 1 : index + 5]
+        if str(row.get("text", "")).strip()
+    ]
+    learn_funny_scene(
+        chat_mem,
+        context=context,
+        punchline=punchline,
+        after_context=after_context,
+        signals=signals,
+        mechanism=infer_scene_mechanism(context, punchline),
+        source_message_id=int(anchor_message_id),
+    )
+
+
+def _observe_chat_humor(memory: Dict[str, Any], message: Message) -> None:
+    """Learn from chat laughs without making the bot talk more often."""
+    if not _adaptive_humor_settings(memory).get("auto_learn", True):
+        return
+    text = _extract_message_text(message)
+    if classify_text_feedback(text) != "funny":
+        return
+    chat_mem = get_chat_mem(memory, message.chat_id)
+    if message.reply_to_message:
+        target_id = int(message.reply_to_message.message_id or 0)
+        _learn_scene_from_history(chat_mem, anchor_message_id=target_id, signals=["direct_laugh"])
+        return
+    history = list(chat_mem.get("history", []))
+    if len(history) < 2:
+        return
+    anchor = history[-2]
+    author_id = message.from_user.id if message.from_user else 0
+    if int(anchor.get("user_id", 0) or 0) != int(author_id):
+        _learn_scene_from_history(chat_mem, anchor_message_id=int(anchor.get("message_id", 0) or 0), signals=["adjacent_laugh"])
+
+
 async def _handle_mood_probe(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -4008,6 +4212,8 @@ async def reaction_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     memory = load_memory()
     chat_mem = get_chat_mem(memory, reaction.chat.id)
     user_id = reaction.user.id if reaction.user else None
+    if rating == "funny" and _adaptive_humor_settings(memory).get("auto_learn", True):
+        _learn_scene_from_history(chat_mem, anchor_message_id=reaction.message_id, signals=["heart"])
     ok = apply_feedback(
         chat_mem,
         message_id=reaction.message_id,
@@ -4015,9 +4221,9 @@ async def reaction_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         source="reaction",
         user_id=user_id,
     )
-    if ok:
+    if ok or rating == "funny":
         save_memory(memory)
-        logger.info("Reaction feedback применен: rating=%s message_id=%s", rating, reaction.message_id)
+        logger.info("Reaction feedback/learning применен: rating=%s message_id=%s", rating, reaction.message_id)
     else:
         logger.info("Reaction feedback пропущен: message_id=%s не найден в bot_outputs", reaction.message_id)
 
@@ -4033,6 +4239,7 @@ async def send_reply_with_style(
     reply_text: str,
     force_voice: bool = False,
     humor_plan: Dict[str, Any] | None = None,
+    is_snipe: bool = False,
 ) -> None:
     message = update.effective_message
 
@@ -4050,7 +4257,7 @@ async def send_reply_with_style(
     try:
         features = get_chat_features(message.chat_id)
         used_today = billing.bot_replies_today(message.chat_id)
-        if not feature_gate.within_daily_reply_cap(features, used_today):
+        if not _is_main_chat(memory, message.chat_id) and not feature_gate.within_daily_reply_cap(features, used_today):
             logger.info("Дневной лимит ответов исчерпан для чата %s (tier=%s)", message.chat_id, features.get("tier"))
             return
         billing.register_bot_reply(message.chat_id)
@@ -4098,6 +4305,13 @@ async def send_reply_with_style(
                     await message.reply_text(watermark_text)
                 increase_voice_counters(memory, message.chat_id)
                 _store_bot_claim_memory(memory, message, fact_memory_text)
+                chat_mem = get_chat_mem(memory, message.chat_id)
+                sender = getattr(message, "from_user", None)
+                if sender:
+                    activate_dialogue(chat_mem, initiator_id=sender.id, text=_extract_message_text(message))
+                mark_reply_sent(chat_mem)
+                if is_snipe:
+                    mark_snipe_sent(chat_mem)
                 save_memory(memory)
                 logger.info("Voice reply sent in chat %s", message.chat_id)
                 return
@@ -4135,6 +4349,13 @@ async def send_reply_with_style(
         record_bot_output(chat_mem, message_id=sent.message_id, text=reply_text, plan=humor_plan)
 
     _store_bot_claim_memory(memory, message, fact_memory_text)
+    chat_mem = get_chat_mem(memory, message.chat_id)
+    sender = getattr(message, "from_user", None)
+    if sender:
+        activate_dialogue(chat_mem, initiator_id=sender.id, text=_extract_message_text(message))
+    mark_reply_sent(chat_mem)
+    if is_snipe:
+        mark_snipe_sent(chat_mem)
     save_memory(memory)
 
 
@@ -4714,6 +4935,7 @@ def build_miniapp_launch_url(memory: Dict[str, Any], chat_id: int) -> str:
         return ""
     cfg = memory.setdefault("config", {})
     mood = _ensure_mood_config(cfg)
+    adaptive_humor = _adaptive_humor_settings(memory)
     mood_chat = _ensure_mood_chat_state(mood, chat_id)
     mood_event = mood.get("current_event", {}) if isinstance(mood.get("current_event"), dict) else {}
     members = _miniapp_members(memory, chat_id)
@@ -4722,6 +4944,7 @@ def build_miniapp_launch_url(memory: Dict[str, Any], chat_id: int) -> str:
         "settings": {
             "activeMode": get_active_mode(memory),
             "heat": get_toxicity_level(memory),
+            "participationRate": float(adaptive_humor["participation_rate"]),
             "previewText": PERSONA_MODES.get(get_active_mode(memory), ""),
             "personas": _miniapp_persona_cards(),
             "mood": {
@@ -4787,6 +5010,7 @@ def apply_miniapp_admin_config(memory: Dict[str, Any], chat_id: int, payload: Di
         raise ValueError("chat mismatch")
     mode = str(payload.get("active_mode") or "").strip().lower()
     heat = payload.get("heat")
+    participation_rate = payload.get("participation_rate")
     cfg = memory.setdefault("config", {})
     if mode:
         if mode not in PERSONA_MODES:
@@ -4794,11 +5018,15 @@ def apply_miniapp_admin_config(memory: Dict[str, Any], chat_id: int, payload: Di
         cfg["active_mode"] = mode
     if heat is not None:
         cfg["toxicity_level"] = max(0, min(100, int(heat)))
+    if participation_rate is not None:
+        settings = _adaptive_humor_settings(memory)
+        settings["participation_rate"] = max(0.0, min(1.0, float(participation_rate)))
     save_memory(memory)
     return (
         "mini app конфиг применен\n"
         f"режим: {get_active_mode(memory)}\n"
-        f"вредность: {get_toxicity_level(memory)}/100"
+        f"вредность: {get_toxicity_level(memory)}/100\n"
+        f"активность: {round(float(_adaptive_humor_settings(memory)['participation_rate']) * 100)}%"
     )
 
 
@@ -5916,8 +6144,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if await _handle_admin_pending_text(update, context, memory):
         return
 
-    if await _handle_text_feedback(update, memory):
-        return
+    is_feedback_message = await _handle_text_feedback(update, memory)
 
     logger.info(
         "Входящее текстовое сообщение: user_id=%s username=%s chat_id=%s текст=%s",
@@ -5938,6 +6165,11 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             return
         _mark_processed_event(chat_mem, event_key)
         update_memory_with_message(memory, message)
+        _observe_chat_humor(memory, message)
+        if is_feedback_message:
+            # A laugh/critique is training data, not an invitation to reply "лол" back.
+            save_memory(memory)
+            return
         if _apply_message_mood_impact(memory, message):
             save_memory(memory)
         _sync_mood_state(memory, allow_event_roll=True)
@@ -5966,6 +6198,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         decision = should_reply_decision(memory, message, bot_id)
         _log_reply_decision("тексту", decision)
         if not decision.should_reply:
+            await _maybe_send_adaptive_snipe(update, context, memory)
             return
 
         logger.info(

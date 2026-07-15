@@ -6,6 +6,7 @@ from timur_bot.services.humor import (
     classify_reactions,
     classify_text_feedback,
     ensure_humor_schema,
+    learn_funny_scene,
     record_bot_output,
 )
 
@@ -15,10 +16,10 @@ class DummyReaction:
         self.emoji = emoji
 
 
-def test_choose_humor_plan_uses_serious_fallback() -> None:
+def test_choose_humor_plan_keeps_humor_available_for_serious_text() -> None:
     chat = {}
     plan = choose_humor_plan(chat, text="мне очень плохо", user_id=1, user_name="A")
-    assert plan["mode"] == "serious"
+    assert plan["mode"] != "serious"
 
 
 def test_choose_humor_plan_can_select_callback_bit() -> None:
@@ -55,6 +56,29 @@ def test_feedback_classifiers() -> None:
     assert classify_reactions([DummyReaction("💩")]) == "unfunny"
 
 
+def test_live_scene_heart_confirms_and_adjacent_laugh_stays_provisional() -> None:
+    chat = {}
+    confirmed = learn_funny_scene(
+        chat,
+        context=[{"author": "A", "text": "я снова проспал"}],
+        punchline="будильник уже в профсоюзе",
+        after_context=[{"author": "B", "text": "лол"}],
+        signals=["heart"],
+        source_message_id=12,
+    )
+    provisional = learn_funny_scene(
+        chat,
+        context=[{"author": "A", "text": "пойду на пару"}],
+        punchline="легенда факультета вышла в сеть",
+        after_context=[{"author": "B", "text": "ахах"}],
+        signals=["adjacent_laugh"],
+        source_message_id=13,
+    )
+
+    assert confirmed and confirmed["provisional"] is False
+    assert provisional and provisional["provisional"] is True
+
+
 def test_humor_plan_includes_relevant_funny_example() -> None:
     chat = {}
     add_funny_example(
@@ -80,6 +104,16 @@ def test_humor_plan_skips_blocked_repeated_callback_meme() -> None:
 
     blocked_bit = plan.get("bit")
     assert not blocked_bit or blocked_bit.get("text") != "митя снес сообщения кадыра"
+
+
+def test_humor_plan_does_not_reuse_curated_reply_as_a_callback_bit() -> None:
+    chat = {}
+    add_joke_bit(chat, "готовая шутка из старого набора", source="llm_curated_example", weight=99)
+    add_joke_bit(chat, "ручной callback", source="manual", tags=["callback"], weight=1)
+
+    plan = choose_humor_plan(chat, text="готовая шутка", user_id=1, user_name="A")
+
+    assert plan["bit"]["text"] == "ручной callback"
 
 
 def test_humor_plan_avoids_roast_without_explicit_request() -> None:

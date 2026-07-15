@@ -25,6 +25,7 @@ from typing import Any, Dict, List
 # that must stay stable; a chat message can never overwrite them.
 CANON_SELF_FACTS: Dict[str, str] = {
     "name": "тимур",
+    "nature": "бот в чате дискордники",
     "age": "22",
     "city": "казань",
     "residence": "казань",
@@ -42,6 +43,7 @@ _ESTABLISHED_CONFIDENCE = 0.8
 # Render order + first-person phrasing for the identity card.
 _SELF_PHRASING: Dict[str, str] = {
     "name": "меня зовут {v}",
+    "nature": "я — {v}",
     "full_name": "полное имя — {v}",
     "surname": "моя фамилия {v}",
     "age": "мне {v}",
@@ -57,6 +59,7 @@ _SELF_PHRASING: Dict[str, str] = {
 }
 _RENDER_ORDER: List[str] = [
     "name",
+    "nature",
     "surname",
     "full_name",
     "age",
