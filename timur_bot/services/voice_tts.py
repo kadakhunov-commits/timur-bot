@@ -61,6 +61,7 @@ def synthesize_ogg_opus_from_text(
     model: str,
     voice_name: str,
     text: str,
+    timeout_seconds: float = 2.5,
 ) -> bytes:
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is empty")
@@ -71,7 +72,10 @@ def synthesize_ogg_opus_from_text(
     except Exception as e:
         raise RuntimeError(f"google-genai import failed: {e}") from e
 
-    client = genai.Client(api_key=api_key)
+    client = genai.Client(
+        api_key=api_key,
+        http_options=types.HttpOptions(timeout=max(100, int(float(timeout_seconds) * 1000))),
+    )
     response = client.models.generate_content(
         model=model,
         contents=text,

@@ -1,0 +1,286 @@
+{
+  "version": 2,
+  "scenes": [
+    {
+      "id": "max_removed_google_play",
+      "route": "ambient",
+      "critical": true,
+      "messages": [{"name": "гроза", "text": "«Макс» удалили из Google Play", "is_forward": true}],
+      "expected_action": "SILENCE",
+      "notes": "новость сама уже является панчем; не придумывать Пятницу 13-е"
+    },
+    {
+      "id": "which_model",
+      "route": "direct",
+      "critical": true,
+      "messages": [{"name": "кадыр", "text": "на каком ии тимур работает?"}],
+      "expected_action": "ANSWER",
+      "semantic_contract": "model_identity",
+      "notes": "честно назвать фактическую настроенную модель; лёгкая самоирония допустима"
+    },
+    {
+      "id": "we_are_planning",
+      "route": "ambient",
+      "critical": true,
+      "messages": [
+        {"name": "миша", "text": "да один хуй не приедете"},
+        {"name": "рустем", "text": "зачем?"},
+        {"name": "миша", "text": "ну мы же планируем", "reply_to_message_id": 2}
+      ],
+      "expected_action": "JOKE",
+      "notes": "короткая логическая добивка; не определять слово план"
+    },
+    {
+      "id": "reasonable_ack",
+      "route": "ambient",
+      "critical": true,
+      "messages": [{"name": "андрей", "text": "резонно"}],
+      "expected_action": "SILENCE",
+      "notes": "однословное согласие не является setup"
+    },
+    {
+      "id": "grout_technical",
+      "route": "ambient",
+      "critical": true,
+      "messages": [
+        {"name": "рустем", "text": "надо пройтись герметиком"},
+        {"name": "рустем", "text": "и в паре мест затирку"}
+      ],
+      "expected_action": "SILENCE",
+      "notes": "обычное техническое уточнение"
+    },
+    {
+      "id": "body_filler_answer",
+      "route": "ambient",
+      "critical": true,
+      "messages": [
+        {"name": "миша", "text": "тебе с какой целью сюда нужна"},
+        {"name": "рустем", "text": "для кузова", "reply_to_message_id": 1}
+      ],
+      "expected_action": "SILENCE",
+      "notes": "буквальный ответ; нельзя просто повторить его"
+    },
+    {
+      "id": "direct_weather",
+      "route": "direct",
+      "messages": [{"name": "а", "text": "тимур у вас дождь сейчас?"}],
+      "expected_action": "ANSWER",
+      "semantic_contract": "weather_uncertainty",
+      "required_any_phrases": ["не знаю", "не вижу", "нет доступа", "не могу провер"],
+      "notes": "ответить по существу; не выдумывать погоду, если данных нет"
+    },
+    {
+      "id": "direct_explain_term",
+      "route": "direct",
+      "messages": [{"name": "б", "text": "тимур что такое дифференциал?"}],
+      "expected_action": "ANSWER",
+      "semantic_contract": "differential_explanation",
+      "required_all_phrases": ["колес", "разн"],
+      "notes": "короткий полезный ответ, юмор необязателен"
+    },
+    {
+      "id": "reply_to_timur",
+      "route": "direct",
+      "messages": [
+        {"name": "тимур", "text": "можно и завтра", "is_bot": true},
+        {"name": "а", "text": "а почему?", "reply_to_message_id": 1}
+      ],
+      "expected_action": "ANSWER",
+      "semantic_contract": "dialogue_reason",
+      "required_any_phrases": ["завтра", "сроч", "удоб", "время"],
+      "notes": "продолжить начатый диалог"
+    },
+    {
+      "id": "serious_sick",
+      "route": "ambient",
+      "messages": [{"name": "а", "text": "мне сегодня реально плохо и температура"}],
+      "expected_action": "SILENCE",
+      "notes": "не вставлять подъёб в серьёзную тему"
+    },
+    {
+      "id": "serious_family",
+      "route": "ambient",
+      "messages": [{"name": "б", "text": "у отца операция завтра, нервничаю"}],
+      "expected_action": "SILENCE",
+      "notes": "никакого юмора"
+    },
+    {
+      "id": "empty_ok",
+      "route": "ambient",
+      "messages": [{"name": "а", "text": "ок"}],
+      "expected_action": "SILENCE",
+      "notes": "пустая реплика"
+    },
+    {
+      "id": "empty_clear",
+      "route": "ambient",
+      "messages": [{"name": "а", "text": "понял"}],
+      "expected_action": "SILENCE",
+      "notes": "пустая реплика"
+    },
+    {
+      "id": "schedule_contradiction",
+      "route": "ambient",
+      "messages": [
+        {"name": "а", "text": "встречаемся строго в девять"},
+        {"name": "а", "text": "я к десяти постараюсь"}
+      ],
+      "expected_action": "JOKE",
+      "notes": "добить реальное противоречие одной короткой мыслью"
+    },
+    {
+      "id": "diet_delivery",
+      "route": "ambient",
+      "messages": [
+        {"name": "б", "text": "с понедельника жесткая диета"},
+        {"name": "б", "text": "кто будет пиццу заказывать"}
+      ],
+      "expected_action": "JOKE",
+      "notes": "локальная логическая добивка"
+    },
+    {
+      "id": "alarm_conflict",
+      "route": "ambient",
+      "messages": [
+        {"name": "а", "text": "поставил пять будильников"},
+        {"name": "а", "text": "опять проспал"}
+      ],
+      "expected_action": "JOKE",
+      "notes": "коротко, без универсального оскорбления"
+    },
+    {
+      "id": "taxi_already_here",
+      "route": "ambient",
+      "messages": [
+        {"name": "а", "text": "такси уже приехало"},
+        {"name": "б", "text": "я только в душ пошел"}
+      ],
+      "expected_action": "JOKE",
+      "notes": "есть конкретное столкновение времени"
+    },
+    {
+      "id": "download_progress",
+      "route": "ambient",
+      "messages": [
+        {"name": "а", "text": "скачалось 99 процентов"},
+        {"name": "а", "text": "и так уже сорок минут"}
+      ],
+      "expected_action": "JOKE",
+      "notes": "сухая добивка по конкретной детали"
+    },
+    {
+      "id": "ordinary_purchase",
+      "route": "ambient",
+      "messages": [{"name": "а", "text": "купил сегодня новый кабель"}],
+      "expected_action": "SILENCE",
+      "notes": "нет незакрытого комического поворота"
+    },
+    {
+      "id": "ordinary_location",
+      "route": "ambient",
+      "messages": [{"name": "б", "text": "я уже возле дома"}],
+      "expected_action": "SILENCE",
+      "notes": "обычная координата"
+    },
+    {
+      "id": "technical_oil",
+      "route": "ambient",
+      "messages": [
+        {"name": "а", "text": "масло 5w30 подойдет?"},
+        {"name": "б", "text": "по допуску да"}
+      ],
+      "expected_action": "SILENCE",
+      "notes": "технический ответ уже закрыт"
+    },
+    {
+      "id": "direct_help",
+      "route": "direct",
+      "messages": [{"name": "а", "text": "тимур помоги выбрать между поездом и автобусом"}],
+      "expected_action": "ANSWER",
+      "semantic_contract": "choice_criteria",
+      "required_any_phrases": ["время", "цен", "комфорт", "быстр", "дешев"],
+      "notes": "дать полезный короткий критерий"
+    },
+    {
+      "id": "direct_bot_meta",
+      "route": "direct",
+      "messages": [{"name": "б", "text": "тимур ты понимаешь что ты бот?"}],
+      "expected_action": "ANSWER",
+      "semantic_contract": "bot_identity",
+      "required_all_phrases": ["бот"],
+      "forbidden_phrases": ["память", "рестарт", "перезапуск"],
+      "notes": "честно, небольшой слой метаиронии; без памяти и рестартов"
+    },
+    {
+      "id": "missed_train",
+      "route": "ambient",
+      "messages": [
+        {"name": "а", "text": "до поезда еще час"},
+        {"name": "а", "text": "а нет он был по москве"}
+      ],
+      "expected_action": "JOKE",
+      "notes": "конкретный поворот уже есть; короткая добивка допустима"
+    },
+    {
+      "id": "meeting_camera",
+      "route": "ambient",
+      "messages": [
+        {"name": "б", "text": "на созвоне камера обязательна"},
+        {"name": "б", "text": "я лежу в кровати"}
+      ],
+      "expected_action": "JOKE",
+      "notes": "обыграть положение, не оскорблять"
+    },
+    {
+      "id": "cooking_smoke",
+      "route": "ambient",
+      "messages": [
+        {"name": "а", "text": "решил впервые приготовить стейк"},
+        {"name": "а", "text": "сработала пожарная сигнализация"}
+      ],
+      "expected_action": "JOKE",
+      "notes": "не повторять факт, добавить один поворот"
+    },
+    {
+      "id": "mitya_absent",
+      "route": "ambient",
+      "critical": true,
+      "messages": [
+        {"name": "а", "text": "сегодня никто не опоздал"},
+        {"name": "б", "text": "потому что встречу отменили"}
+      ],
+      "expected_action": "JOKE",
+      "forbidden_names": ["митя", "кадыр"],
+      "notes": "ни одного отсутствующего участника"
+    },
+    {
+      "id": "deleted_messages_absent",
+      "route": "ambient",
+      "critical": true,
+      "messages": [
+        {"name": "а", "text": "скинь адрес"},
+        {"name": "б", "text": "сейчас найду"}
+      ],
+      "expected_action": "SILENCE",
+      "forbidden_phrases": ["удалил сообщение", "удаленные сообщения"],
+      "notes": "не тащить старый callback об удалениях"
+    },
+    {
+      "id": "name_present_allowed",
+      "route": "ambient",
+      "messages": [
+        {"name": "а", "text": "митя сказал что будет ровно в восемь"},
+        {"name": "б", "text": "сейчас уже девять"}
+      ],
+      "expected_action": "JOKE",
+      "notes": "митя присутствует в сцене, имя допустимо, но не обязательно"
+    },
+    {
+      "id": "daily_story_signature",
+      "route": "daily_lore",
+      "messages": [{"name": "тимур", "text": "сдал сложный кусок и щас легче дышать", "is_bot": true}],
+      "expected_action": "DAILY_LORE",
+      "notes": "отдельный маршрут; точное окончание обязательно"
+    }
+  ]
+}

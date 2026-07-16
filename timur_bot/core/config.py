@@ -177,20 +177,24 @@ def _normalize_funny_scan_defaults(raw: Any) -> Dict[str, Any]:
 def _normalize_adaptive_humor_defaults(raw: Any) -> Dict[str, Any]:
     data = raw if isinstance(raw, dict) else {}
     return {
+        "schema_version": 2,
         "enabled": bool(data.get("enabled", True)),
         "auto_learn": bool(data.get("auto_learn", True)),
         "live_snipe_enabled": bool(data.get("live_snipe_enabled", True)),
-        "participation_rate": max(0.0, min(1.0, float(data.get("participation_rate", 0.30)))),
-        "min_human_messages_between_replies": max(1, int(data.get("min_human_messages_between_replies", 2))),
-        "min_human_messages_between_checks": max(1, int(data.get("min_human_messages_between_checks", 5))),
+        "participation_rate": max(0.0, min(1.0, float(data.get("participation_rate", 0.45)))),
+        "min_human_messages_between_replies": max(1, int(data.get("min_human_messages_between_replies", 3))),
+        "min_human_messages_between_checks": max(1, int(data.get("min_human_messages_between_checks", 3))),
         "interjection_timeout_seconds": max(1, min(10, int(data.get("interjection_timeout_seconds", 3)))),
-        "reply_timeout_seconds": max(1, min(15, int(data.get("reply_timeout_seconds", 6)))),
+        "reply_timeout_seconds": max(1, min(15, int(data.get("reply_timeout_seconds", 3)))),
         "dialogue_window_minutes": max(1, int(data.get("dialogue_window_minutes", 10))),
-        "snipe_cooldown_minutes": max(1, int(data.get("snipe_cooldown_minutes", 30))),
-        "min_human_messages": max(1, int(data.get("min_human_messages", 12))),
-        "opportunity_threshold": max(0, min(100, int(data.get("opportunity_threshold", 85)))),
+        "snipe_cooldown_minutes": max(1, int(data.get("snipe_cooldown_minutes", 10))),
+        "min_human_messages": max(1, int(data.get("min_human_messages", 3))),
         "candidate_threshold": max(0, min(100, int(data.get("candidate_threshold", 85)))),
-        "candidate_count": max(1, min(5, int(data.get("candidate_count", 3)))),
+        "director_max_tokens": max(80, min(300, int(data.get("director_max_tokens", 180)))),
+        "critic_max_tokens": max(20, min(100, int(data.get("critic_max_tokens", 40)))),
+        "background_daily_token_budget": max(1000, min(100000, int(data.get("background_daily_token_budget", 12000)))),
+        "ambient_reply_max_chars": max(20, min(120, int(data.get("ambient_reply_max_chars", 60)))),
+        "direct_reply_max_chars": max(40, min(500, int(data.get("direct_reply_max_chars", 120)))),
     }
 
 

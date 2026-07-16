@@ -1,12 +1,97 @@
 import asyncio
+import copy
 import os
-from datetime import datetime
-from unittest.mock import patch
+import warnings
+from datetime import datetime, timedelta
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 os.environ.setdefault("TELEGRAM_BOT_TOKEN", "test-token")
 os.environ.setdefault("OPENAI_API_KEY", "test-api-key")
 
 from timur_bot.services import bot_logic as runtime
+
+
+def test_yaml_persona_is_canonical_unless_admin_set_real_override() -> None:
+    memory = runtime.default_memory()
+    memory["config"] = {"system_prompt": runtime.DEFAULT_SYSTEM_PROMPT}
+
+    assert runtime.get_system_prompt(memory) == runtime.DEFAULT_SYSTEM_PROMPT
+    assert memory["config"]["system_prompt_override"] == ""
+    assert "system_prompt" not in memory["config"]
+
+    custom = {"config": {"system_prompt": "мой ручной промпт"}}
+    assert runtime.get_system_prompt(custom) == "мой ручной промпт"
+    assert custom["config"]["system_prompt_override"] == "мой ручной промпт"
+
+
+def test_direct_model_question_prompt_contains_truthful_runtime_model() -> None:
+    memory = runtime.default_memory()
+    message = SimpleNamespace(
+        chat_id=991,
+        text="на каком ии тимур работает?",
+        caption=None,
+        from_user=SimpleNamespace(id=7, first_name="кадыр", username=None),
+    )
+
+    messages = runtime.build_chat_messages(memory, message, humor_plan=runtime.build_humor_plan(memory, message))
+
+    assert "честный технический ответ — deepseek v4 flash" in messages[0]["content"]
+
+
+def test_saved_v1_adaptive_defaults_migrate_to_v2_runtime_values() -> None:
+    memory = runtime.default_memory()
+    memory["config"]["adaptive_humor"] = {
+        "participation_rate": 0.30,
+        "min_human_messages_between_replies": 2,
+        "min_human_messages_between_checks": 5,
+        "reply_timeout_seconds": 6,
+        "snipe_cooldown_minutes": 30,
+        "min_human_messages": 12,
+        "candidate_threshold": 91,
+        "opportunity_threshold": 85,
+        "candidate_count": 3,
+    }
+
+    settings = runtime._adaptive_humor_settings(memory)
+
+    assert settings["schema_version"] == 2
+    assert settings["participation_rate"] == 0.45
+    assert settings["reply_timeout_seconds"] == 3
+    assert settings["snipe_cooldown_minutes"] == 10
+    assert settings["min_human_messages"] == 3
+    assert settings["candidate_threshold"] == 91
+    assert settings["legacy_v1_settings"] == {"opportunity_threshold": 85, "candidate_count": 3}
+
+
+def test_direct_reply_context_contains_timurs_previous_message_and_reply_edge() -> None:
+    memory = runtime.default_memory()
+    chat = runtime.get_chat_mem(memory, 992)
+    chat["history"] = [{"message_id": 1, "user_id": 7, "name": "а", "text": "можно завтра?"}]
+    runtime.record_bot_output(
+        chat,
+        message_id=2,
+        text="можно и завтра",
+        plan={"mode": "direct", "context": list(chat["history"])},
+        output_kind="direct",
+        trigger_message_id=1,
+        reply_to_message_id=1,
+    )
+    chat["history"].append(
+        {"message_id": 3, "reply_to_message_id": 2, "user_id": 7, "name": "а", "text": "а почему"}
+    )
+    message = SimpleNamespace(
+        chat_id=992,
+        message_id=3,
+        text="а почему",
+        caption=None,
+        from_user=SimpleNamespace(id=7, first_name="а", username=None),
+    )
+
+    messages = runtime.build_chat_messages(memory, message, humor_plan=runtime.build_humor_plan(memory, message))
+
+    assert "[bot] тимур: можно и завтра" in messages[0]["content"] or "bot] тимур: можно и завтра" in messages[0]["content"]
+    assert "reply=#2" in messages[0]["content"]
 
 
 def test_get_chat_mem_has_memory_layers() -> None:
@@ -190,6 +275,33 @@ def test_ordinary_participation_is_left_to_the_quality_filter_after_gap() -> Non
     assert "качественному фильтру" in decision.reason
 
 
+def test_open_followup_does_not_hijack_reply_to_another_human() -> None:
+    memory = runtime.default_memory()
+    chat = runtime.get_chat_mem(memory, 56)
+    runtime.activate_dialogue(chat, initiator_id=7, text="тимур как дела")
+    other_human = SimpleNamespace(id=8, is_bot=False)
+    message = SimpleNamespace(
+        chat_id=56,
+        text="я вообще про картошку",
+        caption=None,
+        from_user=SimpleNamespace(id=7),
+        reply_to_message=SimpleNamespace(from_user=other_human),
+    )
+
+    decision = runtime.should_reply_decision(memory, message, bot_id=999)
+
+    assert decision.should_reply is False
+    assert "другому участнику" in decision.reason
+    followup = SimpleNamespace(
+        chat_id=56,
+        text="у тебя завтра пары?",
+        caption=None,
+        from_user=SimpleNamespace(id=7),
+        reply_to_message=None,
+    )
+    assert runtime.should_reply_decision(memory, followup, bot_id=999).should_reply is True
+
+
 def test_processed_event_cache_marks_duplicate() -> None:
     memory = runtime.default_memory()
     chat = runtime.get_chat_mem(memory, 1)
@@ -244,6 +356,26 @@ def test_run_with_typing_stops_after_timeout() -> None:
 
     assert result == ""
     assert context.bot.calls >= 1
+
+
+def test_run_with_typing_does_not_wait_for_stuck_typing_action() -> None:
+    class StuckBot:
+        async def send_chat_action(self, chat_id: int, action: str) -> None:
+            del chat_id, action
+            await asyncio.Event().wait()
+
+    context = type("DummyContext", (), {"bot": StuckBot()})()
+
+    async def _quick_task() -> str:
+        return "ok"
+
+    async def _run() -> str:
+        return await asyncio.wait_for(
+            runtime._run_with_typing(context, 90212, _quick_task(), timeout_seconds=0.1),
+            timeout=0.25,
+        )
+
+    assert asyncio.run(_run()) == "ok"
 
 
 def test_run_with_typing_skips_overlapping_generation_in_same_chat() -> None:
@@ -311,7 +443,8 @@ def test_store_bot_claim_memory_writes_fact_graph_and_long_fact() -> None:
     assert any("surname" in str(item.get("text", "")) for item in chat_mem["memory_layers"]["long_facts"])
 
 
-def test_apply_lore_payload_appends_arc_and_persists_facts() -> None:
+def test_apply_lore_payload_appends_arc_and_persists_facts(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(runtime, "MEMORY_PATH", tmp_path / "memory.json")
     memory = runtime.default_memory()
     cfg = memory["config"]
     mood = runtime._ensure_mood_config(cfg)
@@ -344,10 +477,20 @@ def test_apply_lore_payload_appends_arc_and_persists_facts() -> None:
 
     assert beat["output_text"]
     assert arc["beats"]
+    stored_arc = next(item for item in life["lore_arcs"] if item["id"] == arc["id"])
+    assert stored_arc is arc
+    assert stored_arc["beats"][-1]["id"] == beat["id"]
     chat_mem = runtime.get_chat_mem(memory, 1)
     graph = chat_mem["memory_layers"]["fact_graph"]
     assert any(str(f.get("source")) == "lore_arc" for f in graph.get("facts", []))
     assert any(str(f.get("attribute")) == "habit" for f in graph.get("facts", []))
+    assert runtime.save_memory(memory) is True
+    reloaded_arc = next(
+        item
+        for item in runtime.load_memory()["config"]["life"]["lore_arcs"]
+        if item["id"] == arc["id"]
+    )
+    assert reloaded_arc["beats"][-1]["id"] == beat["id"]
 
 
 def test_lore_fallback_uses_event_hint() -> None:
@@ -404,3 +547,469 @@ def test_lore_private_event_can_use_cover_story() -> None:
     )
 
     assert beat["output_text"]
+
+
+def test_proactive_story_merge_preserves_newer_feedback_and_dialogue_state() -> None:
+    base = runtime.default_memory()
+    base_mood = copy.deepcopy(base["config"]["mood"])
+    generated = copy.deepcopy(base)
+    generated_life = runtime._ensure_life_config(generated["config"])
+    generated_life["slots_date"] = "2026-07-16"
+    generated_life["daily_slots"] = [780]
+    generated_life["sent_slots"] = [780]
+    generated_life["last_emit_ts"] = "2026-07-16T13:00:00"
+    generated_life["last_emit_chat_id"] = 1
+    generated_life["chat_last_emit"] = {"1": "2026-07-16T13:00:00"}
+    generated_life["last_lore_arc_id"] = 1
+    generated_life["lore_arcs"] = [
+        {
+            "id": 1,
+            "title": "сложный кусок",
+            "summary": "закрыл учебную задачу",
+            "status": "active",
+            "arc_kind": "core",
+            "parent_arc_id": 0,
+            "seed_event_id": 0,
+            "seed_event_key": "",
+            "base_privacy": 1,
+            "last_beat_id": 1,
+            "created_ts": "2026-07-16T12:50:00",
+            "updated_ts": "2026-07-16T13:00:00",
+            "beats": [
+                {
+                    "id": 1,
+                    "phase": "payoff",
+                    "public_story": "сдал сложный кусок и щас легче дышать",
+                    "private_story": "сдал сложный кусок и щас легче дышать",
+                    "facts": [
+                        {
+                            "attribute": "study_state",
+                            "value": "закрыл сложный учебный кусок",
+                            "privacy": 1,
+                            "confidence": 0.8,
+                        }
+                    ],
+                    "output_text": "сдал сложный кусок и щас легче дышать\nу вас как с этим обычно",
+                }
+            ],
+            "facts": [],
+        }
+    ]
+    text = "сдал сложный кусок и щас легче дышать\nу вас как с этим обычно"
+    runtime._append_story_log(generated, text, source="proactive", chat_id=1)
+
+    latest = copy.deepcopy(base)
+    latest["config"]["life"]["enabled"] = False
+    latest["config"]["mood"]["valence"] = 77.0
+    runtime._append_story_log(latest, "параллельная история", source="on_demand", chat_id=1)
+    latest_chat = runtime.get_chat_mem(latest, 1)
+    latest_layers = runtime.ensure_humor_schema(latest_chat)
+    latest_layers["humor_scenes_v2"].append(
+        {
+            "id": "fresh-heart-scene",
+            "output_message_id": 55,
+            "feedback": [{"rating": "funny", "source": "heart"}],
+        }
+    )
+    latest_layers["adaptive_humor"] = {
+        "pending_followups": {"42": {"last_activity_ts": "2026-07-16T12:59:59"}}
+    }
+
+    merged = runtime._merge_proactive_story_state(
+        latest,
+        generated,
+        base_life=copy.deepcopy(base["config"]["life"]),
+        base_mood=base_mood,
+        chat_id=1,
+        sent_message_id=99,
+        text=text,
+    )
+
+    merged_chat = runtime.get_chat_mem(merged, 1)
+    merged_layers = runtime.ensure_humor_schema(merged_chat)
+    assert any(scene.get("id") == "fresh-heart-scene" for scene in merged_layers["humor_scenes_v2"])
+    assert "42" in merged_layers["adaptive_humor"]["pending_followups"]
+    assert merged["config"]["mood"]["valence"] == 77.0
+    assert merged["config"]["life"]["enabled"] is False
+    assert merged["config"]["life"]["sent_slots"] == [780]
+    assert {item.get("text") for item in merged["config"]["life"]["story_log"]} == {
+        "параллельная история",
+        text,
+    }
+    assert any(item.get("message_id") == 99 for item in merged_chat["history"])
+    assert not any(scene.get("output_message_id") == 99 for scene in merged_layers["humor_scenes_v2"])
+    assert any(
+        fact.get("source") == "lore_arc"
+        for fact in merged_chat["memory_layers"]["fact_graph"]["facts"]
+    )
+
+
+def test_concurrent_memory_saves_merge_heart_daily_and_direct_state(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(runtime, "MEMORY_PATH", tmp_path / "memory.json")
+    initial = runtime.default_memory()
+    initial_chat = runtime.get_chat_mem(initial, 1)
+    runtime.record_bot_output(
+        initial_chat,
+        message_id=10,
+        text="первая шутка",
+        plan={"mode": "ambient", "action": "JOKE", "context": []},
+        output_kind="ambient",
+    )
+    runtime.save_memory(initial)
+
+    heart_writer = runtime.load_memory()
+    daily_writer = runtime.load_memory()
+    direct_writer = runtime.load_memory()
+
+    assert runtime.set_heart_feedback(
+        runtime.get_chat_mem(heart_writer, 1),
+        message_id=10,
+        user_id=7,
+        active=True,
+    )
+    runtime.save_memory(heart_writer)
+
+    daily_life = runtime._ensure_life_config(daily_writer["config"])
+    daily_life["slots_date"] = "2026-07-16"
+    daily_life["daily_slots"] = [780]
+    daily_life["sent_slots"] = [780]
+    daily_life["last_emit_ts"] = "2026-07-16T13:00:00"
+    runtime._append_story_log(daily_writer, "дневная история", source="proactive", chat_id=1)
+    runtime.record_bot_output(
+        runtime.get_chat_mem(daily_writer, 1),
+        message_id=12,
+        text="дневная история\nу вас как с этим обычно",
+        plan=None,
+        output_kind="daily_lore",
+    )
+    runtime.save_memory(daily_writer)
+
+    direct_chat = runtime.get_chat_mem(direct_writer, 1)
+    runtime.record_bot_output(
+        direct_chat,
+        message_id=11,
+        text="короткий ответ",
+        plan={"mode": "direct", "action": "ANSWER", "context": []},
+        output_kind="direct",
+    )
+    runtime.activate_dialogue(direct_chat, initiator_id=42, text="а почему")
+    runtime.save_memory(direct_writer)
+
+    final = runtime.load_memory()
+    final_chat = runtime.get_chat_mem(final, 1)
+    heart_scene = runtime.find_humor_scene(final_chat, 10)
+    assert heart_scene is not None
+    assert any(item.get("source") == "heart" for item in heart_scene["feedback"])
+    assert runtime.find_humor_scene(final_chat, 11) is not None
+    assert "42" in final_chat["memory_layers"]["adaptive_humor"]["pending_followups"]
+    assert final["config"]["life"]["sent_slots"] == [780]
+    assert any(item.get("text") == "дневная история" for item in final["config"]["life"]["story_log"])
+    assert [item.get("message_id") for item in final_chat["history"]] == [10, 11, 12]
+
+
+def test_voice_budget_check_and_reservation_are_atomic(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(runtime, "MEMORY_PATH", tmp_path / "memory.json")
+    monkeypatch.setattr(runtime, "GLOBAL_DAILY_VOICE_LIMIT", 3)
+    monkeypatch.setattr(runtime, "CHAT_DAILY_VOICE_LIMIT", 3)
+    monkeypatch.setattr(runtime, "get_chat_features", lambda _: {})
+    monkeypatch.setattr(runtime.feature_gate, "voice_allowed", lambda _: True)
+    initial = runtime.default_memory()
+    initial["config"]["voice_usage"] = {
+        runtime._today_str(): {"global": 2, "chats": {"seed": 2}}
+    }
+    runtime.save_memory(initial)
+    first = runtime.load_memory()
+    second = runtime.load_memory()
+
+    assert runtime.reserve_voice_attempt(first, 101) is True
+    assert runtime.reserve_voice_attempt(second, 202) is False
+
+    final = runtime.load_memory()
+    stats = final["config"]["voice_usage"][runtime._today_str()]
+    assert stats["global"] == 3
+    assert stats["chats"] == {"seed": 2, "101": 1}
+
+
+def test_concurrent_followup_refresh_wins_over_stale_deletion(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(runtime, "MEMORY_PATH", tmp_path / "memory.json")
+    initial = runtime.default_memory()
+    runtime.activate_dialogue(
+        runtime.get_chat_mem(initial, 1),
+        initiator_id=42,
+        text="про поезд",
+        now=datetime(2026, 7, 16, 12, 0),
+    )
+    runtime.save_memory(initial)
+    stale_consumer = runtime.load_memory()
+    refresher = runtime.load_memory()
+
+    assert runtime.continue_dialogue(
+        runtime.get_chat_mem(stale_consumer, 1),
+        user_id=42,
+        text="а почему",
+        window_minutes=10,
+        now=datetime(2026, 7, 16, 12, 1),
+    )
+    runtime.activate_dialogue(
+        runtime.get_chat_mem(refresher, 1),
+        initiator_id=42,
+        text="теперь про автобус",
+        now=datetime(2026, 7, 16, 12, 2),
+    )
+    runtime.save_memory(refresher)
+    runtime.save_memory(stale_consumer)
+
+    final_state = runtime.get_chat_mem(runtime.load_memory(), 1)["memory_layers"]["adaptive_humor"]
+    assert final_state["pending_followups"]["42"]["last_activity_ts"] == "2026-07-16T12:02:00"
+
+
+def test_proactive_slot_is_durably_reserved_before_send(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(runtime, "MEMORY_PATH", tmp_path / "memory.json")
+    memory = runtime.default_memory()
+    life = runtime._ensure_life_config(memory["config"])
+    life["slots_date"] = "2026-07-16"
+    life["daily_slots"] = [780]
+    life["sent_slots"] = []
+    runtime.save_memory(memory)
+    now_local = datetime(2026, 7, 16, 13, 1)
+
+    assert runtime._reserve_proactive_slot(780, now_local) is True
+    assert runtime._reserve_proactive_slot(780, now_local) is False
+    assert runtime._release_proactive_slot(780, now_local) is True
+    assert runtime._reserve_proactive_slot(780, now_local) is True
+    assert runtime.load_memory()["config"]["life"]["sent_slots"] == [780]
+
+    failed_reservation = runtime.load_memory()
+    failed_reservation["config"]["life"]["daily_slots"] = [780, 781]
+    runtime.save_memory(failed_reservation)
+    with patch.object(runtime, "save_memory", return_value=False):
+        assert runtime._reserve_proactive_slot(781, now_local) is False
+
+
+def test_concurrent_new_lore_arcs_keep_uid_references_after_numeric_remap(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(runtime, "MEMORY_PATH", tmp_path / "memory.json")
+    initial = runtime.default_memory()
+    initial_life = runtime._ensure_life_config(initial["config"])
+    parent = runtime._start_new_lore_arc(
+        initial_life,
+        {},
+        datetime(2026, 7, 16, 12, 0),
+        title="общая арка",
+        arc_kind="core",
+    )
+    parent_uid = parent["uid"]
+    runtime.save_memory(initial)
+    first = runtime.load_memory()
+    second = runtime.load_memory()
+
+    branch_uids: dict[str, str] = {}
+    for memory, title, created_at in (
+        (first, "первая ветка", datetime(2026, 7, 16, 13, 0, 0, 1)),
+        (second, "вторая ветка", datetime(2026, 7, 16, 13, 0, 0, 2)),
+    ):
+        life = runtime._ensure_life_config(memory["config"])
+        current_parent = next(arc for arc in life["lore_arcs"] if arc["uid"] == parent_uid)
+        branch = runtime._start_new_lore_arc(
+            life,
+            {},
+            created_at,
+            title=title,
+            summary=title,
+            arc_kind="branch",
+            parent_arc_id=current_parent["id"],
+            parent_arc_uid=parent_uid,
+        )
+        branch_uids[title] = branch["uid"]
+        current_parent["beats"].append(
+            {
+                "id": 1,
+                "ts": created_at.isoformat(),
+                "spawned_branch_arc_id": branch["id"],
+                "spawned_branch_arc_uid": branch["uid"],
+                "spawned_branch_arc_title": title,
+            }
+        )
+        graph = runtime.ensure_fact_graph(runtime.get_chat_mem(memory, 1))
+        graph["facts"].append(
+            {
+                "id": f"fact-{title}",
+                "source": "lore_arc",
+                "arc_id": branch["id"],
+                "arc_uid": branch["uid"],
+            }
+        )
+
+    runtime.save_memory(first)
+    runtime.save_memory(second)
+
+    saved = runtime.load_memory()
+    arcs = saved["config"]["life"]["lore_arcs"]
+    assert {arc["title"] for arc in arcs} == {"общая арка", "первая ветка", "вторая ветка"}
+
+    by_uid = {arc["uid"]: arc for arc in arcs}
+    saved_parent = by_uid[parent_uid]
+    assert len({arc["id"] for arc in arcs}) == len(arcs)
+    for title, branch_uid in branch_uids.items():
+        saved_branch = by_uid[branch_uid]
+        assert saved_branch["parent_arc_uid"] == parent_uid
+        assert saved_branch["parent_arc_id"] == saved_parent["id"]
+        beat = next(
+            item
+            for item in saved_parent["beats"]
+            if item.get("spawned_branch_arc_title") == title
+        )
+        assert beat["spawned_branch_arc_uid"] == branch_uid
+        assert beat["spawned_branch_arc_id"] == saved_branch["id"]
+
+    facts = runtime.ensure_fact_graph(runtime.get_chat_mem(saved, 1))["facts"]
+    for fact in facts:
+        assert fact["arc_id"] == by_uid[fact["arc_uid"]]["id"]
+
+
+def _store_due_daily_memory() -> None:
+    memory = runtime.default_memory()
+    runtime.get_chat_mem(memory, 1)["history"] = [
+        {"message_id": 1, "user_id": 7, "name": "а", "text": "живой чат"}
+    ]
+    life = runtime._ensure_life_config(memory["config"])
+    now_local = datetime.now(runtime._safe_zoneinfo(life["timezone"]))
+    life["slots_date"] = now_local.date().isoformat()
+    life["daily_slots"] = [0]
+    life["sent_slots"] = []
+    assert runtime.save_memory(memory) is True
+
+
+def test_proactive_send_error_releases_slot_for_retry(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(runtime, "MEMORY_PATH", tmp_path / "memory.json")
+    _store_due_daily_memory()
+    application = SimpleNamespace(bot=SimpleNamespace(send_message=AsyncMock(side_effect=RuntimeError("telegram down"))))
+
+    def stable_mood(memory, **kwargs):
+        del kwargs
+        return False, runtime._ensure_mood_config(memory["config"]), False
+
+    with (
+        patch.object(runtime, "_sync_mood_state", side_effect=stable_mood),
+        patch.object(
+            runtime,
+            "_generate_story_text",
+            new=AsyncMock(return_value="сдал сложный кусок\nу вас как с этим обычно"),
+        ),
+    ):
+        try:
+            asyncio.run(runtime._emit_proactive_story(application))
+        except RuntimeError as exc:
+            assert str(exc) == "telegram down"
+        else:
+            raise AssertionError("Telegram error must propagate to the life loop")
+
+    assert runtime.load_memory()["config"]["life"]["sent_slots"] == []
+
+
+def test_proactive_ambiguous_network_error_keeps_slot_to_avoid_duplicate(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(runtime, "MEMORY_PATH", tmp_path / "memory.json")
+    _store_due_daily_memory()
+    application = SimpleNamespace(
+        bot=SimpleNamespace(send_message=AsyncMock(side_effect=runtime.TimedOut("outcome unknown")))
+    )
+
+    def stable_mood(memory, **kwargs):
+        del kwargs
+        return False, runtime._ensure_mood_config(memory["config"]), False
+
+    with (
+        patch.object(runtime, "_sync_mood_state", side_effect=stable_mood),
+        patch.object(
+            runtime,
+            "_generate_story_text",
+            new=AsyncMock(return_value="сдал сложный кусок\nу вас как с этим обычно"),
+        ),
+    ):
+        try:
+            asyncio.run(runtime._emit_proactive_story(application))
+        except runtime.TimedOut:
+            pass
+        else:
+            raise AssertionError("Telegram timeout must propagate to the life loop")
+
+    assert runtime.load_memory()["config"]["life"]["sent_slots"] == [0]
+
+
+def test_proactive_bad_request_is_permanent_not_ambiguous_or_retried(tmp_path, monkeypatch, caplog) -> None:
+    monkeypatch.setattr(runtime, "MEMORY_PATH", tmp_path / "memory.json")
+    _store_due_daily_memory()
+    application = SimpleNamespace(
+        bot=SimpleNamespace(send_message=AsyncMock(side_effect=runtime.BadRequest("chat not found")))
+    )
+
+    def stable_mood(memory, **kwargs):
+        del kwargs
+        return False, runtime._ensure_mood_config(memory["config"]), False
+
+    with (
+        patch.object(runtime, "_sync_mood_state", side_effect=stable_mood),
+        patch.object(
+            runtime,
+            "_generate_story_text",
+            new=AsyncMock(return_value="сдал сложный кусок\nу вас как с этим обычно"),
+        ),
+        caplog.at_level("WARNING", logger="timur-bot"),
+    ):
+        try:
+            asyncio.run(runtime._emit_proactive_story(application))
+        except runtime.BadRequest:
+            pass
+        else:
+            raise AssertionError("Telegram bad request must propagate to the life loop")
+
+    assert runtime.load_memory()["config"]["life"]["sent_slots"] == [0]
+    assert "слот закрыт без повтора" in caplog.text
+    assert "Исход отправки Telegram неизвестен" not in caplog.text
+
+
+def test_proactive_failure_policy_does_not_retry_obsolete_chat_id() -> None:
+    from telegram.error import ChatMigrated, RetryAfter
+
+    assert runtime._telegram_send_failure_policy(ChatMigrated(123)) == "permanent"
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        retry_after = RetryAfter(timedelta(seconds=1))
+    assert runtime._telegram_send_failure_policy(retry_after) == "retry"
+
+
+def test_proactive_final_save_failure_is_logged_not_reported_as_success(tmp_path, monkeypatch, caplog) -> None:
+    monkeypatch.setattr(runtime, "MEMORY_PATH", tmp_path / "memory.json")
+    _store_due_daily_memory()
+    original_save = runtime.save_memory
+    message_sent = {"value": False}
+
+    async def send_message(**kwargs):
+        del kwargs
+        message_sent["value"] = True
+        return SimpleNamespace(message_id=99)
+
+    def fail_after_send(memory):
+        if message_sent["value"]:
+            return False
+        return original_save(memory)
+
+    application = SimpleNamespace(bot=SimpleNamespace(send_message=send_message))
+
+    def stable_mood(memory, **kwargs):
+        del kwargs
+        return False, runtime._ensure_mood_config(memory["config"]), False
+
+    with (
+        patch.object(runtime, "_sync_mood_state", side_effect=stable_mood),
+        patch.object(
+            runtime,
+            "_generate_story_text",
+            new=AsyncMock(return_value="сдал сложный кусок\nу вас как с этим обычно"),
+        ),
+        patch.object(runtime, "save_memory", side_effect=fail_after_send),
+        caplog.at_level("INFO", logger="timur-bot"),
+    ):
+        asyncio.run(runtime._emit_proactive_story(application))
+
+    assert "История отправлена, но не сохранена" in caplog.text
+    assert "Проактивная история отправлена" not in caplog.text
