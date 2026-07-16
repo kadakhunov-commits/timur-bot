@@ -186,16 +186,31 @@ OPENAI_BASE_URL = APP_CONFIG.openai_base_url
 GEMINI_API_KEY = APP_CONFIG.gemini_api_key
 MINIAPP_URL = APP_CONFIG.miniapp_url
 
+TEXT_TRANSPORT_TIMEOUT_SECONDS = 5.0
+
+
+def _text_completion_extra_body() -> Dict[str, Any]:
+    if "polza.ai" in OPENAI_BASE_URL.lower():
+        return {
+            "reasoning": {"enabled": False},
+            "provider": {"sort": "latency", "allow_fallbacks": True},
+        }
+    return {}
+
+
+TECHNICAL_FALLBACK_REPLY = "щас туплю повтори"
+
+
 client = OpenAI(
     api_key=OPENAI_API_KEY,
     max_retries=0,
-    timeout=3.0,
+    timeout=TEXT_TRANSPORT_TIMEOUT_SECONDS,
     **({"base_url": OPENAI_BASE_URL} if OPENAI_BASE_URL else {}),
 )
 async_client = AsyncOpenAI(
     api_key=OPENAI_API_KEY,
     max_retries=0,
-    timeout=3.0,
+    timeout=TEXT_TRANSPORT_TIMEOUT_SECONDS,
     **({"base_url": OPENAI_BASE_URL} if OPENAI_BASE_URL else {}),
 )
 
@@ -1032,6 +1047,7 @@ async def _score_probe_attempt_llm(user_text: str, event: Dict[str, Any]) -> flo
             temperature=0.0,
             max_tokens=60,
             response_format={"type": "json_object"},
+            extra_body=_text_completion_extra_body(),
         )
         content = (response.choices[0].message.content or "").strip()
         payload = json.loads(content)
@@ -2522,6 +2538,7 @@ async def _call_openai_lore_episode_payload(
             ],
             max_tokens=280,
             temperature=0.92,
+            extra_body=_text_completion_extra_body(),
         )
         raw = (response.choices[0].message.content or "").strip()
         payload = _extract_json_object(raw)
@@ -3015,6 +3032,7 @@ def _update_association_graph(chat_mem: Dict[str, Any], *, user_id: int, message
 
 
 def update_memory_with_message(memory: Dict[str, Any], message: Message) -> None:
+    """Apply one Telegram message in memory; the handler owns persistence timing."""
     chat_id = message.chat_id
     author = _resolve_author_from_message(message)
     if not author:
@@ -3108,7 +3126,6 @@ def update_memory_with_message(memory: Dict[str, Any], message: Message) -> None
                 ts=rec["ts"],
             )
 
-    save_memory(memory)
     try:
         billing.register_activity(
             chat_id=chat_id,
@@ -3720,22 +3737,12 @@ def build_chat_messages(
 
     full_system = system_prompt + "\n\n"
     full_system += (
-        "гайд по стилю:\n"
-        "- всегда используй только строчные буквы\n"
-        "- без эмодзи\n"
-        "- максимум 2 очень коротких предложения в одном сообщении\n"
-        "- прямой ответ должен уложиться в 120 знаков, если это не команда и не важная серьезная тема\n"
-        "- говори естественно и живо, как человек в чате\n"
-        "- юмор дружеский и по ситуации, без агрессивных наездов\n"
-        "- не обязан шутить: сначала ответь по смыслу, потом реши, нужна ли короткая добивка\n"
-        "- не используй заезженные шаблоны типа iq комнатной температуры или мои нейроны плавятся\n"
-        "- если нет нормальной шутки, дай обычный короткий ответ без натянутой прожарки\n"
-        "- не делай каламбур из одного последнего слова и не пересказывай его с новой вывеской\n"
-        "- не вводи в ответ человека, которого нет в текущей сцене\n"
-        "- не используй конструкции «x — это когда» и «а то я думал»\n"
-        "- не шути о том, умеешь ли ты шутить, и не оценивай собственный юмор\n"
-        "- не зацикливайся на одном и том же старом факте, чаще меняй тему\n"
-        "- не делай длинные объяснения, лучше коротко и по делу\n"
+        "правила быстрого ответа:\n"
+        "- строчные буквы, без эмодзи, до 120 знаков и двух коротких предложений\n"
+        "- сначала ответь по смыслу; шути только через реальную деталь текущей сцены\n"
+        "- не вводи отсутствующих людей, не пересказывай реплику и не объясняй шутку\n"
+        "- запрещены шаблоны про iq и нейроны, «x — это когда» и «а то я думал»\n"
+        "- если точной шутки нет, дай обычный короткий ответ\n"
     )
 
     if re.search(r"\b(?:како[йм]\s+ии|на\s+како[йм]\s+(?:ии|модел)|какая\s+модель|на\s+чем\s+работаешь)\b", user_text, re.I):
@@ -3823,18 +3830,35 @@ def build_chat_messages(
 # =========================
 
 async def call_openai_text(messages: List[Dict[str, Any]]) -> str:
+    started = time.perf_counter()
     try:
         response = await async_client.chat.completions.create(
             model=TEXT_MODEL,
             messages=messages,
             max_tokens=60,
             temperature=0.75,
-            timeout=3.0,
+            extra_body=_text_completion_extra_body(),
         )
-        return (response.choices[0].message.content or "").strip()
+        text = (response.choices[0].message.content or "").strip()
+        usage = getattr(response, "usage", None)
+        completion_details = getattr(usage, "completion_tokens_details", None)
+        logger.info(
+            "OpenAI text completed: latency_ms=%s finish=%s prompt_tokens=%s completion_tokens=%s reasoning_tokens=%s visible_chars=%s",
+            int((time.perf_counter() - started) * 1000),
+            getattr(response.choices[0], "finish_reason", None),
+            int(getattr(usage, "prompt_tokens", 0) or 0),
+            int(getattr(usage, "completion_tokens", 0) or 0),
+            int(getattr(completion_details, "reasoning_tokens", 0) or 0),
+            len(text),
+        )
+        return text
 
     except Exception as e:
-        logger.error("Ошибка OpenAI при генерации текста: %s", e)
+        logger.error(
+            "Ошибка OpenAI при генерации текста после %s мс: %s",
+            int((time.perf_counter() - started) * 1000),
+            e,
+        )
         return ""
 
 
@@ -3845,7 +3869,7 @@ async def call_openai_with_params(messages: List[Dict[str, Any]], *, max_tokens:
             messages=messages,
             max_tokens=max_tokens,
             temperature=temperature,
-            timeout=3.0,
+            extra_body=_text_completion_extra_body(),
         )
         return (response.choices[0].message.content or "").strip()
     except Exception as e:
@@ -3866,7 +3890,7 @@ async def call_openai_metered(
             messages=messages,
             max_tokens=max_tokens,
             temperature=temperature,
-            timeout=3.0,
+            extra_body=_text_completion_extra_body(),
         )
         text = (response.choices[0].message.content or "").strip()
         usage = getattr(response, "usage", None)
@@ -5189,6 +5213,7 @@ async def send_reply_with_style(
     force_voice: bool = False,
     humor_plan: Dict[str, Any] | None = None,
     is_snipe: bool = False,
+    open_dialogue: bool = True,
 ) -> bool:
     message = update.effective_message
     if not message:
@@ -5203,6 +5228,7 @@ async def send_reply_with_style(
             force_voice=force_voice,
             humor_plan=humor_plan,
             is_snipe=is_snipe,
+            open_dialogue=open_dialogue,
         )
 
 
@@ -5214,6 +5240,7 @@ async def _send_reply_with_style_locked(
     force_voice: bool = False,
     humor_plan: Dict[str, Any] | None = None,
     is_snipe: bool = False,
+    open_dialogue: bool = True,
 ) -> bool:
     message = update.effective_message
 
@@ -5236,7 +5263,9 @@ async def _send_reply_with_style_locked(
         )
         if guarded_reply != re.sub(r"\s+", " ", reply_text or "").strip():
             logger.info("Удалена нерелевантная старая отсылка из прямого ответа")
-        reply_text = guarded_reply or "щас туплю повтори"
+        if not guarded_reply:
+            open_dialogue = False
+        reply_text = guarded_reply or TECHNICAL_FALLBACK_REPLY
 
     reply_text = enforce_reply_guardrails(reply_text)
     settings = _adaptive_humor_settings(memory)
@@ -5354,7 +5383,7 @@ async def _send_reply_with_style_locked(
                         reply_to_message_id=trigger_message_id,
                     )
                 sender = getattr(message, "from_user", None)
-                if sender and not is_snipe:
+                if sender and open_dialogue and not is_snipe:
                     activate_dialogue(chat_mem, initiator_id=sender.id, text=_extract_message_text(message))
                 mark_reply_sent(chat_mem)
                 if is_snipe:
@@ -5403,7 +5432,7 @@ async def _send_reply_with_style_locked(
                 _store_bot_claim_memory(memory, message, part)
                 if index == 0:
                     sender = getattr(message, "from_user", None)
-                    if sender:
+                    if sender and open_dialogue:
                         activate_dialogue(chat_mem, initiator_id=sender.id, text=_extract_message_text(message))
                     mark_reply_sent(chat_mem)
                     first_finalized = True
@@ -5415,7 +5444,7 @@ async def _send_reply_with_style_locked(
                 if not first_finalized:
                     chat_mem = get_chat_mem(memory, message.chat_id)
                     sender = getattr(message, "from_user", None)
-                    if sender:
+                    if sender and open_dialogue:
                         activate_dialogue(chat_mem, initiator_id=sender.id, text=_extract_message_text(message))
                     mark_reply_sent(chat_mem)
                     save_memory(memory)
@@ -5440,7 +5469,7 @@ async def _send_reply_with_style_locked(
     _store_bot_claim_memory(memory, message, fact_memory_text)
     chat_mem = get_chat_mem(memory, message.chat_id)
     sender = getattr(message, "from_user", None)
-    if sender and not is_snipe:
+    if sender and open_dialogue and not is_snipe:
         activate_dialogue(chat_mem, initiator_id=sender.id, text=_extract_message_text(message))
     mark_reply_sent(chat_mem)
     if is_snipe:
@@ -7222,6 +7251,7 @@ async def command_memory_tap(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     _mark_processed_event(chat_mem, event_key)
     update_memory_with_message(memory, message)
+    save_memory(memory)
 
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -7312,8 +7342,10 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             call_openai_text(messages),
             timeout_seconds=float(_adaptive_humor_settings(memory)["reply_timeout_seconds"]),
         )
+        technical_fallback = not bool(reply_text)
         if not reply_text:
-            reply_text = "щас туплю, повтори"
+            logger.warning("Прямой LLM-ответ пустой, отправляю нелипкую техническую заглушку")
+            reply_text = TECHNICAL_FALLBACK_REPLY
 
         force_voice = is_voice_codeword(user_text)
         await send_reply_with_style(
@@ -7323,6 +7355,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             reply_text,
             force_voice=force_voice,
             humor_plan=humor_plan,
+            open_dialogue=not technical_fallback,
         )
     finally:
         _release_inflight_event(event_key)
@@ -7356,6 +7389,7 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             return
         _mark_processed_event(chat_mem, event_key)
         update_memory_with_message(memory, message)
+        save_memory(memory)
         if _apply_message_mood_impact(memory, message):
             save_memory(memory)
         _sync_mood_state(memory, allow_event_roll=True)

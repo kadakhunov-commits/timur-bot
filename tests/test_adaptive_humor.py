@@ -323,19 +323,41 @@ def test_runtime_daily_budget_prevents_background_api_calls() -> None:
     metered.assert_not_awaited()
 
 
-def test_direct_api_call_has_hard_timeout_no_retries_and_sixty_tokens() -> None:
+def test_direct_api_call_disables_reasoning_prefers_latency_and_keeps_sixty_tokens() -> None:
     response = SimpleNamespace(
         choices=[SimpleNamespace(message=SimpleNamespace(content="короткий ответ"))],
     )
     create = AsyncMock(return_value=response)
-    with patch.object(runtime.async_client.chat.completions, "create", create):
+    with (
+        patch.object(runtime, "OPENAI_BASE_URL", "https://polza.ai/api/v1"),
+        patch.object(runtime.async_client.chat.completions, "create", create),
+    ):
         text = asyncio.run(runtime.call_openai_text([{"role": "user", "content": "тимур?"}]))
 
     assert text == "короткий ответ"
     assert create.await_count == 1
     assert create.await_args.kwargs["max_tokens"] == 60
-    assert create.await_args.kwargs["timeout"] == 3.0
+    assert "timeout" not in create.await_args.kwargs
+    assert create.await_args.kwargs["extra_body"] == {
+        "reasoning": {"enabled": False},
+        "provider": {"sort": "latency", "allow_fallbacks": True},
+    }
+    assert runtime.TEXT_TRANSPORT_TIMEOUT_SECONDS > 3.0
     assert runtime.async_client.max_retries == 0
+
+
+def test_non_polza_api_call_does_not_receive_provider_specific_fields() -> None:
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="короткий ответ"))],
+    )
+    create = AsyncMock(return_value=response)
+    with (
+        patch.object(runtime, "OPENAI_BASE_URL", "https://api.openai.com/v1"),
+        patch.object(runtime.async_client.chat.completions, "create", create),
+    ):
+        asyncio.run(runtime.call_openai_text([{"role": "user", "content": "тимур?"}]))
+
+    assert create.await_args.kwargs["extra_body"] == {}
 
 
 def test_token_ceiling_covers_utf8_bytes_and_message_framing() -> None:
@@ -354,11 +376,16 @@ def test_metered_fallback_is_conservative_without_provider_usage() -> None:
     )
     create = AsyncMock(return_value=response)
     messages = [{"role": "user", "content": "кириллица " * 20}]
-    with patch.object(runtime.async_client.chat.completions, "create", create):
+    with (
+        patch.object(runtime, "OPENAI_BASE_URL", "https://polza.ai/api/v1"),
+        patch.object(runtime.async_client.chat.completions, "create", create),
+    ):
         text, tokens = asyncio.run(runtime.call_openai_metered(messages, max_tokens=40, temperature=0.1))
 
     assert text == "❤️ смешно"
     assert tokens >= len(messages[0]["content"].encode("utf-8"))
+    assert create.await_args.kwargs["extra_body"]["reasoning"] == {"enabled": False}
+    assert create.await_args.kwargs["extra_body"]["provider"]["sort"] == "latency"
 
 
 def test_non_reply_laugh_is_feedback_and_not_an_invitation_to_answer() -> None:
@@ -390,11 +417,12 @@ def test_adjacent_laugh_uses_telegram_event_time_not_queue_processing_time() -> 
     setup = message(1, 1, "планируете не приехать", 0)
     delayed_laugh = message(2, 2, "лол", 5)
     with (
-        patch.object(runtime, "save_memory"),
+        patch.object(runtime, "save_memory") as save_memory,
         patch.object(runtime.billing, "register_activity"),
     ):
         runtime.update_memory_with_message(memory, setup)
         runtime.update_memory_with_message(memory, delayed_laugh)
+    save_memory.assert_not_called()
     runtime._observe_chat_humor(memory, delayed_laugh)
 
     chat = runtime.get_chat_mem(memory, 780)

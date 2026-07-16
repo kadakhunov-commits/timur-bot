@@ -123,6 +123,36 @@ def test_ambient_reply_is_one_short_message_and_does_not_open_dialogue() -> None
     assert chat["memory_layers"]["humor_scenes_v2"][-1]["output_kind"] == "ambient"
 
 
+def test_technical_fallback_does_not_open_sticky_dialogue() -> None:
+    memory = runtime.default_memory()
+    message = DummyMessage()
+    update = SimpleNamespace(effective_message=message)
+
+    with (
+        patch.object(runtime, "save_memory"),
+        patch.object(runtime, "_store_bot_claim_memory"),
+        patch.object(runtime, "_is_main_chat", return_value=True),
+        patch.object(runtime.billing, "register_bot_reply"),
+        patch.object(runtime.billing, "should_apply_free_watermark", return_value=(False, "")),
+        patch.object(runtime.random, "random", return_value=1.0),
+    ):
+        sent = asyncio.run(
+            runtime.send_reply_with_style(
+                update,
+                None,
+                memory,
+                runtime.TECHNICAL_FALLBACK_REPLY,
+                humor_plan={"mode": "direct", "context": []},
+                open_dialogue=False,
+            )
+        )
+
+    assert sent is True
+    assert message.reply_calls[0]["text"] == runtime.TECHNICAL_FALLBACK_REPLY
+    chat = runtime.get_chat_mem(memory, 123)
+    assert chat["memory_layers"]["adaptive_humor"]["dialogue"] == {}
+
+
 def test_watermark_is_included_inside_final_ambient_length_limit() -> None:
     memory = runtime.default_memory()
     message = DummyMessage()
