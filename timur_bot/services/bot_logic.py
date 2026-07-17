@@ -7314,7 +7314,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         if await _handle_mood_probe(update, context, memory):
             return
 
-        bot_id = (await context.bot.get_me()).id
+        bot_id = context.bot.id
 
         decision = should_reply_decision(memory, message, bot_id)
         _log_reply_decision("тексту", decision)
@@ -7394,7 +7394,7 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             save_memory(memory)
         _sync_mood_state(memory, allow_event_roll=True)
 
-        bot_id = (await context.bot.get_me()).id
+        bot_id = context.bot.id
 
         decision = ReplyDecision(False, "нет триггера для ответа на фото")
 

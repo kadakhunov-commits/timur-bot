@@ -276,6 +276,77 @@ def test_ordinary_participation_is_left_to_the_quality_filter_after_gap() -> Non
     assert "качественному фильтру" in decision.reason
 
 
+def test_text_handler_uses_cached_bot_id_without_get_me_request() -> None:
+    class CachedBot:
+        id = 999
+
+        async def get_me(self):
+            raise AssertionError("text handler must not call Telegram get_me")
+
+    message = SimpleNamespace(
+        chat_id=57,
+        message_id=1001,
+        text="обычная реплика",
+        caption=None,
+        from_user=SimpleNamespace(id=7, first_name="а", username=None, is_bot=False),
+        sender_chat=None,
+        reply_to_message=None,
+    )
+    update = SimpleNamespace(effective_message=message)
+    context = SimpleNamespace(bot=CachedBot())
+    memory = runtime.default_memory()
+    decision = runtime.ReplyDecision(False, "обычный случай")
+
+    with (
+        patch.object(runtime, "load_memory", return_value=memory),
+        patch.object(runtime, "_handle_admin_pending_text", new=AsyncMock(return_value=False)),
+        patch.object(runtime, "_handle_text_feedback", new=AsyncMock(return_value=False)),
+        patch.object(runtime, "update_memory_with_message"),
+        patch.object(runtime, "_observe_chat_humor"),
+        patch.object(runtime, "_apply_message_mood_impact", return_value=False),
+        patch.object(runtime, "_sync_mood_state"),
+        patch.object(runtime, "_handle_mood_probe", new=AsyncMock(return_value=False)),
+        patch.object(runtime, "should_reply_decision", return_value=decision) as should_reply,
+        patch.object(runtime, "_maybe_send_adaptive_snipe", new=AsyncMock(return_value=False)),
+        patch.object(runtime, "save_memory"),
+    ):
+        asyncio.run(runtime.text_handler(update, context))
+
+    assert should_reply.call_args.args[2] == 999
+
+
+def test_photo_handler_uses_cached_bot_id_without_get_me_request() -> None:
+    class CachedBot:
+        id = 999
+
+        async def get_me(self):
+            raise AssertionError("photo handler must not call Telegram get_me")
+
+    message = SimpleNamespace(
+        chat_id=58,
+        message_id=1002,
+        text=None,
+        caption="",
+        photo=[],
+        from_user=SimpleNamespace(id=7, first_name="а", username=None, is_bot=False),
+        sender_chat=None,
+        reply_to_message=None,
+    )
+    update = SimpleNamespace(effective_message=message)
+    context = SimpleNamespace(bot=CachedBot())
+    memory = runtime.default_memory()
+
+    with (
+        patch.object(runtime, "load_memory", return_value=memory),
+        patch.object(runtime, "update_memory_with_message"),
+        patch.object(runtime, "_apply_message_mood_impact", return_value=False),
+        patch.object(runtime, "_sync_mood_state"),
+        patch.object(runtime.random, "random", return_value=1.0),
+        patch.object(runtime, "save_memory"),
+    ):
+        asyncio.run(runtime.photo_handler(update, context))
+
+
 def test_open_followup_does_not_hijack_reply_to_another_human() -> None:
     memory = runtime.default_memory()
     chat = runtime.get_chat_mem(memory, 56)
