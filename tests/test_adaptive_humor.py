@@ -323,7 +323,7 @@ def test_runtime_daily_budget_prevents_background_api_calls() -> None:
     metered.assert_not_awaited()
 
 
-def test_direct_api_call_disables_reasoning_prefers_latency_and_keeps_sixty_tokens() -> None:
+def test_direct_api_call_disables_reasoning_uses_proven_providers_and_keeps_sixty_tokens() -> None:
     response = SimpleNamespace(
         choices=[SimpleNamespace(message=SimpleNamespace(content="короткий ответ"))],
     )
@@ -340,7 +340,11 @@ def test_direct_api_call_disables_reasoning_prefers_latency_and_keeps_sixty_toke
     assert "timeout" not in create.await_args.kwargs
     assert create.await_args.kwargs["extra_body"] == {
         "reasoning": {"enabled": False},
-        "provider": {"sort": "latency", "allow_fallbacks": True},
+        "provider": {
+            "only": ["Baidu", "Parasail", "DeepSeek"],
+            "sort": "latency",
+            "allow_fallbacks": True,
+        },
     }
     assert runtime.TEXT_TRANSPORT_TIMEOUT_SECONDS > 3.0
     assert runtime.async_client.max_retries == 0
@@ -385,6 +389,11 @@ def test_metered_fallback_is_conservative_without_provider_usage() -> None:
     assert text == "❤️ смешно"
     assert tokens >= len(messages[0]["content"].encode("utf-8"))
     assert create.await_args.kwargs["extra_body"]["reasoning"] == {"enabled": False}
+    assert create.await_args.kwargs["extra_body"]["provider"]["only"] == [
+        "Baidu",
+        "Parasail",
+        "DeepSeek",
+    ]
     assert create.await_args.kwargs["extra_body"]["provider"]["sort"] == "latency"
 
 

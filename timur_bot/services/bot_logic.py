@@ -187,13 +187,18 @@ GEMINI_API_KEY = APP_CONFIG.gemini_api_key
 MINIAPP_URL = APP_CONFIG.miniapp_url
 
 TEXT_TRANSPORT_TIMEOUT_SECONDS = 5.0
+POLZA_TEXT_PROVIDERS = ("Baidu", "Parasail", "DeepSeek")
 
 
 def _text_completion_extra_body() -> Dict[str, Any]:
     if "polza.ai" in OPENAI_BASE_URL.lower():
         return {
             "reasoning": {"enabled": False},
-            "provider": {"sort": "latency", "allow_fallbacks": True},
+            "provider": {
+                "only": list(POLZA_TEXT_PROVIDERS),
+                "sort": "latency",
+                "allow_fallbacks": True,
+            },
         }
     return {}
 
