@@ -177,7 +177,7 @@ def _normalize_funny_scan_defaults(raw: Any) -> Dict[str, Any]:
 def _normalize_adaptive_humor_defaults(raw: Any) -> Dict[str, Any]:
     data = raw if isinstance(raw, dict) else {}
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "enabled": bool(data.get("enabled", True)),
         "auto_learn": bool(data.get("auto_learn", True)),
         "live_snipe_enabled": bool(data.get("live_snipe_enabled", True)),
@@ -185,7 +185,7 @@ def _normalize_adaptive_humor_defaults(raw: Any) -> Dict[str, Any]:
         "min_human_messages_between_replies": max(1, int(data.get("min_human_messages_between_replies", 3))),
         "min_human_messages_between_checks": max(1, int(data.get("min_human_messages_between_checks", 3))),
         "interjection_timeout_seconds": max(1, min(10, int(data.get("interjection_timeout_seconds", 3)))),
-        "reply_timeout_seconds": max(1, min(15, int(data.get("reply_timeout_seconds", 3)))),
+        "reply_timeout_seconds": max(1, min(15, int(data.get("reply_timeout_seconds", 6)))),
         "dialogue_window_minutes": max(1, int(data.get("dialogue_window_minutes", 10))),
         "snipe_cooldown_minutes": max(1, int(data.get("snipe_cooldown_minutes", 10))),
         "min_human_messages": max(1, int(data.get("min_human_messages", 3))),

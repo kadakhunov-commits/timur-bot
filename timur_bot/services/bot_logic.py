@@ -186,7 +186,7 @@ OPENAI_BASE_URL = APP_CONFIG.openai_base_url
 GEMINI_API_KEY = APP_CONFIG.gemini_api_key
 MINIAPP_URL = APP_CONFIG.miniapp_url
 
-TEXT_TRANSPORT_TIMEOUT_SECONDS = 5.0
+TEXT_TRANSPORT_TIMEOUT_SECONDS = 7.0
 POLZA_TEXT_PROVIDERS = ("DeepInfra", "Baidu")
 
 
@@ -530,7 +530,8 @@ def _ensure_funny_scan_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
 def _adaptive_humor_settings(memory: Dict[str, Any]) -> Dict[str, Any]:
     cfg = memory.setdefault("config", {})
     settings = cfg.setdefault("adaptive_humor", {})
-    if int(settings.get("schema_version", 0) or 0) < 2:
+    schema_version = int(settings.get("schema_version", 0) or 0)
+    if schema_version < 2:
         old_defaults = {
             "participation_rate": 0.30,
             "min_human_messages_between_replies": 2,
@@ -547,6 +548,11 @@ def _adaptive_humor_settings(memory: Dict[str, Any]) -> Dict[str, Any]:
             if key in settings:
                 retired[key] = settings.pop(key)
         settings["schema_version"] = 2
+        schema_version = 2
+    if schema_version < 3:
+        if settings.get("reply_timeout_seconds") in (None, 3):
+            settings["reply_timeout_seconds"] = ADAPTIVE_HUMOR_DEFAULTS["reply_timeout_seconds"]
+        settings["schema_version"] = 3
     for key, value in ADAPTIVE_HUMOR_DEFAULTS.items():
         settings.setdefault(key, value)
     settings["enabled"] = bool(settings.get("enabled", True))
@@ -4260,6 +4266,13 @@ async def call_openai_vision(
         return ""
 
 
+async def _download_photo_as_base64(context: ContextTypes.DEFAULT_TYPE, source_message: Message) -> str:
+    photo = source_message.photo[-1]
+    file = await context.bot.get_file(photo.file_id)
+    file_bytes = await file.download_as_bytearray()
+    return base64.b64encode(file_bytes).decode("utf-8")
+
+
 async def _run_with_typing(
     context: ContextTypes.DEFAULT_TYPE,
     chat_id: int,
@@ -7334,6 +7347,28 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             save_memory(memory)
             return
 
+        replied_message = message.reply_to_message
+        if replied_message and getattr(replied_message, "photo", None):
+            user_id = int(author.get("user_id", 0) or 0)
+            if not can_use_vision(memory, message.chat_id, user_id):
+                logger.info("Лимит vision исчерпан, фото из reply пропускаю")
+                return
+
+            logger.info("Текстовое обращение ссылается на фото, использую vision")
+            image_b64 = await _download_photo_as_base64(context, replied_message)
+            increase_vision_counters(memory, message.chat_id, user_id)
+            reply_text = await _run_with_typing(
+                context,
+                message.chat_id,
+                call_openai_vision(memory, message, image_b64),
+            )
+            reply_text = sanitize_reply_text(reply_text)
+            if not reply_text:
+                logger.info("Vision-ответ на фото из reply получился пустым, пропускаю отправку")
+                return
+            await send_reply_with_style(update, context, memory, reply_text, humor_plan=None)
+            return
+
         logger.info(
             "Готовлю текстовый ответ: режим=%s токсичность=%s источник=LLM",
             get_active_mode(memory),
@@ -7427,10 +7462,7 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             logger.info("Лимит vision исчерпан, фото пропускаю")
             return
 
-        photo = message.photo[-1]
-        file = await context.bot.get_file(photo.file_id)
-        file_bytes = await file.download_as_bytearray()
-        image_b64 = base64.b64encode(file_bytes).decode("utf-8")
+        image_b64 = await _download_photo_as_base64(context, message)
 
         increase_vision_counters(memory, chat_id, int(author.get("user_id", 0) or 0))
 

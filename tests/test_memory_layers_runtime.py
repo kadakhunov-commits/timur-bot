@@ -40,7 +40,7 @@ def test_direct_model_question_prompt_contains_truthful_runtime_model() -> None:
     assert len(messages[0]["content"]) < 4_500
 
 
-def test_saved_v1_adaptive_defaults_migrate_to_v2_runtime_values() -> None:
+def test_saved_v1_adaptive_defaults_migrate_to_v3_runtime_values() -> None:
     memory = runtime.default_memory()
     memory["config"]["adaptive_humor"] = {
         "participation_rate": 0.30,
@@ -56,13 +56,26 @@ def test_saved_v1_adaptive_defaults_migrate_to_v2_runtime_values() -> None:
 
     settings = runtime._adaptive_humor_settings(memory)
 
-    assert settings["schema_version"] == 2
+    assert settings["schema_version"] == 3
     assert settings["participation_rate"] == 0.45
-    assert settings["reply_timeout_seconds"] == 3
+    assert settings["reply_timeout_seconds"] == 6
     assert settings["snipe_cooldown_minutes"] == 10
     assert settings["min_human_messages"] == 3
     assert settings["candidate_threshold"] == 91
     assert settings["legacy_v1_settings"] == {"opportunity_threshold": 85, "candidate_count": 3}
+
+
+def test_saved_v2_default_reply_timeout_migrates_to_six_seconds() -> None:
+    memory = runtime.default_memory()
+    memory["config"]["adaptive_humor"] = {
+        "schema_version": 2,
+        "reply_timeout_seconds": 3,
+    }
+
+    settings = runtime._adaptive_humor_settings(memory)
+
+    assert settings["schema_version"] == 3
+    assert settings["reply_timeout_seconds"] == 6
 
 
 def test_direct_reply_context_contains_timurs_previous_message_and_reply_edge() -> None:
@@ -313,6 +326,59 @@ def test_text_handler_uses_cached_bot_id_without_get_me_request() -> None:
         asyncio.run(runtime.text_handler(update, context))
 
     assert should_reply.call_args.args[2] == 999
+
+
+def test_text_reply_to_photo_uses_vision_instead_of_text_model() -> None:
+    class DownloadedFile:
+        async def download_as_bytearray(self) -> bytearray:
+            return bytearray(b"image-bytes")
+
+    class CachedBot:
+        id = 999
+        get_file = AsyncMock(return_value=DownloadedFile())
+
+    replied_photo = SimpleNamespace(photo=[SimpleNamespace(file_id="photo-file")])
+    message = SimpleNamespace(
+        chat_id=59,
+        message_id=1003,
+        text="тимур глянь",
+        caption=None,
+        from_user=SimpleNamespace(id=7, first_name="а", username=None, is_bot=False),
+        sender_chat=None,
+        reply_to_message=replied_photo,
+    )
+    update = SimpleNamespace(effective_message=message)
+    context = SimpleNamespace(bot=CachedBot())
+    memory = runtime.default_memory()
+
+    async def run_now(_context, _chat_id, task, **_kwargs):
+        return await task
+
+    with (
+        patch.object(runtime, "load_memory", return_value=memory),
+        patch.object(runtime, "_handle_admin_pending_text", new=AsyncMock(return_value=False)),
+        patch.object(runtime, "_handle_text_feedback", new=AsyncMock(return_value=False)),
+        patch.object(runtime, "update_memory_with_message"),
+        patch.object(runtime, "_observe_chat_humor"),
+        patch.object(runtime, "_apply_message_mood_impact", return_value=False),
+        patch.object(runtime, "_sync_mood_state"),
+        patch.object(runtime, "_handle_mood_probe", new=AsyncMock(return_value=False)),
+        patch.object(runtime, "should_reply_decision", return_value=runtime.ReplyDecision(True, "прямое обращение")),
+        patch.object(runtime, "can_use_vision", return_value=True),
+        patch.object(runtime, "increase_vision_counters") as increase_counters,
+        patch.object(runtime, "call_openai_vision", new=AsyncMock(return_value="глянул")) as call_vision,
+        patch.object(runtime, "call_openai_text", new=AsyncMock(return_value="не должен вызываться")) as call_text,
+        patch.object(runtime, "_run_with_typing", side_effect=run_now),
+        patch.object(runtime, "send_reply_with_style", new=AsyncMock(return_value=True)) as send_reply,
+        patch.object(runtime, "save_memory"),
+    ):
+        asyncio.run(runtime.text_handler(update, context))
+
+    context.bot.get_file.assert_awaited_once_with("photo-file")
+    increase_counters.assert_called_once_with(memory, 59, 7)
+    call_vision.assert_awaited_once()
+    call_text.assert_not_awaited()
+    send_reply.assert_awaited_once_with(update, context, memory, "глянул", humor_plan=None)
 
 
 def test_photo_handler_uses_cached_bot_id_without_get_me_request() -> None:

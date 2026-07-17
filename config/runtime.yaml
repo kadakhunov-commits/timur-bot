@@ -41,7 +41,7 @@ adaptive_humor:
   min_human_messages_between_replies: 3
   min_human_messages_between_checks: 3
   interjection_timeout_seconds: 3
-  reply_timeout_seconds: 3
+  reply_timeout_seconds: 6
   dialogue_window_minutes: 10
   snipe_cooldown_minutes: 10
   min_human_messages: 3
