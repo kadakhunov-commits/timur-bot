@@ -35,6 +35,7 @@ class AppConfig:
     miniapp_url: str
     owner_id: int
     owner_ids: List[int]
+    premium_chat_ids: List[int]
     text_model: str
     vision_model: str
     voice_model: str
@@ -328,6 +329,16 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
     if owner_id not in owner_ids:
         owner_ids.insert(0, owner_id)
 
+    premium_chat_ids_raw = runtime.get("premium_chat_ids") if isinstance(runtime.get("premium_chat_ids"), list) else []
+    premium_chat_ids: List[int] = []
+    for item in premium_chat_ids_raw:
+        try:
+            parsed = int(item)
+        except Exception:
+            continue
+        if parsed not in premium_chat_ids:
+            premium_chat_ids.append(parsed)
+
     return AppConfig(
         base_dir=root,
         memory_path=Path(memory_path_env) if memory_path_env else root / "memory.json",
@@ -339,6 +350,7 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
         miniapp_url=miniapp_url,
         owner_id=owner_id,
         owner_ids=owner_ids,
+        premium_chat_ids=premium_chat_ids,
         text_model=openai_text_model or str(models.get("text", "gpt-4o-mini")),
         vision_model=openai_vision_model or str(models.get("vision", "gpt-4o-mini")),
         voice_model=str(models.get("voice", "gemini-3.1-flash-tts-preview")),

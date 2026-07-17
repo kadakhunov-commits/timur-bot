@@ -91,6 +91,28 @@ def test_chain_reply_falls_back_to_non_quoted_reply_without_bot_sender() -> None
     ]
 
 
+def test_premium_chat_bypasses_free_reply_cap_and_watermark() -> None:
+    memory = runtime.default_memory()
+    memory["config"]["funny_scan"]["main_chat_id"] = 0
+    message = DummyMessage(chat_id=123)
+    update = SimpleNamespace(effective_message=message)
+
+    with (
+        patch.object(runtime, "PREMIUM_CHAT_IDS", {123}),
+        patch.object(runtime, "save_memory"),
+        patch.object(runtime, "_store_bot_claim_memory"),
+        patch.object(runtime.billing, "bot_replies_today", return_value=30),
+        patch.object(runtime.billing, "register_bot_reply"),
+        patch.object(runtime.billing, "should_apply_free_watermark") as watermark,
+        patch.object(runtime.random, "random", return_value=1.0),
+    ):
+        sent = asyncio.run(runtime.send_reply_with_style(update, None, memory, "ответ"))
+
+    assert sent is True
+    assert message.reply_calls == [{"text": "ответ", "do_quote": True}]
+    watermark.assert_not_called()
+
+
 def test_ambient_reply_is_one_short_message_and_does_not_open_dialogue() -> None:
     memory = runtime.default_memory()
     message = DummyMessage()
@@ -161,7 +183,9 @@ def test_watermark_is_included_inside_final_ambient_length_limit() -> None:
     with (
         patch.object(runtime, "save_memory"),
         patch.object(runtime, "_store_bot_claim_memory"),
-        patch.object(runtime, "_is_main_chat", return_value=True),
+        patch.object(runtime, "get_chat_features", return_value={**runtime.feature_gate.FREE_FEATURES, "max_daily_replies": 1000}),
+        patch.object(runtime, "_is_main_chat", return_value=False),
+        patch.object(runtime.billing, "bot_replies_today", return_value=0),
         patch.object(runtime.billing, "register_bot_reply"),
         patch.object(runtime.billing, "should_apply_free_watermark", return_value=(True, "free тимур")),
     ):
@@ -241,7 +265,9 @@ def test_voice_success_is_not_duplicated_when_watermark_send_fails() -> None:
         patch.object(runtime, "synthesize_ogg_opus_from_text", return_value=b"ogg") as synthesize,
         patch.object(runtime, "save_memory"),
         patch.object(runtime, "_store_bot_claim_memory"),
-        patch.object(runtime, "_is_main_chat", return_value=True),
+        patch.object(runtime, "get_chat_features", return_value={**runtime.feature_gate.FREE_FEATURES, "max_daily_replies": 1000}),
+        patch.object(runtime, "_is_main_chat", return_value=False),
+        patch.object(runtime.billing, "bot_replies_today", return_value=0),
         patch.object(runtime.billing, "register_bot_reply"),
         patch.object(runtime.billing, "should_apply_free_watermark", return_value=(True, "free тимур")),
     ):

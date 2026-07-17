@@ -221,6 +221,7 @@ async_client = AsyncOpenAI(
 
 OWNER_ID = APP_CONFIG.owner_id
 OWNER_IDS = {int(x) for x in (APP_CONFIG.owner_ids or [APP_CONFIG.owner_id])}
+PREMIUM_CHAT_IDS = {int(x) for x in APP_CONFIG.premium_chat_ids}
 TEXT_MODEL = APP_CONFIG.text_model
 VISION_MODEL = APP_CONFIG.vision_model
 VOICE_MODEL = APP_CONFIG.voice_model
@@ -585,6 +586,10 @@ def _adaptive_humor_settings(memory: Dict[str, Any]) -> Dict[str, Any]:
 def _is_main_chat(memory: Dict[str, Any], chat_id: int) -> bool:
     settings = _ensure_funny_scan_config(memory.setdefault("config", {}))
     return int(settings.get("main_chat_id", 0) or 0) == int(chat_id)
+
+
+def _is_premium_chat(chat_id: int) -> bool:
+    return int(chat_id) in PREMIUM_CHAT_IDS
 
 
 def default_memory() -> Dict[str, Any]:
@@ -3199,7 +3204,7 @@ def increase_vision_counters(memory: Dict[str, Any], chat_id: int, user_id: int)
 
 
 def can_send_voice(memory: Dict[str, Any], chat_id: int) -> bool:
-    if not feature_gate.voice_allowed(get_chat_features(chat_id)):
+    if not feature_gate.voice_allowed(get_chat_features(chat_id, memory)):
         return False
 
     cfg = memory.setdefault("config", {})
@@ -3418,8 +3423,16 @@ def enforce_reply_guardrails(reply_text: str) -> str:
     return clean
 
 
-def get_chat_features(chat_id: int) -> Dict[str, Any]:
+def get_chat_features(chat_id: int, memory: Dict[str, Any] | None = None) -> Dict[str, Any]:
     """Subscription-resolved feature flags for a chat (free defaults on error)."""
+    if _is_premium_chat(chat_id) or (memory is not None and _is_main_chat(memory, chat_id)):
+        features = billing.tier_features("group_plus", "owner")
+        return {
+            **features,
+            "tier": "group_plus",
+            "entitlement_status": "internal_premium_chat",
+            "expires_at": None,
+        }
     try:
         return billing.effective_features(chat_id)
     except Exception as e:
@@ -3711,15 +3724,7 @@ def build_chat_messages(
 
     # Subscription gating: tier decides how deep тимур's memory may reach and
     # which persona modes are unlocked for this chat.
-    features = get_chat_features(message.chat_id)
-    if _is_main_chat(memory, message.chat_id):
-        features = {
-            **features,
-            "memory_depth": feature_gate.MEMORY_FULL,
-            "friend_dossiers": True,
-            "episodic_memory": True,
-            "persona_modes": list(PERSONA_MODES),
-        }
+    features = get_chat_features(message.chat_id, memory)
     active_mode = get_active_mode(memory)
     effective_mode = feature_gate.gate_mode(features, active_mode)
     mode_prompt = (
@@ -5301,8 +5306,8 @@ async def _send_reply_with_style_locked(
 
     # Daily reply quota by tier: a free chat hits a wall and тимур goes quiet,
     # which is the nudge to upgrade. Counted in one place per actual reply.
+    features = get_chat_features(message.chat_id, memory)
     try:
-        features = get_chat_features(message.chat_id)
         used_today = billing.bot_replies_today(message.chat_id)
         if not _is_main_chat(memory, message.chat_id) and not feature_gate.within_daily_reply_cap(features, used_today):
             logger.info("Дневной лимит ответов исчерпан для чата %s (tier=%s)", message.chat_id, features.get("tier"))
@@ -5314,23 +5319,24 @@ async def _send_reply_with_style_locked(
 
     use_watermark = False
     watermark_text = ""
-    try:
-        use_watermark, watermark_text = billing.should_apply_free_watermark(message.chat_id)
-        if use_watermark and watermark_text:
-            safe_watermark = enforce_reply_guardrails(watermark_text)
-            if reply_limit is None:
-                reply_text = f"{reply_text}\n\n{safe_watermark}"
-            else:
-                body_limit = reply_limit - len(safe_watermark) - 2
-                if body_limit < 1:
-                    logger.info("Watermark не помещается в лимит casual-ответа, пропускаю отправку")
-                    return False
-                bounded_body = _truncate_casual_reply(reply_text, body_limit)
-                if not bounded_body:
-                    return False
-                reply_text = f"{bounded_body}\n\n{safe_watermark}"
-    except Exception as e:
-        logger.error("Ошибка проверки водяного знака биллинга: %s", e)
+    if bool(features.get("watermark", True)):
+        try:
+            use_watermark, watermark_text = billing.should_apply_free_watermark(message.chat_id)
+            if use_watermark and watermark_text:
+                safe_watermark = enforce_reply_guardrails(watermark_text)
+                if reply_limit is None:
+                    reply_text = f"{reply_text}\n\n{safe_watermark}"
+                else:
+                    body_limit = reply_limit - len(safe_watermark) - 2
+                    if body_limit < 1:
+                        logger.info("Watermark не помещается в лимит casual-ответа, пропускаю отправку")
+                        return False
+                    bounded_body = _truncate_casual_reply(reply_text, body_limit)
+                    if not bounded_body:
+                        return False
+                    reply_text = f"{bounded_body}\n\n{safe_watermark}"
+        except Exception as e:
+            logger.error("Ошибка проверки водяного знака биллинга: %s", e)
 
     # Вторая очистка после возможной инъекции watermark-текста.
     reply_text = enforce_reply_guardrails(reply_text)
@@ -6002,12 +6008,8 @@ def _miniapp_episodes(chat_mem: Dict[str, Any], *, limit: int = 8) -> List[Dict[
     return out
 
 
-def _miniapp_subscription(chat_id: int) -> Dict[str, Any]:
-    try:
-        feats = billing.effective_features(chat_id)
-    except Exception as e:
-        logger.error("Не удалось получить фичи подписки для miniapp: %s", e)
-        feats = dict(feature_gate.FREE_FEATURES)
+def _miniapp_subscription(memory: Dict[str, Any], chat_id: int) -> Dict[str, Any]:
+    feats = get_chat_features(chat_id, memory)
     return {
         "tier": str(feats.get("tier", "free_promo")),
         "memoryDepth": str(feats.get("memory_depth", "short")),
@@ -6107,7 +6109,7 @@ def build_miniapp_launch_url(memory: Dict[str, Any], chat_id: int) -> str:
             "selectedMember": members[0]["id"] if members else "",
             "episodes": _miniapp_episodes(get_chat_mem(memory, chat_id), limit=8),
         },
-        "subscription": _miniapp_subscription(chat_id),
+        "subscription": _miniapp_subscription(memory, chat_id),
         "billing": _miniapp_billing_state(chat_id),
         "meta": {
             "systemPromptSet": bool(str(cfg.get("system_prompt_override") or "").strip()),
@@ -7879,7 +7881,7 @@ async def subscribe_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     arg = parts[1].strip().lower() if len(parts) >= 2 else ""
 
     if arg in ("", "plans", "status"):
-        feats = billing.effective_features(message.chat_id)
+        feats = get_chat_features(message.chat_id, load_memory())
         ent = billing.get_chat_entitlement(message.chat_id)
         lines = [
             "тарифы тимура (оплата пока мок):",

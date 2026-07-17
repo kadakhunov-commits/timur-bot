@@ -36,6 +36,7 @@ defaults:
     assert cfg.openai_base_url == ""
     assert cfg.owner_ids
     assert cfg.owner_id in cfg.owner_ids
+    assert cfg.premium_chat_ids == []
     assert cfg.funny_scan_defaults["review_threshold"] == 70
     assert cfg.funny_scan_defaults["owner_delivery_mode"] == "auto_forward"
     assert cfg.funny_scan_defaults["rule_min_hearts"] == 3
@@ -77,6 +78,9 @@ owner_id: 111
 owner_ids:
   - 222
   - "333"
+premium_chat_ids:
+  - -1001
+  - "-1002"
 models: {}
 limits: {}
 probabilities: {}
@@ -89,3 +93,4 @@ probabilities: {}
     cfg = load_app_config(tmp_path)
     assert cfg.owner_id == 111
     assert cfg.owner_ids == [111, 222, 333]
+    assert cfg.premium_chat_ids == [-1001, -1002]

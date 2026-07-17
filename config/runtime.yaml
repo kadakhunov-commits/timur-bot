@@ -3,6 +3,9 @@ owner_ids:
   - 428469927
   - 93135242
 
+premium_chat_ids:
+  - -1002011983899
+
 models:
   text: "deepseek/deepseek-v4-flash"
   vision: "gpt-4o-mini"

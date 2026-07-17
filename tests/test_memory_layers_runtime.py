@@ -117,6 +117,26 @@ def test_get_chat_mem_has_memory_layers() -> None:
     assert isinstance(layers.get("long_facts", []), list)
 
 
+def test_runtime_premium_chat_gets_all_plus_features_independently_of_scan_role() -> None:
+    memory = runtime.default_memory()
+    memory["config"]["funny_scan"]["main_chat_id"] = 0
+
+    with (
+        patch.object(runtime, "PREMIUM_CHAT_IDS", {-5001}),
+        patch.object(runtime.billing, "effective_features") as billing_features,
+    ):
+        features = runtime.get_chat_features(-5001, memory)
+
+    billing_features.assert_not_called()
+    assert features["tier"] == "group_plus"
+    assert features["memory_depth"] == "full"
+    assert features["voice"] is True
+    assert features["friend_dossiers"] is True
+    assert features["episodic_memory"] is True
+    assert features["watermark"] is False
+    assert features["max_daily_replies"] == 3000
+
+
 def test_context_prefers_recent_messages_layer() -> None:
     memory = runtime.default_memory()
     chat = runtime.get_chat_mem(memory, 1)
@@ -849,7 +869,7 @@ def test_voice_budget_check_and_reservation_are_atomic(tmp_path, monkeypatch) ->
     monkeypatch.setattr(runtime, "MEMORY_PATH", tmp_path / "memory.json")
     monkeypatch.setattr(runtime, "GLOBAL_DAILY_VOICE_LIMIT", 3)
     monkeypatch.setattr(runtime, "CHAT_DAILY_VOICE_LIMIT", 3)
-    monkeypatch.setattr(runtime, "get_chat_features", lambda _: {})
+    monkeypatch.setattr(runtime, "get_chat_features", lambda *_: {})
     monkeypatch.setattr(runtime.feature_gate, "voice_allowed", lambda _: True)
     initial = runtime.default_memory()
     initial["config"]["voice_usage"] = {
