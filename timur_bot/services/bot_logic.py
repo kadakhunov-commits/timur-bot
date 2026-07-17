@@ -187,7 +187,7 @@ GEMINI_API_KEY = APP_CONFIG.gemini_api_key
 MINIAPP_URL = APP_CONFIG.miniapp_url
 
 TEXT_TRANSPORT_TIMEOUT_SECONDS = 5.0
-POLZA_TEXT_PROVIDERS = ("Baidu", "Parasail", "DeepSeek")
+POLZA_TEXT_PROVIDERS = ("DeepInfra", "Baidu")
 
 
 def _text_completion_extra_body() -> Dict[str, Any]:
@@ -196,7 +196,7 @@ def _text_completion_extra_body() -> Dict[str, Any]:
             "reasoning": {"enabled": False},
             "provider": {
                 "only": list(POLZA_TEXT_PROVIDERS),
-                "sort": "latency",
+                "order": list(POLZA_TEXT_PROVIDERS),
                 "allow_fallbacks": True,
             },
         }

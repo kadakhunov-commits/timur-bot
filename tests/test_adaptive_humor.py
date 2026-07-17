@@ -341,8 +341,8 @@ def test_direct_api_call_disables_reasoning_uses_proven_providers_and_keeps_sixt
     assert create.await_args.kwargs["extra_body"] == {
         "reasoning": {"enabled": False},
         "provider": {
-            "only": ["Baidu", "Parasail", "DeepSeek"],
-            "sort": "latency",
+            "only": ["DeepInfra", "Baidu"],
+            "order": ["DeepInfra", "Baidu"],
             "allow_fallbacks": True,
         },
     }
@@ -389,12 +389,8 @@ def test_metered_fallback_is_conservative_without_provider_usage() -> None:
     assert text == "❤️ смешно"
     assert tokens >= len(messages[0]["content"].encode("utf-8"))
     assert create.await_args.kwargs["extra_body"]["reasoning"] == {"enabled": False}
-    assert create.await_args.kwargs["extra_body"]["provider"]["only"] == [
-        "Baidu",
-        "Parasail",
-        "DeepSeek",
-    ]
-    assert create.await_args.kwargs["extra_body"]["provider"]["sort"] == "latency"
+    assert create.await_args.kwargs["extra_body"]["provider"]["only"] == ["DeepInfra", "Baidu"]
+    assert create.await_args.kwargs["extra_body"]["provider"]["order"] == ["DeepInfra", "Baidu"]
 
 
 def test_non_reply_laugh_is_feedback_and_not_an_invitation_to_answer() -> None:
