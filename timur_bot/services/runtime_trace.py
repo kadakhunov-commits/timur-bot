@@ -26,6 +26,7 @@ _LLM_OUTCOME: contextvars.ContextVar[dict[str, Any]] = contextvars.ContextVar(
     "timur_runtime_llm_outcome",
     default={},
 )
+_FULL_TEXT_FIELDS = {"llm_reply_text", "delivery_reply_text"}
 
 
 def _safe_value(key: str, value: Any) -> str:
@@ -40,7 +41,7 @@ def _safe_value(key: str, value: Any) -> str:
     if isinstance(value, (bool, int, float)):
         return str(value).lower() if isinstance(value, bool) else str(value)
     text = " ".join(str(value).split())
-    if len(text) > 300:
+    if key_low not in _FULL_TEXT_FIELDS and len(text) > 300:
         text = text[:297] + "..."
     return json.dumps(text, ensure_ascii=False)
 

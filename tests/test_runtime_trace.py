@@ -36,6 +36,27 @@ def test_runtime_trace_correlates_events_and_redacts_secrets(caplog) -> None:
     assert "line one line two" in lines[1]
 
 
+def test_runtime_trace_keeps_full_reply_text_but_bounds_regular_fields(caplog) -> None:
+    full_text = "ответ " + "очень-длинный " * 40
+
+    with caplog.at_level(logging.INFO, logger="timur-bot"):
+        tokens = start_trace(runtime.logger, kind="text", chat_id=-1001, message_id=43)
+        trace_event(
+            runtime.logger,
+            "llm",
+            "request_completed",
+            llm_reply_text=full_text,
+            ordinary_detail=full_text,
+        )
+        finish_trace(runtime.logger, tokens, outcome="test")
+
+    line = next(line for line in caplog.messages if 'event="request_completed"' in line)
+    normalized = " ".join(full_text.split())
+    assert f'llm_reply_text="{normalized}"' in line
+    assert 'ordinary_detail="' in line
+    assert "..." in line
+
+
 def test_llm_outcome_from_wait_for_child_is_visible_to_parent() -> None:
     async def child() -> str:
         set_llm_outcome(status="provider_error", status_code=429)

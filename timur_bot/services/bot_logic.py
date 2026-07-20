@@ -3976,7 +3976,7 @@ async def call_openai_text(messages: List[Dict[str, Any]]) -> str:
             completion_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
             reasoning_tokens=int(getattr(completion_details, "reasoning_tokens", 0) or 0),
             visible_chars=len(text),
-            reply_preview=re.sub(r"\s+", " ", text)[:120],
+            llm_reply_text=text,
             outcome="success" if text else "empty_response",
         )
         return text
@@ -6025,7 +6025,7 @@ async def _send_reply_with_style_locked(
                 reason="reply_too_long",
                 reply_chars=len(reply_text),
                 reply_limit=reply_limit,
-                reply_preview=reply_text[:120],
+                delivery_reply_text=reply_text,
             )
             logger.info(
                 "Слишком длинный casual-ответ подавлен без обрезания: chat_id=%s chars=%s limit=%s",
@@ -6091,6 +6091,13 @@ async def _send_reply_with_style_locked(
     if reply_limit is not None and len(reply_text) > reply_limit:
         logger.error("Casual reply guard failed: len=%s limit=%s", len(reply_text), reply_limit)
         return False
+    trace_event(
+        logger,
+        "delivery",
+        "ready",
+        delivery_reply_text=reply_text,
+        reply_chars=len(reply_text),
+    )
     reply_registered = False
 
     def _register_delivered_reply() -> None:
