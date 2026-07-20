@@ -169,6 +169,13 @@ from timur_bot.services.rolling_memory import (
     select_recall as select_rolling_recall,
     status_snapshot as rolling_memory_status_snapshot,
 )
+from timur_bot.services.runtime_trace import (
+    finish_trace,
+    get_llm_outcome,
+    set_llm_outcome,
+    start_trace,
+    trace_event,
+)
 from timur_bot.services.summary import (
     SUMMARY_MAX_MESSAGES,
     SummaryWindow,
@@ -349,6 +356,17 @@ class MemoryState(dict):
 
 
 def _log_reply_decision(kind: str, decision: ReplyDecision) -> None:
+    trace_event(
+        logger,
+        "routing",
+        "reply_decision",
+        target_kind=kind,
+        should_reply=decision.should_reply,
+        reason=decision.reason,
+        threshold=decision.threshold,
+        roll=decision.roll,
+        allow_ambient_fallback=decision.allow_ambient_fallback,
+    )
     if decision.threshold is not None and decision.roll is not None:
         logger.info(
             "Решение по %s: %s | причина=%s | шанс=%.2f | бросок=%.2f",
@@ -3877,6 +3895,20 @@ def build_chat_messages(
 
 async def call_openai_text(messages: List[Dict[str, Any]]) -> str:
     started = time.perf_counter()
+    prompt_chars = sum(len(str(item.get("content", ""))) for item in messages)
+    provider_route = ",".join(POLZA_TEXT_PROVIDERS) if "polza.ai" in OPENAI_BASE_URL.lower() else "default"
+    set_llm_outcome(status="started", model=TEXT_MODEL, provider_route=provider_route)
+    trace_event(
+        logger,
+        "llm",
+        "request_started",
+        model=TEXT_MODEL,
+        provider_route=provider_route,
+        message_count=len(messages),
+        prompt_chars=prompt_chars,
+        max_tokens=60,
+        transport_timeout_seconds=TEXT_TRANSPORT_TIMEOUT_SECONDS,
+    )
     try:
         response = await async_client.chat.completions.create(
             model=TEXT_MODEL,
@@ -3897,12 +3929,54 @@ async def call_openai_text(messages: List[Dict[str, Any]]) -> str:
             int(getattr(completion_details, "reasoning_tokens", 0) or 0),
             len(text),
         )
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        set_llm_outcome(
+            status="success" if text else "empty_response",
+            model=TEXT_MODEL,
+            provider_route=provider_route,
+            latency_ms=latency_ms,
+            finish_reason=getattr(response.choices[0], "finish_reason", None),
+            visible_chars=len(text),
+        )
+        trace_event(
+            logger,
+            "llm",
+            "request_completed",
+            latency_ms=latency_ms,
+            finish_reason=getattr(response.choices[0], "finish_reason", None),
+            prompt_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
+            completion_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
+            reasoning_tokens=int(getattr(completion_details, "reasoning_tokens", 0) or 0),
+            visible_chars=len(text),
+            outcome="success" if text else "empty_response",
+        )
         return text
 
     except Exception as e:
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        status_code = getattr(e, "status_code", None)
+        error_type = type(e).__name__
+        set_llm_outcome(
+            status="provider_error",
+            model=TEXT_MODEL,
+            provider_route=provider_route,
+            latency_ms=latency_ms,
+            status_code=status_code,
+            error_type=error_type,
+        )
+        trace_event(
+            logger,
+            "llm",
+            "request_failed",
+            level=logging.ERROR,
+            latency_ms=latency_ms,
+            status_code=status_code,
+            error_type=error_type,
+            error=e,
+        )
         logger.error(
             "Ошибка OpenAI при генерации текста после %s мс: %s",
-            int((time.perf_counter() - started) * 1000),
+            latency_ms,
             e,
         )
         return ""
@@ -3928,8 +4002,20 @@ async def call_openai_metered(
     *,
     max_tokens: int,
     temperature: float,
+    purpose: str = "unspecified",
 ) -> tuple[str, int]:
     """Return one bounded completion and its total token cost."""
+    started = time.perf_counter()
+    llm_call_id = uuid.uuid4().hex[:12]
+    logger.info(
+        "LLM metered started: llm_call_id=%s purpose=%s model=%s prompt_messages=%s prompt_chars=%s max_tokens=%s",
+        llm_call_id,
+        purpose,
+        TEXT_MODEL,
+        len(messages),
+        sum(len(str(item.get("content", ""))) for item in messages),
+        max_tokens,
+    )
     try:
         response = await async_client.chat.completions.create(
             model=TEXT_MODEL,
@@ -3947,9 +4033,48 @@ async def call_openai_metered(
             input_ceiling = sum(len(str(item.get("content", "")).encode("utf-8")) + 16 for item in messages) + 16
             output_ceiling = min(max(1, int(max_tokens)), len(text.encode("utf-8"))) if text else 0
             total_tokens = max(1, input_ceiling + output_ceiling)
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        logger.info(
+            "LLM metered completed: llm_call_id=%s purpose=%s latency_ms=%s total_tokens=%s visible_chars=%s",
+            llm_call_id,
+            purpose,
+            latency_ms,
+            total_tokens,
+            len(text),
+        )
+        trace_event(
+            logger,
+            "llm_metered",
+            "completed",
+            llm_call_id=llm_call_id,
+            purpose=purpose,
+            latency_ms=latency_ms,
+            total_tokens=total_tokens,
+            visible_chars=len(text),
+        )
         return text, total_tokens
     except Exception as e:
-        logger.error("Ошибка OpenAI в adaptive humor: %s", e)
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        logger.error(
+            "LLM metered failed: llm_call_id=%s purpose=%s latency_ms=%s status_code=%s error_type=%s error=%s",
+            llm_call_id,
+            purpose,
+            latency_ms,
+            getattr(e, "status_code", None),
+            type(e).__name__,
+            e,
+        )
+        trace_event(
+            logger,
+            "llm_metered",
+            "failed",
+            level=logging.ERROR,
+            llm_call_id=llm_call_id,
+            purpose=purpose,
+            latency_ms=latency_ms,
+            status_code=getattr(e, "status_code", None),
+            error_type=type(e).__name__,
+        )
         return "", 0
 
 
@@ -4002,8 +4127,18 @@ async def _maybe_send_adaptive_snipe(
         return False
     settings = _adaptive_humor_settings(memory)
     chat_mem = get_chat_mem(memory, message.chat_id)
+    trace_event(
+        logger,
+        "adaptive_humor",
+        "check_started",
+        enabled=settings.get("enabled"),
+        live_snipe_enabled=settings.get("live_snipe_enabled"),
+        participation_rate=settings.get("participation_rate"),
+        daily_token_budget=settings.get("background_daily_token_budget"),
+    )
     if not settings.get("enabled") or not settings.get("live_snipe_enabled"):
         _adaptive_metric(chat_mem, "disabled")
+        trace_event(logger, "adaptive_humor", "abstained", reason="disabled")
         return False
     check_allowed = interjection_check_allowed(
         chat_mem,
@@ -4020,12 +4155,30 @@ async def _maybe_send_adaptive_snipe(
     )
     if not cooldown_allowed:
         _adaptive_metric(chat_mem, "cooldown_abstain")
+        trace_event(
+            logger,
+            "adaptive_humor",
+            "abstained",
+            reason="conversation_gate",
+            check_allowed=check_allowed,
+            reply_gap_allowed=reply_gap_allowed,
+            cooldown_allowed=cooldown_allowed,
+        )
         return False
 
     mark_interjection_checked(chat_mem)
-    if random.random() >= float(settings["participation_rate"]):
+    participation_roll = random.random()
+    if participation_roll >= float(settings["participation_rate"]):
         _adaptive_metric(chat_mem, "participation_abstain")
         record_humor_decision(chat_mem, action="SILENCE", sent=False, reason_codes=["participation_roll"])
+        trace_event(
+            logger,
+            "adaptive_humor",
+            "abstained",
+            reason="participation_roll",
+            threshold=settings["participation_rate"],
+            roll=participation_roll,
+        )
         return False
 
     used_before = background_tokens_used_today(chat_mem)
@@ -4033,6 +4186,14 @@ async def _maybe_send_adaptive_snipe(
     if background_budget_blocked_today(chat_mem) or used_before >= daily_budget:
         _adaptive_metric(chat_mem, "budget_abstain")
         record_humor_decision(chat_mem, action="SILENCE", sent=False, reason_codes=["daily_token_budget"])
+        trace_event(
+            logger,
+            "adaptive_humor",
+            "abstained",
+            reason="daily_token_budget",
+            tokens_used=used_before,
+            token_budget=daily_budget,
+        )
         return False
 
     mark_snipe_attempt(chat_mem)
@@ -4073,13 +4234,32 @@ async def _maybe_send_adaptive_snipe(
     if used_before + writer_ceiling > daily_budget:
         record_humor_decision(chat_mem, action="SILENCE", sent=False, reason_codes=["daily_token_budget"])
         _adaptive_metric(chat_mem, "budget_abstain")
+        trace_event(
+            logger,
+            "adaptive_humor",
+            "abstained",
+            reason="writer_budget_ceiling",
+            tokens_used=used_before,
+            request_ceiling=writer_ceiling,
+            token_budget=daily_budget,
+        )
         return False
     writer_reserved = reserve_background_tokens(chat_mem, writer_ceiling)
+    trace_event(
+        logger,
+        "adaptive_humor",
+        "writer_started",
+        context_messages=len(history),
+        positive_example=bool(positive_example),
+        blocked_callbacks=len(blocked_callbacks),
+        reserved_tokens=writer_reserved,
+    )
     try:
         writer_raw, writer_tokens = await call_openai_metered(
             writer_messages,
             max_tokens=int(settings["director_max_tokens"]),
             temperature=0.9,
+            purpose="adaptive_humor_writer",
         )
     except asyncio.CancelledError:
         record_humor_decision(
@@ -4096,6 +4276,17 @@ async def _maybe_send_adaptive_snipe(
     writer_reported = writer_tokens if writer_tokens > 0 else writer_reserved
     writer_charged = settle_background_tokens(chat_mem, reserved=writer_reserved, actual=writer_reported)
     director = parse_director(writer_raw)
+    trace_event(
+        logger,
+        "adaptive_humor",
+        "writer_completed",
+        reported_tokens=writer_tokens,
+        charged_tokens=writer_charged,
+        response_chars=len(writer_raw),
+        should_attempt=director.get("should_attempt"),
+        latest_message_funny=director.get("latest_message_funny"),
+        proposed_candidates=len(director.get("candidates", [])),
+    )
     if not director.get("should_attempt") and not director.get("latest_message_funny"):
         latency_ms = int((time.perf_counter() - started) * 1000)
         record_humor_decision(
@@ -4108,6 +4299,7 @@ async def _maybe_send_adaptive_snipe(
             charge_usage=False,
         )
         _adaptive_metric(chat_mem, "writer_abstain")
+        trace_event(logger, "adaptive_humor", "abstained", reason="writer_abstain", latency_ms=latency_ms)
         return False
 
     filter_recent_outputs = list(recent_outputs)
@@ -4138,6 +4330,15 @@ async def _maybe_send_adaptive_snipe(
             charge_usage=False,
         )
         _adaptive_metric(chat_mem, "hard_filter_abstain")
+        trace_event(
+            logger,
+            "adaptive_humor",
+            "abstained",
+            reason="hard_filter_empty",
+            proposed_candidates=len(director.get("candidates", [])),
+            accepted_candidates=0,
+            latency_ms=latency_ms,
+        )
         return False
 
     critic_prompt = critic_messages(
@@ -4161,13 +4362,31 @@ async def _maybe_send_adaptive_snipe(
             charge_usage=False,
         )
         _adaptive_metric(chat_mem, "budget_abstain")
+        trace_event(
+            logger,
+            "adaptive_humor",
+            "abstained",
+            reason="critic_budget_ceiling",
+            tokens_used=background_tokens_used_today(chat_mem),
+            request_ceiling=critic_ceiling,
+            token_budget=daily_budget,
+        )
         return False
     critic_reserved = reserve_background_tokens(chat_mem, critic_ceiling)
+    trace_event(
+        logger,
+        "adaptive_humor",
+        "critic_started",
+        candidates=len(candidates),
+        reaction_candidate=bool(reaction_candidate),
+        reserved_tokens=critic_reserved,
+    )
     try:
         critic_raw, critic_tokens = await call_openai_metered(
             critic_prompt,
             max_tokens=int(settings["critic_max_tokens"]),
             temperature=0.1,
+            purpose="adaptive_humor_critic",
         )
     except asyncio.CancelledError:
         record_humor_decision(
@@ -4193,6 +4412,20 @@ async def _maybe_send_adaptive_snipe(
     threshold = int(settings["candidate_threshold"])
     joke_approved = winner_index is not None and candidate_score >= threshold
     reaction_approved = bool(reaction_candidate and critic_decision["react"] and reaction_score >= threshold)
+    trace_event(
+        logger,
+        "adaptive_humor",
+        "critic_completed",
+        winner_index=winner_index,
+        candidate_score=candidate_score,
+        reaction_score=reaction_score,
+        threshold=threshold,
+        joke_approved=joke_approved,
+        reaction_approved=reaction_approved,
+        reason_codes=reason_codes,
+        token_usage=token_usage,
+        latency_ms=latency_ms,
+    )
     reacted = False
     if reaction_approved:
         reacted = await _set_funny_heart_reaction(context, message)
@@ -4214,6 +4447,7 @@ async def _maybe_send_adaptive_snipe(
             candidate_score,
             reaction_score,
         )
+        trace_event(logger, "adaptive_humor", "abstained", reason="critic_abstain")
         return False
 
     if not joke_approved:
@@ -4227,6 +4461,7 @@ async def _maybe_send_adaptive_snipe(
             charge_usage=False,
         )
         save_memory(memory)
+        trace_event(logger, "adaptive_humor", "reaction_sent", joke_sent=False)
         return True
 
     winner_row = candidates[winner_index]
@@ -4243,6 +4478,7 @@ async def _maybe_send_adaptive_snipe(
         )
         if reacted:
             save_memory(memory)
+        trace_event(logger, "adaptive_humor", "abstained", reason="recent_duplicate", reacted=reacted)
         return reacted
 
     callback_key = str(winner_row.get("callback_key", "")).strip()
@@ -4290,6 +4526,7 @@ async def _maybe_send_adaptive_snipe(
     )
     _adaptive_metric(chat_mem, "sent" if sent else "send_rejected")
     save_memory(memory)
+    trace_event(logger, "adaptive_humor", "completed", joke_sent=sent, reacted=reacted)
     return sent or reacted
 
 
@@ -4339,6 +4576,18 @@ async def call_openai_vision(
         },
     ]
 
+    started = time.perf_counter()
+    set_llm_outcome(status="started", model=VISION_MODEL, provider_route="vision_default")
+    trace_event(
+        logger,
+        "vision_llm",
+        "request_started",
+        model=VISION_MODEL,
+        context_messages=len(hist_lines),
+        prompt_chars=len(text_context),
+        encoded_image_bytes=len(image_b64),
+        max_tokens=100,
+    )
     try:
         response = await asyncio.to_thread(
             client.chat.completions.create,
@@ -4350,9 +4599,43 @@ async def call_openai_vision(
             max_tokens=100,
             temperature=0.85,
         )
-        return (response.choices[0].message.content or "").strip()
+        text = (response.choices[0].message.content or "").strip()
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        set_llm_outcome(
+            status="success" if text else "empty_response",
+            model=VISION_MODEL,
+            latency_ms=latency_ms,
+            visible_chars=len(text),
+        )
+        trace_event(
+            logger,
+            "vision_llm",
+            "request_completed",
+            latency_ms=latency_ms,
+            visible_chars=len(text),
+            outcome="success" if text else "empty_response",
+        )
+        return text
 
     except Exception as e:
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        set_llm_outcome(
+            status="provider_error",
+            model=VISION_MODEL,
+            latency_ms=latency_ms,
+            status_code=getattr(e, "status_code", None),
+            error_type=type(e).__name__,
+        )
+        trace_event(
+            logger,
+            "vision_llm",
+            "request_failed",
+            level=logging.ERROR,
+            latency_ms=latency_ms,
+            status_code=getattr(e, "status_code", None),
+            error_type=type(e).__name__,
+            error=e,
+        )
         logger.error("Ошибка OpenAI при обработке изображения: %s", e)
         return ""
 
@@ -4374,6 +4657,7 @@ async def _run_with_typing(
 ) -> Any:
     lock = _CHAT_GENERATION_LOCKS.setdefault(int(chat_id), asyncio.Lock())
     if lock.locked():
+        trace_event(logger, "generation", "skipped_busy", reason="previous_generation_in_progress")
         logger.info("Пропускаю генерацию в чате %s: предыдущий ответ ещё не завершился", chat_id)
         if hasattr(task_coro, "close"):
             task_coro.close()
@@ -4398,6 +4682,14 @@ async def _run_with_typing_locked(
     show_typing: bool,
 ) -> Any:
     stop_event = asyncio.Event()
+    started = time.perf_counter()
+    trace_event(
+        logger,
+        "generation",
+        "started",
+        timeout_seconds=timeout_seconds,
+        show_typing=show_typing,
+    )
 
     async def _typing_pulse() -> None:
         while not stop_event.is_set():
@@ -4417,8 +4709,27 @@ async def _run_with_typing_locked(
 
     pulse_task = asyncio.create_task(_typing_pulse()) if show_typing else None
     try:
-        return await asyncio.wait_for(task_coro, timeout=max(0.01, float(timeout_seconds)))
+        result = await asyncio.wait_for(task_coro, timeout=max(0.01, float(timeout_seconds)))
+        trace_event(
+            logger,
+            "generation",
+            "completed",
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            result_empty=not bool(result),
+            result_chars=len(result) if isinstance(result, str) else None,
+        )
+        return result
     except asyncio.TimeoutError:
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        set_llm_outcome(status="timeout", latency_ms=duration_ms, timeout_seconds=timeout_seconds)
+        trace_event(
+            logger,
+            "generation",
+            "timed_out",
+            level=logging.WARNING,
+            duration_ms=duration_ms,
+            timeout_seconds=timeout_seconds,
+        )
         logger.warning("Операция в чате %s превысила %.1f с и была отменена", chat_id, timeout_seconds)
         return ""
     finally:
@@ -5000,13 +5311,31 @@ async def _process_rolling_memory_once(*, chat_id: int | None = None) -> Dict[st
             token_ceiling = _completion_token_ceiling(messages, int(settings["summary_max_tokens"]))
             used_tokens = int(state.get("daily_usage", {}).get("tokens", 0))
             if used_tokens + token_ceiling > int(settings["daily_token_budget_per_chat"]):
+                logger.info(
+                    "Rolling memory skipped: chat_id=%s candidate_id=%s reason=daily_token_budget used_tokens=%s request_ceiling=%s budget=%s",
+                    current_chat_id,
+                    candidate.get("id"),
+                    used_tokens,
+                    token_ceiling,
+                    settings["daily_token_budget_per_chat"],
+                )
                 continue
 
             summary["attempted"] += 1
+            logger.info(
+                "Rolling memory processing started: chat_id=%s candidate_id=%s attempt=%s context_messages=%s pending=%s active=%s",
+                current_chat_id,
+                candidate.get("id"),
+                int(candidate.get("attempts", 0)) + 1,
+                len(candidate.get("context", [])),
+                len(state.get("pending", [])),
+                len(state.get("items", [])),
+            )
             raw, token_usage = await call_openai_metered(
                 messages,
                 max_tokens=int(settings["summary_max_tokens"]),
                 temperature=0.2,
+                purpose="rolling_memory_summary",
             )
 
             # The LLM call yields control. Reload before committing so a message
@@ -5024,6 +5353,10 @@ async def _process_rolling_memory_once(*, chat_id: int | None = None) -> Dict[st
                 None,
             )
             if candidate is None:
+                logger.info(
+                    "Rolling memory result discarded: chat_id=%s reason=candidate_missing_after_reload",
+                    current_chat_id,
+                )
                 continue
             decision = parse_rolling_summary(raw, settings)
             if decision is None:
@@ -5034,6 +5367,13 @@ async def _process_rolling_memory_once(*, chat_id: int | None = None) -> Dict[st
                     token_usage=token_usage or token_ceiling,
                 )
                 summary["errors"] += 1
+                logger.warning(
+                    "Rolling memory processing failed: chat_id=%s candidate_id=%s reason=invalid_or_empty_llm_response token_usage=%s next_attempt_at=%s",
+                    current_chat_id,
+                    candidate.get("id"),
+                    token_usage or token_ceiling,
+                    candidate.get("next_attempt_at"),
+                )
             else:
                 item = complete_rolling_candidate(
                     state,
@@ -5044,8 +5384,23 @@ async def _process_rolling_memory_once(*, chat_id: int | None = None) -> Dict[st
                 )
                 if item:
                     summary["created"] += 1
+                    logger.info(
+                        "Rolling memory created: chat_id=%s candidate_id=%s item_id=%s token_usage=%s expires_at=%s",
+                        current_chat_id,
+                        candidate.get("id"),
+                        item.get("id"),
+                        token_usage or token_ceiling,
+                        item.get("expires_at"),
+                    )
                 else:
                     summary["rejected"] += 1
+                    logger.info(
+                        "Rolling memory rejected: chat_id=%s candidate_id=%s keep=%s token_usage=%s",
+                        current_chat_id,
+                        candidate.get("id"),
+                        decision.get("keep"),
+                        token_usage or token_ceiling,
+                    )
             save_memory(memory)
     return summary
 
@@ -5444,19 +5799,50 @@ async def send_reply_with_style(
     message = update.effective_message
     if not message:
         return False
+    started = time.perf_counter()
+    trace_event(
+        logger,
+        "delivery",
+        "started",
+        reply_chars=len(reply_text or ""),
+        technical_fallback=reply_text == TECHNICAL_FALLBACK_REPLY,
+        force_voice=force_voice,
+        is_snipe=is_snipe,
+        allow_long_reply=allow_long_reply,
+    )
     lock = _REPLY_SEND_LOCKS.setdefault(int(message.chat_id), asyncio.Lock())
-    async with lock:
-        return await _send_reply_with_style_locked(
-            update,
-            context,
-            memory,
-            reply_text,
-            force_voice=force_voice,
-            humor_plan=humor_plan,
-            is_snipe=is_snipe,
-            open_dialogue=open_dialogue,
-            allow_long_reply=allow_long_reply,
+    try:
+        async with lock:
+            sent = await _send_reply_with_style_locked(
+                update,
+                context,
+                memory,
+                reply_text,
+                force_voice=force_voice,
+                humor_plan=humor_plan,
+                is_snipe=is_snipe,
+                open_dialogue=open_dialogue,
+                allow_long_reply=allow_long_reply,
+            )
+    except Exception as e:
+        trace_event(
+            logger,
+            "delivery",
+            "failed",
+            level=logging.ERROR,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            error_type=type(e).__name__,
+            error=e,
         )
+        raise
+    trace_event(
+        logger,
+        "delivery",
+        "completed",
+        duration_ms=int((time.perf_counter() - started) * 1000),
+        sent=sent,
+    )
+    return sent
 
 
 async def _send_reply_with_style_locked(
@@ -7630,6 +8016,13 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
 
     is_feedback_message = await _handle_text_feedback(update, memory)
+    trace_tokens = start_trace(
+        logger,
+        kind="text",
+        chat_id=message.chat_id,
+        message_id=int(getattr(message, "message_id", 0) or 0),
+    )
+    handler_outcome = "completed_without_reply"
 
     logger.info(
         "Входящее текстовое сообщение: user_id=%s username=%s chat_id=%s текст=%s",
@@ -7641,19 +8034,40 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     event_key = _make_event_key("text", message.chat_id, message.message_id)
     if not _try_acquire_inflight_event(event_key):
+        trace_event(logger, "deduplication", "skipped", reason="inflight", event_key=event_key)
         logger.info("duplicate skipped: inflight key=%s", event_key)
+        finish_trace(logger, trace_tokens, outcome="duplicate_inflight")
         return
     try:
         chat_mem = get_chat_mem(memory, message.chat_id)
         if _is_processed_event(chat_mem, event_key):
+            handler_outcome = "duplicate_processed"
+            trace_event(logger, "deduplication", "skipped", reason="processed", event_key=event_key)
             logger.info("duplicate skipped: processed key=%s", event_key)
             return
         _mark_processed_event(chat_mem, event_key)
+        memory_started = time.perf_counter()
         update_memory_with_message(memory, message)
         _observe_chat_humor(memory, message)
+        rolling_state = (
+            chat_mem.get("memory_layers", {}).get("rolling_memory", {})
+            if isinstance(chat_mem.get("memory_layers"), dict)
+            else {}
+        )
+        trace_event(
+            logger,
+            "memory",
+            "updated",
+            duration_ms=int((time.perf_counter() - memory_started) * 1000),
+            history_items=len(chat_mem.get("history", [])),
+            rolling_pending=len(rolling_state.get("pending", [])) if isinstance(rolling_state, dict) else 0,
+            rolling_active=len(rolling_state.get("items", [])) if isinstance(rolling_state, dict) else 0,
+        )
         if is_feedback_message:
             # A laugh/critique is training data, not an invitation to reply "лол" back.
             save_memory(memory)
+            handler_outcome = "feedback_recorded"
+            trace_event(logger, "routing", "feedback_only")
             return
         if _apply_message_mood_impact(memory, message):
             save_memory(memory)
@@ -7661,6 +8075,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
         user_text = _extract_message_text(message)
         if _looks_like_story_request(user_text):
+            trace_event(logger, "routing", "story_request")
             entry = _get_last_story(memory, chat_id=message.chat_id)
             if entry:
                 story_text = str(entry.get("text", "")).strip()
@@ -7672,7 +8087,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 )
                 _append_story_log(memory, story_text, source="on_demand", chat_id=message.chat_id)
                 save_memory(memory)
-            await send_reply_with_style(
+            sent = await send_reply_with_style(
                 update,
                 context,
                 memory,
@@ -7680,9 +8095,12 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 humor_plan=None,
                 allow_long_reply=True,
             )
+            handler_outcome = "story_sent" if sent else "story_not_sent"
             return
 
         if await _handle_mood_probe(update, context, memory):
+            handler_outcome = "mood_probe_handled"
+            trace_event(logger, "routing", "mood_probe_handled")
             return
 
         bot_id = context.bot.id
@@ -7692,6 +8110,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         if not decision.should_reply:
             if not decision.allow_ambient_fallback:
                 save_memory(memory)
+                handler_outcome = "reply_skipped"
                 return
             await _run_with_typing(
                 context,
@@ -7701,15 +8120,19 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 show_typing=False,
             )
             save_memory(memory)
+            handler_outcome = "ambient_path_completed"
             return
 
         replied_message = message.reply_to_message
         if replied_message and getattr(replied_message, "photo", None):
             user_id = int(author.get("user_id", 0) or 0)
             if not can_use_vision(memory, message.chat_id, user_id):
+                handler_outcome = "vision_quota_exhausted"
+                trace_event(logger, "vision", "quota_exhausted", user_id=user_id)
                 logger.info("Лимит vision исчерпан, фото из reply пропускаю")
                 return
 
+            trace_event(logger, "vision", "reply_photo_download_started")
             logger.info("Текстовое обращение ссылается на фото, использую vision")
             image_b64 = await _download_photo_as_base64(context, replied_message)
             increase_vision_counters(memory, message.chat_id, user_id)
@@ -7720,9 +8143,12 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             )
             reply_text = sanitize_reply_text(reply_text)
             if not reply_text:
+                handler_outcome = "vision_empty"
+                trace_event(logger, "vision", "empty_response")
                 logger.info("Vision-ответ на фото из reply получился пустым, пропускаю отправку")
                 return
-            await send_reply_with_style(update, context, memory, reply_text, humor_plan=None)
+            sent = await send_reply_with_style(update, context, memory, reply_text, humor_plan=None)
+            handler_outcome = "vision_reply_sent" if sent else "vision_reply_not_sent"
             return
 
         logger.info(
@@ -7732,6 +8158,18 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
         humor_plan = build_humor_plan(memory, message)
         messages = build_chat_messages(memory, message, humor_plan=humor_plan)
+        trace_event(
+            logger,
+            "prompt",
+            "built",
+            active_mode=get_active_mode(memory),
+            toxicity=get_effective_toxicity_level(memory),
+            humor_mode=humor_plan.get("mode") if isinstance(humor_plan, dict) else None,
+            scene_type=humor_plan.get("scene_type") if isinstance(humor_plan, dict) else None,
+            context_messages=len(humor_plan.get("context", [])) if isinstance(humor_plan, dict) else 0,
+            prompt_messages=len(messages),
+            prompt_chars=sum(len(str(item.get("content", ""))) for item in messages),
+        )
         reply_text = await _run_with_typing(
             context,
             message.chat_id,
@@ -7740,11 +8178,22 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
         technical_fallback = not bool(reply_text)
         if not reply_text:
+            llm_outcome = get_llm_outcome()
+            trace_event(
+                logger,
+                "fallback",
+                "technical_reply_selected",
+                level=logging.WARNING,
+                reason=llm_outcome.get("status") or "empty_generation",
+                llm_status_code=llm_outcome.get("status_code"),
+                llm_error_type=llm_outcome.get("error_type"),
+                llm_latency_ms=llm_outcome.get("latency_ms"),
+            )
             logger.warning("Прямой LLM-ответ пустой, отправляю нелипкую техническую заглушку")
             reply_text = TECHNICAL_FALLBACK_REPLY
 
         force_voice = is_voice_codeword(user_text)
-        await send_reply_with_style(
+        sent = await send_reply_with_style(
             update,
             context,
             memory,
@@ -7753,8 +8202,23 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             humor_plan=humor_plan,
             open_dialogue=not technical_fallback,
         )
+        handler_outcome = "technical_fallback_sent" if technical_fallback and sent else (
+            "reply_sent" if sent else "reply_not_sent"
+        )
+    except Exception as e:
+        handler_outcome = "exception"
+        trace_event(
+            logger,
+            "handler",
+            "failed",
+            level=logging.ERROR,
+            error_type=type(e).__name__,
+            error=e,
+        )
+        raise
     finally:
         _release_inflight_event(event_key)
+        finish_trace(logger, trace_tokens, outcome=handler_outcome)
 
 
 async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -7766,6 +8230,13 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     author = _resolve_author_from_message(message) or {}
     chat_id = message.chat_id
+    trace_tokens = start_trace(
+        logger,
+        kind="photo",
+        chat_id=chat_id,
+        message_id=int(getattr(message, "message_id", 0) or 0),
+    )
+    handler_outcome = "completed_without_reply"
 
     logger.info(
         "Входящее фото: user_id=%s username=%s chat_id=%s",
@@ -7776,11 +8247,15 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     event_key = _make_event_key("photo", message.chat_id, message.message_id)
     if not _try_acquire_inflight_event(event_key):
+        trace_event(logger, "deduplication", "skipped", reason="inflight", event_key=event_key)
         logger.info("duplicate skipped: inflight key=%s", event_key)
+        finish_trace(logger, trace_tokens, outcome="duplicate_inflight")
         return
     try:
         chat_mem = get_chat_mem(memory, message.chat_id)
         if _is_processed_event(chat_mem, event_key):
+            handler_outcome = "duplicate_processed"
+            trace_event(logger, "deduplication", "skipped", reason="processed", event_key=event_key)
             logger.info("duplicate skipped: processed key=%s", event_key)
             return
         _mark_processed_event(chat_mem, event_key)
@@ -7813,13 +8288,25 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
         _log_reply_decision("фото", decision)
         if not decision.should_reply:
+            handler_outcome = "reply_skipped"
             return
 
         if not can_use_vision(memory, chat_id, int(author.get("user_id", 0) or 0)):
+            handler_outcome = "vision_quota_exhausted"
+            trace_event(logger, "vision", "quota_exhausted", user_id=author.get("user_id"))
             logger.info("Лимит vision исчерпан, фото пропускаю")
             return
 
+        download_started = time.perf_counter()
+        trace_event(logger, "vision", "photo_download_started")
         image_b64 = await _download_photo_as_base64(context, message)
+        trace_event(
+            logger,
+            "vision",
+            "photo_download_completed",
+            duration_ms=int((time.perf_counter() - download_started) * 1000),
+            encoded_bytes=len(image_b64),
+        )
 
         increase_vision_counters(memory, chat_id, int(author.get("user_id", 0) or 0))
 
@@ -7827,12 +8314,27 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         reply_text = sanitize_reply_text(reply_text)
 
         if not reply_text:
+            handler_outcome = "vision_empty"
+            trace_event(logger, "vision", "empty_response")
             logger.info("Vision-ответ получился пустым, пропускаю отправку")
             return
 
-        await send_reply_with_style(update, context, memory, reply_text, humor_plan=None)
+        sent = await send_reply_with_style(update, context, memory, reply_text, humor_plan=None)
+        handler_outcome = "vision_reply_sent" if sent else "vision_reply_not_sent"
+    except Exception as e:
+        handler_outcome = "exception"
+        trace_event(
+            logger,
+            "handler",
+            "failed",
+            level=logging.ERROR,
+            error_type=type(e).__name__,
+            error=e,
+        )
+        raise
     finally:
         _release_inflight_event(event_key)
+        finish_trace(logger, trace_tokens, outcome=handler_outcome)
 
 
 # =========================
