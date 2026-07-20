@@ -113,6 +113,52 @@ def test_premium_chat_bypasses_free_reply_cap_and_watermark() -> None:
     watermark.assert_not_called()
 
 
+def test_recent_exact_bot_reply_is_suppressed_before_delivery() -> None:
+    memory = runtime.default_memory()
+    message = DummyMessage(chat_id=123)
+    update = SimpleNamespace(effective_message=message)
+    runtime.get_chat_mem(memory, 123)["history"] = [
+        {"message_id": 90, "text": "Заценил.", "is_bot": True},
+        {"message_id": 91, "text": "погуннил?", "is_bot": False},
+    ]
+
+    with (
+        patch.object(runtime.billing, "bot_replies_today") as replies_today,
+        patch.object(runtime.billing, "register_bot_reply") as register_reply,
+    ):
+        sent = asyncio.run(runtime.send_reply_with_style(update, None, memory, "  заценил  "))
+
+    assert sent is False
+    assert message.reply_calls == []
+    replies_today.assert_not_called()
+    register_reply.assert_not_called()
+
+
+def test_exact_bot_reply_is_allowed_after_history_window() -> None:
+    memory = runtime.default_memory()
+    message = DummyMessage(chat_id=123)
+    update = SimpleNamespace(effective_message=message)
+    history = [{"message_id": 80, "text": "заценил", "is_bot": True}]
+    history.extend(
+        {"message_id": 81 + index, "text": f"новая реплика {index}", "is_bot": False}
+        for index in range(runtime.RECENT_EXACT_REPLY_HISTORY_WINDOW)
+    )
+    runtime.get_chat_mem(memory, 123)["history"] = history
+
+    with (
+        patch.object(runtime, "save_memory"),
+        patch.object(runtime, "_store_bot_claim_memory"),
+        patch.object(runtime.billing, "bot_replies_today", return_value=0),
+        patch.object(runtime.billing, "register_bot_reply"),
+        patch.object(runtime.billing, "should_apply_free_watermark", return_value=(False, "")),
+        patch.object(runtime.random, "random", return_value=1.0),
+    ):
+        sent = asyncio.run(runtime.send_reply_with_style(update, None, memory, "заценил"))
+
+    assert sent is True
+    assert message.reply_calls == [{"text": "заценил", "do_quote": True}]
+
+
 def test_ambient_reply_is_one_short_message_and_does_not_open_dialogue() -> None:
     memory = runtime.default_memory()
     message = DummyMessage()

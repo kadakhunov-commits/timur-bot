@@ -40,6 +40,15 @@ def test_direct_model_question_prompt_contains_truthful_runtime_model() -> None:
     assert len(messages[0]["content"]) < 4_500
 
 
+def test_persona_knows_chat_gooning_slang() -> None:
+    prompt = runtime.DEFAULT_SYSTEM_PROMPT.lower()
+
+    assert "goon/gooning" in prompt
+    assert "гунить" in prompt
+    assert "гуннить" in prompt
+    assert "длительную дрочку" in prompt
+
+
 def test_saved_v1_adaptive_defaults_migrate_to_v6_runtime_values() -> None:
     memory = runtime.default_memory()
     memory["config"]["adaptive_humor"] = {

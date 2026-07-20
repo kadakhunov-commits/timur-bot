@@ -214,6 +214,7 @@ MINIAPP_URL = APP_CONFIG.miniapp_url
 
 TEXT_TRANSPORT_TIMEOUT_SECONDS = 9.0
 POLZA_IGNORED_TEXT_PROVIDERS = ("DeepInfra",)
+RECENT_EXACT_REPLY_HISTORY_WINDOW = 12
 
 
 def _text_completion_extra_body() -> Dict[str, Any]:
@@ -4119,6 +4120,21 @@ def _is_repeated_snipe(chat_mem: Dict[str, Any], text: str) -> bool:
     return any(normalize_token(str(item.get("text", ""))) == clean for item in outputs)
 
 
+def _is_recent_exact_bot_reply(chat_mem: Dict[str, Any], text: str) -> bool:
+    def canonical(value: Any) -> str:
+        return re.sub(r"[^a-zа-я0-9]+", " ", str(value or "").lower().replace("ё", "е")).strip()
+
+    candidate = canonical(text)
+    if not candidate:
+        return False
+    recent_timeline = list(chat_mem.get("history", []))[-RECENT_EXACT_REPLY_HISTORY_WINDOW:]
+    return any(
+        bool(item.get("is_bot")) and canonical(item.get("text")) == candidate
+        for item in recent_timeline
+        if isinstance(item, dict)
+    )
+
+
 async def _set_funny_heart_reaction(context: ContextTypes.DEFAULT_TYPE, message: Message) -> bool:
     """Best-effort ❤️ reaction; delivery failures must not suppress a text reply."""
     author = getattr(message, "from_user", None)
@@ -6006,6 +6022,19 @@ async def _send_reply_with_style_locked(
 
     if not reply_text:
         logger.info("Ответ после очистки пустой, пропускаю отправку")
+        return False
+
+    chat_mem = get_chat_mem(memory, message.chat_id)
+    if _is_recent_exact_bot_reply(chat_mem, reply_text):
+        trace_event(
+            logger,
+            "delivery",
+            "suppressed",
+            reason="recent_exact_bot_reply",
+            reply_chars=len(reply_text),
+            history_window=RECENT_EXACT_REPLY_HISTORY_WINDOW,
+        )
+        logger.info("Недавний дословный повтор ответа подавлен: chat_id=%s", message.chat_id)
         return False
 
     # Daily reply quota by tier: a free chat hits a wall and тимур goes quiet,
