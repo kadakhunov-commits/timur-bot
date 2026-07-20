@@ -3820,6 +3820,7 @@ def build_chat_messages(
         "правила быстрого ответа:\n"
         f"- строчные буквы, без эмодзи, обычно одна короткая фраза; максимум {direct_reply_max_chars} знаков\n"
         "- пиши сразу самую меткую добивку; не ставь перед ней подводку или объяснение\n"
+        "- перед ответом молча сравни буквальный, сухой и неожиданный варианты; отправь только самый естественный\n"
         "- вторую фразу пиши только если без неё теряется смысл; не объясняй шутку\n"
         "- сначала ответь по смыслу; шути только через реальную деталь текущей сцены\n"
         "- не вводи отсутствующих людей, не пересказывай реплику и не объясняй шутку\n"
@@ -3975,6 +3976,7 @@ async def call_openai_text(messages: List[Dict[str, Any]]) -> str:
             completion_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
             reasoning_tokens=int(getattr(completion_details, "reasoning_tokens", 0) or 0),
             visible_chars=len(text),
+            reply_preview=re.sub(r"\s+", " ", text)[:120],
             outcome="success" if text else "empty_response",
         )
         return text
@@ -5591,39 +5593,6 @@ def split_into_chain(text: str) -> List[str]:
     return split_into_chain_service(text)
 
 
-def _truncate_casual_reply(text: str, limit: int) -> str:
-    clean = re.sub(r"\s+", " ", text or "").strip()
-    if len(clean) <= max(1, int(limit)):
-        return clean
-    limit = max(1, int(limit))
-
-    # Models often put the actual punchline after a disposable setup. Preserve
-    # the final complete short phrase instead of blindly cutting that punchline.
-    sentence_parts = re.split(r"(?:\n+|(?<=[.!?])\s+|[;—]\s*)", text or "")
-    comma_parts = re.split(r",\s+", clean)
-    continuation_prefixes = (
-        "а ", "и ", "но ", "котор", "потому ", "чтобы ", "когда ",
-        "если ", "хотя ", "где ", "кто ", "что ", "как ", "на котор",
-        "о котор", "про котор", "с котор", "в котор", "за котор",
-    )
-    for part in reversed(sentence_parts + comma_parts):
-        candidate = re.sub(r"\s+", " ", part).strip(" ,.;:—-")
-        low = candidate.lower().replace("ё", "е")
-        if (
-            12 <= len(candidate) <= limit
-            and len(candidate.split()) >= 2
-            and not low.startswith(continuation_prefixes)
-        ):
-            return candidate
-
-    bounded = clean[:limit].rstrip()
-    if " " in bounded:
-        word_bounded = bounded.rsplit(" ", 1)[0].rstrip(" ,.;:—-")
-        if word_bounded:
-            bounded = word_bounded
-    return bounded.rstrip(" ,.;:—-")
-
-
 def build_tts_input(reply_text: str, style_prompt: str) -> str:
     directives = re.findall(r"\[[^\]]+\]", style_prompt or "")
     prefix = " ".join(part.strip() for part in directives if part.strip()).strip()
@@ -6047,17 +6016,24 @@ async def _send_reply_with_style_locked(
     elif not allow_long_reply:
         reply_limit = int(settings["direct_reply_max_chars"])
     if reply_limit is not None:
-        unbounded_reply = reply_text
-        reply_text = _truncate_casual_reply(reply_text, reply_limit)
-        if reply_text != re.sub(r"\s+", " ", unbounded_reply or "").strip():
+        reply_text = re.sub(r"\s+", " ", reply_text or "").strip()
+        if len(reply_text) > reply_limit:
             trace_event(
                 logger,
                 "delivery",
-                "compacted",
-                source_chars=len(unbounded_reply),
-                result_chars=len(reply_text),
-                selected_suffix=re.sub(r"\s+", " ", unbounded_reply).strip().endswith(reply_text),
+                "suppressed",
+                reason="reply_too_long",
+                reply_chars=len(reply_text),
+                reply_limit=reply_limit,
+                reply_preview=reply_text[:120],
             )
+            logger.info(
+                "Слишком длинный casual-ответ подавлен без обрезания: chat_id=%s chars=%s limit=%s",
+                message.chat_id,
+                len(reply_text),
+                reply_limit,
+            )
+            return False
 
     if not reply_text:
         logger.info("Ответ после очистки пустой, пропускаю отправку")
@@ -6100,13 +6076,10 @@ async def _send_reply_with_style_locked(
                     reply_text = f"{reply_text}\n\n{safe_watermark}"
                 else:
                     body_limit = reply_limit - len(safe_watermark) - 2
-                    if body_limit < 1:
+                    if body_limit < 1 or len(reply_text) > body_limit:
                         logger.info("Watermark не помещается в лимит casual-ответа, пропускаю отправку")
                         return False
-                    bounded_body = _truncate_casual_reply(reply_text, body_limit)
-                    if not bounded_body:
-                        return False
-                    reply_text = f"{bounded_body}\n\n{safe_watermark}"
+                    reply_text = f"{reply_text}\n\n{safe_watermark}"
         except Exception as e:
             logger.error("Ошибка проверки водяного знака биллинга: %s", e)
 

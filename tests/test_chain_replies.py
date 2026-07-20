@@ -159,7 +159,7 @@ def test_exact_bot_reply_is_allowed_after_history_window() -> None:
     assert message.reply_calls == [{"text": "заценил", "do_quote": True}]
 
 
-def test_ambient_reply_is_one_short_message_and_does_not_open_dialogue() -> None:
+def test_overlong_ambient_reply_is_suppressed_without_truncation() -> None:
     memory = runtime.default_memory()
     message = DummyMessage()
     update = SimpleNamespace(effective_message=message)
@@ -183,15 +183,14 @@ def test_ambient_reply_is_one_short_message_and_does_not_open_dialogue() -> None
             )
         )
 
-    assert sent is True
-    assert len(message.reply_calls) == 1
-    assert len(str(message.reply_calls[0]["text"])) <= 45
+    assert sent is False
+    assert message.reply_calls == []
     chat = runtime.get_chat_mem(memory, 123)
-    assert chat["memory_layers"]["adaptive_humor"]["dialogue"] == {}
-    assert chat["memory_layers"]["humor_scenes_v2"][-1]["output_kind"] == "ambient"
+    assert chat.get("memory_layers", {}).get("adaptive_humor", {}).get("dialogue", {}) == {}
+    assert chat.get("memory_layers", {}).get("humor_scenes_v2", []) == []
 
 
-def test_vision_style_reply_without_humor_plan_obeys_direct_short_limit() -> None:
+def test_overlong_vision_reply_is_suppressed_without_truncation() -> None:
     memory = runtime.default_memory()
     message = DummyMessage()
     update = SimpleNamespace(effective_message=message)
@@ -207,8 +206,8 @@ def test_vision_style_reply_without_humor_plan_obeys_direct_short_limit() -> Non
     ):
         sent = asyncio.run(runtime.send_reply_with_style(update, None, memory, long_reply))
 
-    assert sent is True
-    assert len(str(message.reply_calls[0]["text"])) <= 70
+    assert sent is False
+    assert message.reply_calls == []
 
 
 def test_explicit_long_reply_can_bypass_casual_limit() -> None:
@@ -264,7 +263,7 @@ def test_direct_reply_removed_by_context_guard_is_not_sent() -> None:
     assert chat.get("memory_layers", {}).get("adaptive_humor", {}).get("dialogue", {}) == {}
 
 
-def test_watermark_is_included_inside_final_ambient_length_limit() -> None:
+def test_overlong_watermarked_reply_is_suppressed_without_truncation() -> None:
     memory = runtime.default_memory()
     message = DummyMessage()
     update = SimpleNamespace(effective_message=message)
@@ -289,10 +288,8 @@ def test_watermark_is_included_inside_final_ambient_length_limit() -> None:
             )
         )
 
-    final_text = str(message.reply_calls[0]["text"])
-    assert sent is True
-    assert len(final_text) <= 45
-    assert final_text.endswith("free тимур")
+    assert sent is False
+    assert message.reply_calls == []
 
 
 def test_failed_telegram_send_does_not_consume_reply_quota() -> None:

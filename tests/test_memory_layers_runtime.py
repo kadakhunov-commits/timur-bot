@@ -143,19 +143,21 @@ def test_saved_v6_default_direct_length_migrates_to_shorter_limit() -> None:
     assert settings["direct_reply_max_chars"] == 55
 
 
-def test_casual_compaction_keeps_final_punchline_instead_of_setup() -> None:
-    reply = "да я просто решил напомнить тебе про всю эту историю. просто чтоб ты не расслаблялся"
+def test_direct_prompt_has_one_length_owner_and_requires_best_short_variant() -> None:
+    memory = runtime.default_memory()
+    message = SimpleNamespace(
+        chat_id=993,
+        text="тимур ты где",
+        caption=None,
+        message_id=10,
+        from_user=SimpleNamespace(id=7, first_name="а", username=None),
+    )
 
-    assert runtime._truncate_casual_reply(reply, 55) == "просто чтоб ты не расслаблялся"
+    prompt = runtime.build_chat_messages(memory, message, humor_plan=runtime.build_humor_plan(memory, message))[0]["content"]
 
-
-def test_casual_compaction_does_not_keep_dependent_tail() -> None:
-    reply = "ты снова придумал очень важный вопрос, на который сам уже прекрасно знаешь ответ"
-
-    compacted = runtime._truncate_casual_reply(reply, 55)
-
-    assert compacted == "ты снова придумал очень важный вопрос"
-    assert len(compacted) <= 55
+    assert "максимум 55 знаков" in prompt
+    assert "максимум 120 знаков" not in prompt
+    assert "сравни буквальный, сухой и неожиданный варианты" in prompt
 
 
 def test_direct_reply_context_contains_timurs_previous_message_and_reply_edge() -> None:
