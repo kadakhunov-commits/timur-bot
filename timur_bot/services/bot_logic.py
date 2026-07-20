@@ -632,6 +632,13 @@ def _adaptive_humor_settings(memory: Dict[str, Any]) -> Dict[str, Any]:
         if settings.get("reply_timeout_seconds") in (None, 6):
             settings["reply_timeout_seconds"] = ADAPTIVE_HUMOR_DEFAULTS["reply_timeout_seconds"]
         settings["schema_version"] = 6
+        schema_version = 6
+    if schema_version < 7:
+        # Existing chats persisted the old 70-character default. Migrate only
+        # that value so deliberate custom limits remain intact.
+        if settings.get("direct_reply_max_chars") in (None, 70):
+            settings["direct_reply_max_chars"] = ADAPTIVE_HUMOR_DEFAULTS["direct_reply_max_chars"]
+        settings["schema_version"] = 7
     for key, value in ADAPTIVE_HUMOR_DEFAULTS.items():
         settings.setdefault(key, value)
     settings["enabled"] = bool(settings.get("enabled", True))
@@ -3812,6 +3819,7 @@ def build_chat_messages(
     full_system += (
         "правила быстрого ответа:\n"
         f"- строчные буквы, без эмодзи, обычно одна короткая фраза; максимум {direct_reply_max_chars} знаков\n"
+        "- пиши сразу самую меткую добивку; не ставь перед ней подводку или объяснение\n"
         "- вторую фразу пиши только если без неё теряется смысл; не объясняй шутку\n"
         "- сначала ответь по смыслу; шути только через реальную деталь текущей сцены\n"
         "- не вводи отсутствующих людей, не пересказывай реплику и не объясняй шутку\n"
@@ -5587,7 +5595,28 @@ def _truncate_casual_reply(text: str, limit: int) -> str:
     clean = re.sub(r"\s+", " ", text or "").strip()
     if len(clean) <= max(1, int(limit)):
         return clean
-    bounded = clean[: max(1, int(limit))].rstrip()
+    limit = max(1, int(limit))
+
+    # Models often put the actual punchline after a disposable setup. Preserve
+    # the final complete short phrase instead of blindly cutting that punchline.
+    sentence_parts = re.split(r"(?:\n+|(?<=[.!?])\s+|[;—]\s*)", text or "")
+    comma_parts = re.split(r",\s+", clean)
+    continuation_prefixes = (
+        "а ", "и ", "но ", "котор", "потому ", "чтобы ", "когда ",
+        "если ", "хотя ", "где ", "кто ", "что ", "как ", "на котор",
+        "о котор", "про котор", "с котор", "в котор", "за котор",
+    )
+    for part in reversed(sentence_parts + comma_parts):
+        candidate = re.sub(r"\s+", " ", part).strip(" ,.;:—-")
+        low = candidate.lower().replace("ё", "е")
+        if (
+            12 <= len(candidate) <= limit
+            and len(candidate.split()) >= 2
+            and not low.startswith(continuation_prefixes)
+        ):
+            return candidate
+
+    bounded = clean[:limit].rstrip()
     if " " in bounded:
         word_bounded = bounded.rsplit(" ", 1)[0].rstrip(" ,.;:—-")
         if word_bounded:
@@ -6018,7 +6047,17 @@ async def _send_reply_with_style_locked(
     elif not allow_long_reply:
         reply_limit = int(settings["direct_reply_max_chars"])
     if reply_limit is not None:
+        unbounded_reply = reply_text
         reply_text = _truncate_casual_reply(reply_text, reply_limit)
+        if reply_text != re.sub(r"\s+", " ", unbounded_reply or "").strip():
+            trace_event(
+                logger,
+                "delivery",
+                "compacted",
+                source_chars=len(unbounded_reply),
+                result_chars=len(reply_text),
+                selected_suffix=re.sub(r"\s+", " ", unbounded_reply).strip().endswith(reply_text),
+            )
 
     if not reply_text:
         logger.info("Ответ после очистки пустой, пропускаю отправку")

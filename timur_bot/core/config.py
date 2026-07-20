@@ -179,7 +179,7 @@ def _normalize_funny_scan_defaults(raw: Any) -> Dict[str, Any]:
 def _normalize_adaptive_humor_defaults(raw: Any) -> Dict[str, Any]:
     data = raw if isinstance(raw, dict) else {}
     return {
-        "schema_version": 6,
+        "schema_version": 7,
         "enabled": bool(data.get("enabled", True)),
         "auto_learn": bool(data.get("auto_learn", True)),
         "live_snipe_enabled": bool(data.get("live_snipe_enabled", True)),
@@ -196,7 +196,7 @@ def _normalize_adaptive_humor_defaults(raw: Any) -> Dict[str, Any]:
         "critic_max_tokens": max(20, min(100, int(data.get("critic_max_tokens", 40)))),
         "background_daily_token_budget": max(1000, min(100000, int(data.get("background_daily_token_budget", 12000)))),
         "ambient_reply_max_chars": max(20, min(120, int(data.get("ambient_reply_max_chars", 60)))),
-        "direct_reply_max_chars": max(40, min(500, int(data.get("direct_reply_max_chars", 120)))),
+        "direct_reply_max_chars": max(40, min(500, int(data.get("direct_reply_max_chars", 55)))),
     }
 
 

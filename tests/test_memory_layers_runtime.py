@@ -49,7 +49,7 @@ def test_persona_knows_chat_gooning_slang() -> None:
     assert "длительную дрочку" in prompt
 
 
-def test_saved_v1_adaptive_defaults_migrate_to_v6_runtime_values() -> None:
+def test_saved_v1_adaptive_defaults_migrate_to_v7_runtime_values() -> None:
     memory = runtime.default_memory()
     memory["config"]["adaptive_humor"] = {
         "participation_rate": 0.30,
@@ -65,7 +65,7 @@ def test_saved_v1_adaptive_defaults_migrate_to_v6_runtime_values() -> None:
 
     settings = runtime._adaptive_humor_settings(memory)
 
-    assert settings["schema_version"] == 6
+    assert settings["schema_version"] == 7
     assert settings["participation_rate"] == 0.225
     assert settings["reply_timeout_seconds"] == 10
     assert settings["snipe_cooldown_minutes"] == 10
@@ -83,7 +83,7 @@ def test_saved_v2_default_reply_timeout_migrates_to_ten_seconds() -> None:
 
     settings = runtime._adaptive_humor_settings(memory)
 
-    assert settings["schema_version"] == 6
+    assert settings["schema_version"] == 7
     assert settings["reply_timeout_seconds"] == 10
 
 
@@ -96,7 +96,7 @@ def test_saved_v3_default_participation_rate_is_halved_once() -> None:
 
     settings = runtime._adaptive_humor_settings(memory)
 
-    assert settings["schema_version"] == 6
+    assert settings["schema_version"] == 7
     assert settings["participation_rate"] == 0.225
     assert runtime._random_photo_reply_chance(memory) == runtime.PHOTO_RANDOM_REPLY_CHANCE / 2
 
@@ -111,9 +111,9 @@ def test_saved_v4_default_reply_lengths_migrate_to_short_limits() -> None:
 
     settings = runtime._adaptive_humor_settings(memory)
 
-    assert settings["schema_version"] == 6
+    assert settings["schema_version"] == 7
     assert settings["ambient_reply_max_chars"] == 45
-    assert settings["direct_reply_max_chars"] == 70
+    assert settings["direct_reply_max_chars"] == 55
 
 
 def test_saved_v5_timeout_migrates_above_transport_deadline() -> None:
@@ -125,9 +125,37 @@ def test_saved_v5_timeout_migrates_above_transport_deadline() -> None:
 
     settings = runtime._adaptive_humor_settings(memory)
 
-    assert settings["schema_version"] == 6
+    assert settings["schema_version"] == 7
     assert settings["reply_timeout_seconds"] == 10
     assert settings["reply_timeout_seconds"] > runtime.TEXT_TRANSPORT_TIMEOUT_SECONDS
+
+
+def test_saved_v6_default_direct_length_migrates_to_shorter_limit() -> None:
+    memory = runtime.default_memory()
+    memory["config"]["adaptive_humor"] = {
+        "schema_version": 6,
+        "direct_reply_max_chars": 70,
+    }
+
+    settings = runtime._adaptive_humor_settings(memory)
+
+    assert settings["schema_version"] == 7
+    assert settings["direct_reply_max_chars"] == 55
+
+
+def test_casual_compaction_keeps_final_punchline_instead_of_setup() -> None:
+    reply = "да я просто решил напомнить тебе про всю эту историю. просто чтоб ты не расслаблялся"
+
+    assert runtime._truncate_casual_reply(reply, 55) == "просто чтоб ты не расслаблялся"
+
+
+def test_casual_compaction_does_not_keep_dependent_tail() -> None:
+    reply = "ты снова придумал очень важный вопрос, на который сам уже прекрасно знаешь ответ"
+
+    compacted = runtime._truncate_casual_reply(reply, 55)
+
+    assert compacted == "ты снова придумал очень важный вопрос"
+    assert len(compacted) <= 55
 
 
 def test_direct_reply_context_contains_timurs_previous_message_and_reply_edge() -> None:

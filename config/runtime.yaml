@@ -35,7 +35,7 @@ probabilities:
   voice_reply_chance: 0.015
 
 adaptive_humor:
-  schema_version: 6
+  schema_version: 7
   enabled: true
   auto_learn: true
   live_snipe_enabled: true
@@ -52,7 +52,7 @@ adaptive_humor:
   critic_max_tokens: 40
   background_daily_token_budget: 12000
   ambient_reply_max_chars: 45
-  direct_reply_max_chars: 70
+  direct_reply_max_chars: 55
 
 rolling_memory:
   schema_version: 1
