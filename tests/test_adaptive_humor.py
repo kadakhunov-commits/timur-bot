@@ -12,6 +12,7 @@ from timur_bot.services.adaptive_humor import (
     director_writer_messages,
     filter_candidates,
     parse_critic,
+    parse_critic_decision,
     parse_director,
     render_scene,
     strip_stale_context_references,
@@ -48,6 +49,8 @@ def test_writer_does_not_judge_itself_and_critic_has_silence() -> None:
     assert '"winner_index"' not in writer_prompt
     assert "SILENCE" in critic_prompt
     assert "независимый" in critic_prompt
+    assert "latest_message_funny" in writer_prompt
+    assert "heart-реакцию" in critic_prompt
 
 
 def test_parsers_are_strict_and_bounded() -> None:
@@ -79,6 +82,16 @@ def test_parsers_are_strict_and_bounded() -> None:
     assert parse_critic('{"winner_index":"0","score":"99"}', candidate_count=1)[:2] == (None, 0)
     assert parse_critic('prefix {"winner_index":0,"score":99}', candidate_count=1)[0] is None
     assert parse_critic("bad") == (None, 0, ["invalid_json"])
+    assert parse_critic_decision(
+        '{"winner_index":null,"score":0,"react":true,"reaction_score":94,"reason_codes":["finished"]}',
+        candidate_count=0,
+    ) == {
+        "winner_index": None,
+        "score": 0,
+        "react": True,
+        "reaction_score": 94,
+        "reason_codes": ["finished"],
+    }
 
 
 def test_hard_filter_rejects_forced_and_ungrounded_candidates() -> None:
@@ -304,6 +317,83 @@ def test_runtime_writer_can_choose_silence_without_critic_call() -> None:
     assert sent is False
     assert metered.await_count == 1
     sender.assert_not_awaited()
+
+
+def test_runtime_finished_joke_gets_heart_without_text_reply() -> None:
+    memory, update, context = _ambient_fixture()
+    context.bot = SimpleNamespace(set_message_reaction=AsyncMock())
+    writer = (
+        '{"should_attempt":false,"latest_message_funny":true,"setup":"готовая шутка","target":"",'
+        '"scene_type":"banter","relation":"chat","forbidden_moves":[],"candidates":[]}'
+    )
+    critic = (
+        '{"winner_index":null,"score":0,"react":true,"reaction_score":94,'
+        '"reason_codes":["finished_joke"]}'
+    )
+    metered = AsyncMock(side_effect=[(writer, 55), (critic, 20)])
+    sender = AsyncMock(return_value=True)
+
+    with (
+        patch.object(runtime, "call_openai_metered", metered),
+        patch.object(runtime, "send_reply_with_style", sender),
+        patch.object(runtime, "save_memory"),
+        patch.object(runtime.random, "random", return_value=0.0),
+    ):
+        acted = asyncio.run(runtime._maybe_send_adaptive_snipe(update, context, memory))
+
+    assert acted is True
+    context.bot.set_message_reaction.assert_awaited_once_with(
+        chat_id=777,
+        message_id=3,
+        reaction="❤️",
+    )
+    sender.assert_not_awaited()
+    decision = ensure_humor_schema(runtime.get_chat_mem(memory, 777))["humor_decisions_v2"][-1]
+    assert decision["action"] == "REACT"
+
+
+def test_funny_heart_never_targets_bot_messages() -> None:
+    bot = SimpleNamespace(set_message_reaction=AsyncMock())
+    context = SimpleNamespace(bot=bot)
+    message = SimpleNamespace(
+        chat_id=777,
+        message_id=3,
+        from_user=SimpleNamespace(is_bot=True),
+    )
+
+    reacted = asyncio.run(runtime._set_funny_heart_reaction(context, message))
+
+    assert reacted is False
+    bot.set_message_reaction.assert_not_awaited()
+
+
+def test_failed_heart_does_not_suppress_approved_text_reply() -> None:
+    memory, update, context = _ambient_fixture()
+    context.bot = SimpleNamespace(set_message_reaction=AsyncMock(side_effect=RuntimeError("reactions disabled")))
+    writer = (
+        '{"should_attempt":true,"latest_message_funny":true,"setup":"готовая шутка","target":"разрыв",'
+        '"scene_type":"banter","relation":"chat","forbidden_moves":[],"candidates":['
+        '{"text":"добивка раз","mechanism":"logic","callback_key":""},'
+        '{"text":"добивка два","mechanism":"status","callback_key":""},'
+        '{"text":"добивка три","mechanism":"image","callback_key":""},'
+        '{"text":"добивка четыре","mechanism":"understatement","callback_key":""}]}'
+    )
+    critic = (
+        '{"winner_index":0,"score":93,"react":true,"reaction_score":95,'
+        '"reason_codes":["local"]}'
+    )
+    sender = AsyncMock(return_value=True)
+
+    with (
+        patch.object(runtime, "call_openai_metered", AsyncMock(side_effect=[(writer, 80), (critic, 20)])),
+        patch.object(runtime, "send_reply_with_style", sender),
+        patch.object(runtime, "save_memory"),
+        patch.object(runtime.random, "random", return_value=0.0),
+    ):
+        acted = asyncio.run(runtime._maybe_send_adaptive_snipe(update, context, memory))
+
+    assert acted is True
+    sender.assert_awaited_once()
 
 
 def test_runtime_daily_budget_prevents_background_api_calls() -> None:

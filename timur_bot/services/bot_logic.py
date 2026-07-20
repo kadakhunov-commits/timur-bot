@@ -123,7 +123,7 @@ from timur_bot.services.adaptive_humor import (
     critic_messages,
     director_writer_messages,
     filter_candidates,
-    parse_critic,
+    parse_critic_decision,
     parse_director,
     strip_stale_context_references,
     text_fingerprint,
@@ -155,6 +155,19 @@ from timur_bot.services.self_model import (
     build_self_card_prompt,
     ensure_self_profile,
     register_self_claim,
+)
+from timur_bot.services.rolling_memory import (
+    build_summary_messages as build_rolling_summary_messages,
+    complete_candidate as complete_rolling_candidate,
+    enqueue_from_history as enqueue_rolling_memory,
+    ensure_state as ensure_rolling_memory_state,
+    fail_candidate as fail_rolling_candidate,
+    format_recall_prompt as format_rolling_recall_prompt,
+    next_pending as next_rolling_pending,
+    normalize_settings as normalize_rolling_memory_settings,
+    parse_summary as parse_rolling_summary,
+    select_recall as select_rolling_recall,
+    status_snapshot as rolling_memory_status_snapshot,
 )
 from timur_bot.services.summary import (
     SUMMARY_MAX_MESSAGES,
@@ -242,7 +255,6 @@ CHAT_DAILY_VOICE_LIMIT = APP_CONFIG.chat_daily_voice_limit
 MAX_VOICE_CHARS = APP_CONFIG.max_voice_chars
 BASE_REPLY_CHANCE = APP_CONFIG.base_reply_chance
 CHAIN_REPLY_CHANCE = APP_CONFIG.chain_reply_chance
-MEM_REPLY_CHANCE = APP_CONFIG.mem_reply_chance
 PHOTO_RANDOM_REPLY_CHANCE = APP_CONFIG.photo_random_reply_chance
 VOICE_REPLY_CHANCE = APP_CONFIG.voice_reply_chance
 MEMES = APP_CONFIG.memes
@@ -253,9 +265,13 @@ EN_STOPWORDS = APP_CONFIG.en_stopwords
 PROFANITY_MARKERS = APP_CONFIG.profanity_markers
 ARCHETYPE_LEXICON = APP_CONFIG.archetype_lexicon
 PERSONA_MODES = APP_CONFIG.persona_modes
+BOT_RIVALS = APP_CONFIG.bot_rivals
 FUNNY_SCAN_RUNTIME_DEFAULTS = APP_CONFIG.funny_scan_defaults
 ADAPTIVE_HUMOR_DEFAULTS = APP_CONFIG.adaptive_humor_defaults
+ROLLING_MEMORY_DEFAULTS = APP_CONFIG.rolling_memory_defaults
 _PREVIOUS_DEFAULT_PARTICIPATION_RATE = 0.45
+_PREVIOUS_DEFAULT_AMBIENT_REPLY_MAX_CHARS = 60
+_PREVIOUS_DEFAULT_DIRECT_REPLY_MAX_CHARS = 120
 FUNNY_SCAN_LEXICON = APP_CONFIG.funny_scan_lexicon
 MOOD_EVENTS_CATALOG = APP_CONFIG.mood_events_catalog
 MOOD_DEFAULTS = (
@@ -292,8 +308,10 @@ _CHAT_GENERATION_LOCKS: Dict[int, asyncio.Lock] = {}
 _REPLY_SEND_LOCKS: Dict[int, asyncio.Lock] = {}
 _LIFE_TASK: asyncio.Task[Any] | None = None
 _FUNNY_SCAN_TASK: asyncio.Task[Any] | None = None
+_ROLLING_MEMORY_TASK: asyncio.Task[Any] | None = None
 _FUNNY_SCAN_LOCK = asyncio.Lock()
 _FUNNY_SCAN_STATE_LOCK = asyncio.Lock()
+_ROLLING_MEMORY_LOCK = asyncio.Lock()
 _FUNNY_FORWARD_LOCKS: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
 _MEMORY_REVISION_KEY = "_memory_revision"
 
@@ -317,6 +335,7 @@ class ReplyDecision:
     reason: str
     threshold: float | None = None
     roll: float | None = None
+    allow_ambient_fallback: bool = True
 
 
 class MemoryState(dict):
@@ -529,6 +548,15 @@ def _ensure_funny_scan_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     )
 
 
+def _rolling_memory_settings(memory: Dict[str, Any]) -> Dict[str, Any]:
+    cfg = memory.setdefault("config", {})
+    current = cfg.setdefault("rolling_memory", dict(ROLLING_MEMORY_DEFAULTS))
+    normalized = normalize_rolling_memory_settings(current)
+    current.clear()
+    current.update(normalized)
+    return current
+
+
 def _adaptive_humor_settings(memory: Dict[str, Any]) -> Dict[str, Any]:
     cfg = memory.setdefault("config", {})
     settings = cfg.setdefault("adaptive_humor", {})
@@ -566,6 +594,15 @@ def _adaptive_humor_settings(memory: Dict[str, Any]) -> Dict[str, Any]:
         if abs(participation_rate - _PREVIOUS_DEFAULT_PARTICIPATION_RATE) < 1e-9:
             settings["participation_rate"] = _PREVIOUS_DEFAULT_PARTICIPATION_RATE / 2
         settings["schema_version"] = 4
+        schema_version = 4
+    if schema_version < 5:
+        # Shorten only the old defaults. This keeps any deliberate custom
+        # limits while making existing chats concise after the upgrade.
+        if settings.get("ambient_reply_max_chars") in (None, _PREVIOUS_DEFAULT_AMBIENT_REPLY_MAX_CHARS):
+            settings["ambient_reply_max_chars"] = ADAPTIVE_HUMOR_DEFAULTS["ambient_reply_max_chars"]
+        if settings.get("direct_reply_max_chars") in (None, _PREVIOUS_DEFAULT_DIRECT_REPLY_MAX_CHARS):
+            settings["direct_reply_max_chars"] = ADAPTIVE_HUMOR_DEFAULTS["direct_reply_max_chars"]
+        settings["schema_version"] = 5
     for key, value in ADAPTIVE_HUMOR_DEFAULTS.items():
         settings.setdefault(key, value)
     settings["enabled"] = bool(settings.get("enabled", True))
@@ -637,6 +674,7 @@ def default_memory() -> Dict[str, Any]:
             "mood": default_mood,
             "funny_scan": _ensure_funny_scan_config({}).copy(),
             "adaptive_humor": dict(ADAPTIVE_HUMOR_DEFAULTS),
+            "rolling_memory": dict(ROLLING_MEMORY_DEFAULTS),
         },
     })
     ensure_self_profile(memory)
@@ -657,6 +695,7 @@ def _ensure_chat_schema(chat: Dict[str, Any]) -> Dict[str, Any]:
     layers.setdefault("summary", {"chat": "", "updated_at": None})
     layers.setdefault("imported_message_keys", [])
     layers.setdefault("processed_event_keys", [])
+    layers.setdefault("rolling_memory", {})
     chat.setdefault("episodes", [])
     ensure_humor_schema(chat)
     ensure_fact_graph(chat)
@@ -1308,41 +1347,9 @@ def _upsert_long_fact(chat_mem: Dict[str, Any], fact_text: str, ts: str, boost: 
         del long_facts[MAX_LONG_FACTS:]
 
 
-def _compact_memory_layers(chat_mem: Dict[str, Any], now_dt: datetime | None = None) -> None:
-    layers = chat_mem.setdefault("memory_layers", {})
-    recent_messages = layers.setdefault("recent_messages", [])
-    recent_facts = layers.setdefault("recent_facts", [])
-    now = now_dt or datetime.utcnow()
-
-    if len(recent_messages) > MAX_RECENT_MESSAGES:
-        del recent_messages[:-MAX_RECENT_MESSAGES]
-
-    kept_facts = []
-    for fact in recent_facts:
-        ts = _parse_iso_ts(str(fact.get("ts", "")))
-        if not ts:
-            continue
-        age_days = (now - ts).days
-        if age_days > RECENT_FACT_WINDOW_DAYS:
-            _upsert_long_fact(
-                chat_mem,
-                fact_text=str(fact.get("text", "")),
-                ts=str(fact.get("ts", "")),
-                boost=float(fact.get("weight", 1.0)),
-            )
-            continue
-        kept_facts.append(fact)
-
-    kept_facts.sort(key=lambda x: str(x.get("ts", "")))
-    if len(kept_facts) > MAX_RECENT_FACTS:
-        kept_facts = kept_facts[-MAX_RECENT_FACTS:]
-    layers["recent_facts"] = kept_facts
-
-
 def _update_memory_layers_with_message(chat_mem: Dict[str, Any], rec: Dict[str, Any]) -> None:
     layers = chat_mem.setdefault("memory_layers", {})
     recent_messages = layers.setdefault("recent_messages", [])
-    recent_facts = layers.setdefault("recent_facts", [])
 
     recent_messages.append(
         {
@@ -1356,18 +1363,6 @@ def _update_memory_layers_with_message(chat_mem: Dict[str, Any], rec: Dict[str, 
     )
     if len(recent_messages) > MAX_RECENT_MESSAGES:
         del recent_messages[:-MAX_RECENT_MESSAGES]
-
-    text = str(rec.get("text", "")).strip()
-    if text:
-        recent_facts.append(
-            {
-                "text": f"{rec.get('name') or rec.get('username') or rec.get('user_id')}: {text}",
-                "ts": rec.get("ts", ""),
-                "weight": 1.0,
-            }
-        )
-
-    _compact_memory_layers(chat_mem)
 
 
 _MISSING_MEMORY_VALUE = object()
@@ -1680,10 +1675,12 @@ def load_memory() -> Dict[str, Any]:
         _ensure_life_config(cfg)
         _ensure_mood_config(cfg)
         _ensure_funny_scan_config(cfg)
+        rolling_settings = _rolling_memory_settings(data)
         ensure_self_profile(data)
 
         for _, chat in data["chats"].items():
             _ensure_chat_schema(chat)
+            ensure_rolling_memory_state(chat, rolling_settings)
 
         _register_memory_snapshot(data)
         return data
@@ -3148,6 +3145,12 @@ def update_memory_with_message(memory: Dict[str, Any], message: Message) -> None
 
         if not user_is_bot:
             note_human_message(chat_mem)
+            enqueue_rolling_memory(
+                chat_mem,
+                chat_id=chat_id,
+                anchor=rec,
+                settings=_rolling_memory_settings(memory),
+            )
             # Learn what friends say about themselves and remember vivid moments,
             # so тимур builds a real dossier on each participant (Phase 1).
             learn_participant_facts(
@@ -3313,6 +3316,15 @@ def is_voice_codeword(text: str) -> bool:
     return "тимур отправь голосовое" in norm
 
 
+def _bot_rival_settings(message: Message) -> Dict[str, Any] | None:
+    tg_user = message.from_user
+    if not tg_user or not bool(getattr(tg_user, "is_bot", False)):
+        return None
+    username = str(getattr(tg_user, "username", "") or "").strip().lstrip("@").casefold()
+    settings = BOT_RIVALS.get(username)
+    return settings if isinstance(settings, dict) else None
+
+
 def should_reply_decision(memory: Dict[str, Any], message: Message, bot_id: int) -> ReplyDecision:
     if not message.text and not message.caption:
         return ReplyDecision(False, "нет текста или подписи")
@@ -3325,6 +3337,28 @@ def should_reply_decision(memory: Dict[str, Any], message: Message, bot_id: int)
 
     if tg_user.id == bot_id:
         return ReplyDecision(False, "сообщение от самого бота")
+
+    rival_settings = _bot_rival_settings(message)
+    if rival_settings:
+        if (
+            message.reply_to_message
+            and message.reply_to_message.from_user
+            and message.reply_to_message.from_user.id == bot_id
+        ):
+            return ReplyDecision(
+                False,
+                "бот-соперник уже отвечает Тимуру: не продолжаю цепочку",
+                allow_ambient_fallback=False,
+            )
+        threshold = float(rival_settings.get("reply_chance", 0.0))
+        roll = random.random()
+        return ReplyDecision(
+            roll < threshold,
+            "отдельная вероятность ответа боту-сопернику",
+            threshold=threshold,
+            roll=roll,
+            allow_ambient_fallback=False,
+        )
 
     if message.reply_to_message and message.reply_to_message.from_user:
         if message.reply_to_message.from_user.id == bot_id:
@@ -3426,7 +3460,6 @@ def _should_include_association_context(
     *,
     memory_requested: bool,
     fact_bundle: Dict[str, Any],
-    recent_facts: List[str],
 ) -> bool:
     if memory_requested:
         return True
@@ -3434,7 +3467,7 @@ def _should_include_association_context(
         return True
     if fact_bundle.get("facts"):
         return True
-    return bool(recent_facts)
+    return False
 
 
 def enforce_reply_guardrails(reply_text: str) -> str:
@@ -3515,28 +3548,6 @@ def select_chat_history_for_context(memory: Dict[str, Any], chat_id: int) -> Lis
         return recent[-12:]
     history = chat_mem.get("history", [])
     return history[-12:]
-
-
-def select_recent_facts_for_context(memory: Dict[str, Any], chat_id: int) -> List[str]:
-    chat_mem = get_chat_mem(memory, chat_id)
-    layers = chat_mem.get("memory_layers", {})
-    recent_facts = layers.get("recent_facts", [])
-    if not isinstance(recent_facts, list) or not recent_facts:
-        return []
-
-    def _score(fact: Dict[str, Any]) -> Tuple[float, str]:
-        ts = _parse_iso_ts(str(fact.get("ts", "")))
-        age_days = (datetime.utcnow() - ts).days if ts else RECENT_FACT_WINDOW_DAYS
-        recency_bonus = max(0.0, (RECENT_FACT_WINDOW_DAYS - age_days) / RECENT_FACT_WINDOW_DAYS)
-        return (float(fact.get("weight", 1.0)) + recency_bonus, str(fact.get("text", "")))
-
-    filtered_facts = [
-        fact
-        for fact in recent_facts
-        if not is_blocked_memory_text(str(fact.get("text", "")))
-    ]
-    ranked = sorted(filtered_facts, key=_score, reverse=True)
-    return [str(x.get("text", "")) for x in ranked[:4] if str(x.get("text", "")).strip()]
 
 
 def select_old_random_memories(memory: Dict[str, Any], chat_id: int) -> List[str]:
@@ -3707,21 +3718,6 @@ def build_humor_plan(memory: Dict[str, Any], message: Message) -> Dict[str, Any]
     )
 
 
-def _lines_relevant_to_text(lines: List[str], text: str, *, min_overlap: int = 1) -> bool:
-    """Deterministic relevance: does any line share a keyword with the message?
-
-    Replaces the old coin-flip gating so recall fires when it actually matters
-    instead of at random.
-    """
-    keys = set(extract_keywords(text))
-    if not keys:
-        return False
-    for line in lines:
-        if len(keys & set(extract_keywords(str(line)))) >= min_overlap:
-            return True
-    return False
-
-
 def build_chat_messages(
     memory: Dict[str, Any],
     message: Message,
@@ -3734,6 +3730,7 @@ def build_chat_messages(
     user_profile = select_user_profile(memory, tg_user.id)
     user_text = _extract_message_text(message)
     memory_requested = looks_like_memory_request(user_text)
+    direct_reply_max_chars = int(_adaptive_humor_settings(memory)["direct_reply_max_chars"])
     chat_mem = get_chat_mem(memory, message.chat_id)
     chat_history = snapshot_scene_context(
         get_chat_mem(memory, message.chat_id),
@@ -3741,8 +3738,7 @@ def build_chat_messages(
         limit=8,
         reply_depth=3,
     ) or select_chat_history_for_context(memory, message.chat_id)
-    recent_facts = select_recent_facts_for_context(memory, message.chat_id)
-    random_memories = select_old_random_memories(memory, message.chat_id)
+    random_memories: List[str] = []
     association_context = build_association_context(memory, message.chat_id, tg_user.id)
     fact_bundle = build_fact_recall_bundle(chat_mem, user_text)
 
@@ -3757,6 +3753,11 @@ def build_chat_messages(
         else PERSONA_MODES.get(effective_mode, PERSONA_MODES["default"])
     )
     deep_memory = feature_gate.depth_at_least(features, feature_gate.MEMORY_STANDARD)
+    if memory_requested and feature_gate.depth_at_least(features, feature_gate.MEMORY_FULL):
+        random_memories = select_old_random_memories(memory, message.chat_id)
+    rolling_settings = _rolling_memory_settings(memory)
+    rolling_state = ensure_rolling_memory_state(chat_mem, rolling_settings)
+    rolling_recall = select_rolling_recall(rolling_state, user_text, rolling_settings)
 
     hist_lines = []
     for rec in chat_history:
@@ -3778,7 +3779,8 @@ def build_chat_messages(
     full_system = system_prompt + "\n\n"
     full_system += (
         "правила быстрого ответа:\n"
-        "- строчные буквы, без эмодзи, до 120 знаков и двух коротких предложений\n"
+        f"- строчные буквы, без эмодзи, обычно одна короткая фраза; максимум {direct_reply_max_chars} знаков\n"
+        "- вторую фразу пиши только если без неё теряется смысл; не объясняй шутку\n"
         "- сначала ответь по смыслу; шути только через реальную деталь текущей сцены\n"
         "- не вводи отсутствующих людей, не пересказывай реплику и не объясняй шутку\n"
         "- запрещены шаблоны про iq и нейроны, «x — это когда» и «а то я думал»\n"
@@ -3813,6 +3815,12 @@ def build_chat_messages(
     if bio_settings:
         full_system += "\nбио тимура от владельца:\n" + bio_settings + "\n"
 
+    rival_settings = _bot_rival_settings(message)
+    if rival_settings:
+        rival_prompt = str(rival_settings.get("prompt", "") or "").strip()
+        if rival_prompt:
+            full_system += "\nотношение к текущему собеседнику:\n" + rival_prompt + "\n"
+
     if user_profile:
         full_system += "\nинфа о собеседнике:\n" + user_profile
 
@@ -3833,7 +3841,6 @@ def build_chat_messages(
         user_text,
         memory_requested=memory_requested,
         fact_bundle=fact_bundle,
-        recent_facts=recent_facts,
     ):
         full_system += "\n\nкарта персонажей и ассоциаций:\n" + association_context
 
@@ -3846,15 +3853,14 @@ def build_chat_messages(
         if episodes_block:
             full_system += "\n\n" + episodes_block + "\n"
 
+    rolling_prompt = format_rolling_recall_prompt(rolling_recall)
+    if rolling_prompt:
+        full_system += "\n\n" + rolling_prompt + "\n"
+
     if hist_lines:
         full_system += "\n\nпоследние сообщения в чате:\n" + "\n".join(hist_lines)
 
-    if deep_memory and recent_facts and (memory_requested or _lines_relevant_to_text(recent_facts, user_text)):
-        full_system += "\n\nчто мы недавно обсуждали (помню):\n"
-        for line in recent_facts[:2]:
-            full_system += f"- {line}\n"
-
-    if feature_gate.depth_at_least(features, feature_gate.MEMORY_FULL) and random_memories and memory_requested:
+    if random_memories:
         full_system += "\n\nдалекие факты беседы (редкие точечные отсылки):\n"
         for line in random_memories[:1]:
             full_system += f"- {line}\n"
@@ -3969,6 +3975,23 @@ def _is_repeated_snipe(chat_mem: Dict[str, Any], text: str) -> bool:
     return any(normalize_token(str(item.get("text", ""))) == clean for item in outputs)
 
 
+async def _set_funny_heart_reaction(context: ContextTypes.DEFAULT_TYPE, message: Message) -> bool:
+    """Best-effort ❤️ reaction; delivery failures must not suppress a text reply."""
+    author = getattr(message, "from_user", None)
+    if author is None or bool(getattr(author, "is_bot", False)):
+        return False
+    try:
+        await context.bot.set_message_reaction(
+            chat_id=message.chat_id,
+            message_id=message.message_id,
+            reaction="❤️",
+        )
+        return True
+    except Exception:
+        logger.debug("Не удалось поставить ❤️ на смешное сообщение", exc_info=True)
+        return False
+
+
 async def _maybe_send_adaptive_snipe(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -4073,7 +4096,7 @@ async def _maybe_send_adaptive_snipe(
     writer_reported = writer_tokens if writer_tokens > 0 else writer_reserved
     writer_charged = settle_background_tokens(chat_mem, reserved=writer_reserved, actual=writer_reported)
     director = parse_director(writer_raw)
-    if not director.get("should_attempt"):
+    if not director.get("should_attempt") and not director.get("latest_message_funny"):
         latency_ms = int((time.perf_counter() - started) * 1000)
         record_humor_decision(
             chat_mem,
@@ -4090,15 +4113,20 @@ async def _maybe_send_adaptive_snipe(
     filter_recent_outputs = list(recent_outputs)
     if positive_example:
         filter_recent_outputs.append({"text": str(positive_example.get("selected_text", "")), "mechanism": ""})
-    candidates = filter_candidates(
-        director.get("candidates", []),
-        history=history,
-        recent_outputs=filter_recent_outputs,
-        known_participant_names=known_names,
-        blocked_callback_keys=blocked_callbacks,
-        max_chars=int(settings["ambient_reply_max_chars"]),
+    reaction_candidate = current_text if director.get("latest_message_funny") else ""
+    candidates = (
+        filter_candidates(
+            director.get("candidates", []),
+            history=history,
+            recent_outputs=filter_recent_outputs,
+            known_participant_names=known_names,
+            blocked_callback_keys=blocked_callbacks,
+            max_chars=int(settings["ambient_reply_max_chars"]),
+        )
+        if director.get("should_attempt")
+        else []
     )
-    if not candidates:
+    if not candidates and not reaction_candidate:
         latency_ms = int((time.perf_counter() - started) * 1000)
         record_humor_decision(
             chat_mem,
@@ -4117,6 +4145,7 @@ async def _maybe_send_adaptive_snipe(
         candidates,
         positive_example=positive_example,
         recent_output_fingerprints=[text_fingerprint(str(item.get("text", ""))) for item in recent_outputs],
+        reaction_candidate=reaction_candidate,
         max_chars=int(settings["ambient_reply_max_chars"]),
     )
     critic_ceiling = _completion_token_ceiling(critic_prompt, int(settings["critic_max_tokens"]))
@@ -4154,10 +4183,22 @@ async def _maybe_send_adaptive_snipe(
         raise
     critic_reported = critic_tokens if critic_tokens > 0 else critic_reserved
     critic_charged = settle_background_tokens(chat_mem, reserved=critic_reserved, actual=critic_reported)
-    winner_index, candidate_score, reason_codes = parse_critic(critic_raw, candidate_count=len(candidates))
+    critic_decision = parse_critic_decision(critic_raw, candidate_count=len(candidates))
+    winner_index = critic_decision["winner_index"]
+    candidate_score = int(critic_decision["score"])
+    reaction_score = int(critic_decision["reaction_score"])
+    reason_codes = list(critic_decision["reason_codes"])
     token_usage = writer_charged + critic_charged
     latency_ms = int((time.perf_counter() - started) * 1000)
-    if winner_index is None or candidate_score < int(settings["candidate_threshold"]):
+    threshold = int(settings["candidate_threshold"])
+    joke_approved = winner_index is not None and candidate_score >= threshold
+    reaction_approved = bool(reaction_candidate and critic_decision["react"] and reaction_score >= threshold)
+    reacted = False
+    if reaction_approved:
+        reacted = await _set_funny_heart_reaction(context, message)
+        _adaptive_metric(chat_mem, "reacted" if reacted else "reaction_error")
+
+    if not joke_approved and not reacted:
         _adaptive_metric(chat_mem, "judge_abstain")
         record_humor_decision(
             chat_mem,
@@ -4168,22 +4209,41 @@ async def _maybe_send_adaptive_snipe(
             latency_ms=latency_ms,
             charge_usage=False,
         )
-        logger.info("adaptive interjection skipped: critic=%s", candidate_score)
+        logger.info(
+            "adaptive interjection skipped: critic=%s reaction=%s",
+            candidate_score,
+            reaction_score,
+        )
         return False
+
+    if not joke_approved:
+        record_humor_decision(
+            chat_mem,
+            action="REACT",
+            sent=True,
+            reason_codes=reason_codes or ["finished_joke"],
+            token_usage=token_usage,
+            latency_ms=latency_ms,
+            charge_usage=False,
+        )
+        save_memory(memory)
+        return True
 
     winner_row = candidates[winner_index]
     winner = str(winner_row.get("text", "")).strip()
     if not winner or _is_repeated_snipe(chat_mem, winner):
         record_humor_decision(
             chat_mem,
-            action="SILENCE",
-            sent=False,
+            action="REACT" if reacted else "SILENCE",
+            sent=reacted,
             reason_codes=["recent_duplicate"],
             token_usage=token_usage,
             latency_ms=latency_ms,
             charge_usage=False,
         )
-        return False
+        if reacted:
+            save_memory(memory)
+        return reacted
 
     callback_key = str(winner_row.get("callback_key", "")).strip()
     plan = {
@@ -4207,30 +4267,30 @@ async def _maybe_send_adaptive_snipe(
         logger.error("adaptive interjection delivery failed: %s", exc)
         record_humor_decision(
             chat_mem,
-            action="SILENCE",
-            sent=False,
-            reason_codes=["send_error"],
+            action="REACT" if reacted else "SILENCE",
+            sent=reacted,
+            reason_codes=["reply_send_error"] if reacted else ["send_error"],
             token_usage=token_usage,
             latency_ms=latency_ms,
             charge_usage=False,
         )
         _adaptive_metric(chat_mem, "send_error")
         save_memory(memory)
-        return False
+        return reacted
     if sent:
         logger.info("adaptive interjection sent: critic=%s", candidate_score)
     record_humor_decision(
         chat_mem,
-        action="JOKE" if sent else "SILENCE",
-        sent=sent,
-        reason_codes=reason_codes if sent else ["send_rejected"],
+        action="JOKE" if sent else ("REACT" if reacted else "SILENCE"),
+        sent=sent or reacted,
+        reason_codes=reason_codes if sent else (["reply_send_rejected"] if reacted else ["send_rejected"]),
         token_usage=token_usage,
         latency_ms=latency_ms,
         charge_usage=False,
     )
     _adaptive_metric(chat_mem, "sent" if sent else "send_rejected")
     save_memory(memory)
-    return sent
+    return sent or reacted
 
 
 async def call_openai_vision(
@@ -4247,10 +4307,12 @@ async def call_openai_vision(
         f"openness={float(chat_state.get('openness', 50.0)):.1f}. "
         "пусть это мягко влияет на тон шутки."
     )
+    direct_reply_max_chars = int(_adaptive_humor_settings(memory)["direct_reply_max_chars"])
     text_context = (
         "тебе прислали фотку в чате. "
         "сделай короткую смешную ироничную реакцию в стиле дружеской подколки, "
-        "без технического описания, максимум 1–2 коротких фразы. "
+        f"без технического описания: одна фраза, максимум {direct_reply_max_chars} знаков. "
+        "не дописывай вторую мысль и не объясняй шутку. "
         "без эмодзи, маленькими буквами. "
         + mood_line
     )
@@ -4910,6 +4972,122 @@ async def stop_funny_scan_loop() -> None:
 
 
 # =========================
+# ROLLING MEMORY LOOP
+# =========================
+
+async def _process_rolling_memory_once(*, chat_id: int | None = None) -> Dict[str, int]:
+    summary = {"attempted": 0, "created": 0, "rejected": 0, "errors": 0}
+    async with _ROLLING_MEMORY_LOCK:
+        memory = load_memory()
+        settings = _rolling_memory_settings(memory)
+        if not settings.get("enabled"):
+            return summary
+        chats = memory.get("chats", {}) if isinstance(memory.get("chats"), dict) else {}
+        for chat_key, chat_mem in list(chats.items()):
+            if not isinstance(chat_mem, dict):
+                continue
+            try:
+                current_chat_id = int(chat_key)
+            except (TypeError, ValueError):
+                continue
+            if chat_id is not None and current_chat_id != int(chat_id):
+                continue
+            state = ensure_rolling_memory_state(chat_mem, settings)
+            candidate = next_rolling_pending(state, settings)
+            if not candidate:
+                continue
+            messages = build_rolling_summary_messages(candidate, settings)
+            token_ceiling = _completion_token_ceiling(messages, int(settings["summary_max_tokens"]))
+            used_tokens = int(state.get("daily_usage", {}).get("tokens", 0))
+            if used_tokens + token_ceiling > int(settings["daily_token_budget_per_chat"]):
+                continue
+
+            summary["attempted"] += 1
+            raw, token_usage = await call_openai_metered(
+                messages,
+                max_tokens=int(settings["summary_max_tokens"]),
+                temperature=0.2,
+            )
+
+            # The LLM call yields control. Reload before committing so a message
+            # saved while the request was in flight cannot be overwritten.
+            memory = load_memory()
+            settings = _rolling_memory_settings(memory)
+            live_chat_mem = get_chat_mem(memory, current_chat_id)
+            state = ensure_rolling_memory_state(live_chat_mem, settings)
+            candidate = next(
+                (
+                    item
+                    for item in state.get("pending", [])
+                    if str(item.get("id")) == str(candidate.get("id"))
+                ),
+                None,
+            )
+            if candidate is None:
+                continue
+            decision = parse_rolling_summary(raw, settings)
+            if decision is None:
+                fail_rolling_candidate(
+                    state,
+                    candidate,
+                    "invalid or empty LLM response",
+                    token_usage=token_usage or token_ceiling,
+                )
+                summary["errors"] += 1
+            else:
+                item = complete_rolling_candidate(
+                    state,
+                    candidate,
+                    decision,
+                    token_usage=token_usage or token_ceiling,
+                    settings=settings,
+                )
+                if item:
+                    summary["created"] += 1
+                else:
+                    summary["rejected"] += 1
+            save_memory(memory)
+    return summary
+
+
+async def _rolling_memory_loop() -> None:
+    logger.info("Запускаю rolling memory loop")
+    try:
+        while True:
+            try:
+                await _process_rolling_memory_once()
+            except Exception as e:
+                logger.error("Ошибка rolling memory loop: %s", e)
+            memory = load_memory()
+            interval = int(_rolling_memory_settings(memory)["process_interval_seconds"])
+            await asyncio.sleep(interval)
+    except asyncio.CancelledError:
+        logger.info("Rolling memory loop остановлен")
+        raise
+
+
+async def start_rolling_memory_loop(application: Any) -> None:
+    del application
+    global _ROLLING_MEMORY_TASK
+    if _ROLLING_MEMORY_TASK and not _ROLLING_MEMORY_TASK.done():
+        return
+    _ROLLING_MEMORY_TASK = asyncio.create_task(_rolling_memory_loop())
+
+
+async def stop_rolling_memory_loop() -> None:
+    global _ROLLING_MEMORY_TASK
+    if not _ROLLING_MEMORY_TASK:
+        return
+    _ROLLING_MEMORY_TASK.cancel()
+    try:
+        await _ROLLING_MEMORY_TASK
+    except asyncio.CancelledError:
+        pass
+    finally:
+        _ROLLING_MEMORY_TASK = None
+
+
+# =========================
 # ОБРАБОТКА ТЕКСТА
 # =========================
 
@@ -5261,6 +5439,7 @@ async def send_reply_with_style(
     humor_plan: Dict[str, Any] | None = None,
     is_snipe: bool = False,
     open_dialogue: bool = True,
+    allow_long_reply: bool = False,
 ) -> bool:
     message = update.effective_message
     if not message:
@@ -5276,6 +5455,7 @@ async def send_reply_with_style(
             humor_plan=humor_plan,
             is_snipe=is_snipe,
             open_dialogue=open_dialogue,
+            allow_long_reply=allow_long_reply,
         )
 
 
@@ -5288,6 +5468,7 @@ async def _send_reply_with_style_locked(
     humor_plan: Dict[str, Any] | None = None,
     is_snipe: bool = False,
     open_dialogue: bool = True,
+    allow_long_reply: bool = False,
 ) -> bool:
     message = update.effective_message
 
@@ -5319,7 +5500,7 @@ async def _send_reply_with_style_locked(
     reply_limit: int | None = None
     if is_snipe:
         reply_limit = int(settings["ambient_reply_max_chars"])
-    elif humor_plan and humor_plan.get("mode") == "direct":
+    elif not allow_long_reply:
         reply_limit = int(settings["direct_reply_max_chars"])
     if reply_limit is not None:
         reply_text = _truncate_casual_reply(reply_text, reply_limit)
@@ -5544,6 +5725,7 @@ def _admin_main_keyboard(chat_id: int) -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton("частота ответов", callback_data=f"adm:frequency_menu:{chat_id}"),
+                InlineKeyboardButton("память чата", callback_data=f"adm:memory_menu:{chat_id}"),
             ],
             [
                 InlineKeyboardButton("облака ассоциаций", callback_data=f"adm:cloud_menu:{chat_id}"),
@@ -5829,6 +6011,55 @@ def _admin_reply_frequency_keyboard(chat_id: int, participation_rate: float) -> 
         )
     rows.append([InlineKeyboardButton("назад", callback_data=f"adm:root:{chat_id}")])
     return InlineKeyboardMarkup(rows)
+
+
+def _admin_rolling_memory_keyboard(chat_id: int, enabled: bool) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "выключить память" if enabled else "включить память",
+                    callback_data=f"adm:memory_toggle:{chat_id}",
+                ),
+                InlineKeyboardButton("обработать сейчас", callback_data=f"adm:memory_process:{chat_id}"),
+            ],
+            [
+                InlineKeyboardButton("обновить", callback_data=f"adm:memory_menu:{chat_id}"),
+                InlineKeyboardButton("назад", callback_data=f"adm:root:{chat_id}"),
+            ],
+        ]
+    )
+
+
+def _format_rolling_memory_status(memory: Dict[str, Any], chat_id: int) -> str:
+    settings = _rolling_memory_settings(memory)
+    chat_mem = get_chat_mem(memory, chat_id)
+    state = ensure_rolling_memory_state(chat_mem, settings)
+    status = rolling_memory_status_snapshot(state, settings)
+    usage = status.get("daily_usage", {})
+    metrics = status.get("metrics", {})
+    lines = [
+        "живая память чата",
+        f"статус: {'on' if status.get('enabled') else 'off'}",
+        f"активных: {status.get('active', 0)} | в очереди: {status.get('pending', 0)}",
+        (
+            f"сегодня: {usage.get('summaries', 0)}/{settings['max_summaries_per_chat_per_day']} саммари | "
+            f"{usage.get('tokens', 0)}/{settings['daily_token_budget_per_chat']} токенов"
+        ),
+        (
+            f"создано: {metrics.get('created', 0)} | отклонено: {metrics.get('rejected', 0)} | "
+            f"ошибок: {metrics.get('processing_errors', 0)}"
+        ),
+        f"последняя обработка: {status.get('last_processed_at') or 'ещё не было'}",
+    ]
+    if status.get("last_error"):
+        lines.append(f"последняя ошибка: {status['last_error']}")
+    latest = status.get("latest", [])
+    if latest:
+        lines.append("\nпоследние воспоминания:")
+        for item in latest:
+            lines.append(f"- {str(item.get('summary', ''))[:220]} | до {item.get('expires_at', '-')}")
+    return "\n".join(lines)[:3900]
 
 
 def _admin_cloud_users_keyboard(memory: Dict[str, Any], chat_id: int) -> InlineKeyboardMarkup:
@@ -7026,6 +7257,43 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
         )
         return
 
+    if action == "memory_menu":
+        chat_id = int(parts[2])
+        settings = _rolling_memory_settings(memory)
+        await query.edit_message_text(
+            _format_rolling_memory_status(memory, chat_id),
+            reply_markup=_admin_rolling_memory_keyboard(chat_id, bool(settings.get("enabled"))),
+        )
+        return
+
+    if action == "memory_toggle":
+        chat_id = int(parts[2])
+        settings = _rolling_memory_settings(memory)
+        settings["enabled"] = not bool(settings.get("enabled"))
+        save_memory(memory)
+        await query.edit_message_text(
+            _format_rolling_memory_status(memory, chat_id),
+            reply_markup=_admin_rolling_memory_keyboard(chat_id, bool(settings.get("enabled"))),
+        )
+        return
+
+    if action == "memory_process":
+        chat_id = int(parts[2])
+        result = await _process_rolling_memory_once(chat_id=chat_id)
+        memory = load_memory()
+        settings = _rolling_memory_settings(memory)
+        text = _format_rolling_memory_status(memory, chat_id)
+        text += (
+            "\n\nручной запуск: "
+            f"попыток={result['attempted']}, создано={result['created']}, "
+            f"отклонено={result['rejected']}, ошибок={result['errors']}"
+        )
+        await query.edit_message_text(
+            text[:3900],
+            reply_markup=_admin_rolling_memory_keyboard(chat_id, bool(settings.get("enabled"))),
+        )
+        return
+
     if action == "heat_delta" and len(parts) >= 4:
         delta = int(parts[2])
         chat_id = int(parts[3])
@@ -7404,7 +7672,14 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 )
                 _append_story_log(memory, story_text, source="on_demand", chat_id=message.chat_id)
                 save_memory(memory)
-            await send_reply_with_style(update, context, memory, story_text, humor_plan=None)
+            await send_reply_with_style(
+                update,
+                context,
+                memory,
+                story_text,
+                humor_plan=None,
+                allow_long_reply=True,
+            )
             return
 
         if await _handle_mood_probe(update, context, memory):
@@ -7415,6 +7690,9 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         decision = should_reply_decision(memory, message, bot_id)
         _log_reply_decision("тексту", decision)
         if not decision.should_reply:
+            if not decision.allow_ambient_fallback:
+                save_memory(memory)
+                return
             await _run_with_typing(
                 context,
                 message.chat_id,

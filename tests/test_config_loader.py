@@ -32,6 +32,7 @@ defaults:
 
     cfg = load_app_config(tmp_path)
     assert cfg.default_active_mode == "default"
+    assert cfg.bot_rivals == {}
     assert cfg.text_model == "gpt-4o-mini"
     assert cfg.openai_base_url == ""
     assert cfg.owner_ids
@@ -40,6 +41,9 @@ defaults:
     assert cfg.funny_scan_defaults["review_threshold"] == 70
     assert cfg.funny_scan_defaults["owner_delivery_mode"] == "auto_forward"
     assert cfg.funny_scan_defaults["rule_min_hearts"] == 3
+    assert cfg.rolling_memory_defaults["ttl_days"] == 4
+    assert cfg.rolling_memory_defaults["sample_rate"] == 0.10
+    assert cfg.rolling_memory_defaults["recall_rate"] == 0.15
     assert "laugh_markers" in cfg.funny_scan_lexicon
     assert "extra_laugh_markers" in cfg.funny_scan_lexicon
     assert "defaults" in cfg.mood_events_catalog
@@ -94,3 +98,39 @@ probabilities: {}
     assert cfg.owner_id == 111
     assert cfg.owner_ids == [111, 222, 333]
     assert cfg.premium_chat_ids == [-1001, -1002]
+
+
+def test_load_config_normalizes_bot_rivals(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "config").mkdir(parents=True, exist_ok=True)
+    _write(
+        tmp_path / "config" / "persona.yaml",
+        """
+default_system_prompt: "x"
+modes:
+  default: "default mode"
+defaults:
+  active_mode: "default"
+bot_rivals:
+  "@SGLYPA_TG_BOT":
+    reply_chance: 1.5
+    prompt: "rival prompt"
+  quiet_bot:
+    reply_chance: -0.5
+    prompt: "quiet prompt"
+  ignored_bot:
+    reply_chance: 0.5
+    prompt: ""
+""".strip(),
+    )
+    _write(tmp_path / "config" / "lexicon.yaml", "archetype_lexicon: {}\n")
+    _write(tmp_path / "config" / "runtime.yaml", "models: {}\nlimits: {}\nprobabilities: {}\n")
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+
+    cfg = load_app_config(tmp_path)
+
+    assert cfg.bot_rivals == {
+        "sglypa_tg_bot": {"reply_chance": 1.0, "prompt": "rival prompt"},
+        "quiet_bot": {"reply_chance": 0.0, "prompt": "quiet prompt"},
+    }

@@ -137,3 +137,19 @@ def test_frequency_callback_updates_shared_participation_rate(monkeypatch: pytes
 
     assert runtime._adaptive_humor_settings(memory)["participation_rate"] == 0.225
     assert "22,5%" in query.edited_text
+
+
+def test_rolling_memory_admin_screen_and_toggle(monkeypatch: pytest.MonkeyPatch) -> None:
+    memory = runtime.default_memory()
+    monkeypatch.setattr(runtime, "load_memory", lambda: memory)
+    monkeypatch.setattr(runtime, "save_memory", lambda _memory: None)
+
+    query = DummyQuery("adm:memory_menu:1")
+    asyncio.run(runtime.admin_callback_handler(_make_update(query), DummyContext()))
+    assert "живая память чата" in query.edited_text
+    assert "активных: 0" in query.edited_text
+
+    toggle_query = DummyQuery("adm:memory_toggle:1")
+    asyncio.run(runtime.admin_callback_handler(_make_update(toggle_query), DummyContext()))
+    assert runtime._rolling_memory_settings(memory)["enabled"] is False
+    assert "статус: off" in toggle_query.edited_text

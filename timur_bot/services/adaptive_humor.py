@@ -130,8 +130,10 @@ def director_writer_messages(
         "продолжение, смена статуса, конкретный образ и сухое преуменьшение. Каждый вариант — одна естественная "
         f"реплика до {bounded_chars} знаков. Не вводи людей и факты, которых нет в сцене; не повторяй исходную фразу; не пиши "
         "словарные определения, 'а то я думал', универсальные оскорбления или объяснение шутки. Callback допустим "
-        "только при прямой связи со сценой. Верни только JSON без markdown: "
-        '{"should_attempt":true,"setup":"...","target":"...","scene_type":"...","relation":"...",'
+        "только при прямой связи со сценой. Отдельно отметь latest_message_funny=true, только если последнее "
+        "сообщение человека — уже законченная и действительно смешная шутка, достойная ❤️; не отмечай так "
+        "просто приятное, грустное, грубое или техническое сообщение. Верни только JSON без markdown: "
+        '{"should_attempt":true,"latest_message_funny":false,"setup":"...","target":"...","scene_type":"...","relation":"...",'
         '"forbidden_moves":["..."],"candidates":[{"text":"...","mechanism":"...","callback_key":""}]}. '
         "Никаких score, winner или самооценки."
     )
@@ -147,6 +149,7 @@ def parse_director(text: str) -> Dict[str, Any]:
     payload = _json_object(text)
     result: Dict[str, Any] = {
         "should_attempt": False,
+        "latest_message_funny": False,
         "setup": "",
         "target": "",
         "scene_type": "",
@@ -155,6 +158,8 @@ def parse_director(text: str) -> Dict[str, Any]:
         "candidates": [],
     }
     if not payload or any(key in payload for key in ("score", "winner", "winner_index")):
+        return result
+    if "latest_message_funny" in payload and not isinstance(payload["latest_message_funny"], bool):
         return result
     required_types = {
         "should_attempt": bool,
@@ -172,6 +177,7 @@ def parse_director(text: str) -> Dict[str, Any]:
     result.update(
         {
             "should_attempt": payload.get("should_attempt") is True,
+            "latest_message_funny": payload.get("latest_message_funny") is True,
             "setup": _clean(payload.get("setup"), limit=240),
             "target": _clean(payload.get("target"), limit=120),
             "scene_type": _clean(payload.get("scene_type"), limit=80),
@@ -437,6 +443,7 @@ def critic_messages(
     *,
     positive_example: Dict[str, Any] | None = None,
     recent_output_fingerprints: Iterable[str] = (),
+    reaction_candidate: str = "",
     max_chars: int = MAX_AMBIENT_REPLY_CHARS,
 ) -> List[Dict[str, str]]:
     bounded_chars = max(1, int(max_chars))
@@ -450,12 +457,14 @@ def critic_messages(
     ]
     system = (
         f"Ты независимый строгий редактор, не автор вариантов. Реплика должна быть не длиннее {bounded_chars} знаков. "
-        "Выбери реплику только если она заметно лучше SILENCE. "
+        "Выбери реплику только если она заметно лучше SILENCE. Независимо оцени heart-реакцию на последнее "
+        "сообщение: react=true только если оно само по себе законченная и действительно смешная шутка; "
+        "не ставь ❤️ за приятность, согласие, грубость, трагедию или просто хороший повод для чужой добивки. "
         "Оцени локальную точность (0–30), неожиданность без случайного скачка (0–20), естественность живого участника "
         "чата (0–20), краткость (0–10), свежесть против недавних реплик (0–20). Обнули вариант за отсутствующего "
         "человека, выдуманную предпосылку, пересказ setup, словарное определение, generic insult, объяснение шутки "
         "или натужный callback. Верни только JSON: "
-        '{"winner_index":0,"score":0,"reason_codes":["..."]}. '
+        '{"winner_index":0,"score":0,"react":false,"reaction_score":0,"reason_codes":["..."]}. '
         "winner_index использует индексы из списка; null означает SILENCE. Для отправки нужен score не ниже 85."
     )
     user: Dict[str, Any] = {
@@ -464,6 +473,8 @@ def critic_messages(
         "silence_is_valid": True,
         "recent_fingerprints": list(recent_output_fingerprints)[-20:],
     }
+    if reaction_candidate.strip():
+        user["heart_reaction_candidate"] = _clean(reaction_candidate, limit=280)
     if positive_example:
         user["one_positive_example"] = {
             "setup": _clean(positive_example.get("setup") or positive_example.get("setup_summary"), limit=180),
@@ -495,3 +506,26 @@ def parse_critic(
         else []
     )
     return winner, score, reasons
+
+
+def parse_critic_decision(
+    text: str,
+    *,
+    candidate_count: int | None = None,
+) -> Dict[str, Any]:
+    """Parse reply and heart decisions while preserving the legacy parser contract."""
+    winner, score, reasons = parse_critic(text, candidate_count=candidate_count)
+    payload = _json_object(text)
+    raw_reaction_score = payload.get("reaction_score") if payload else None
+    reaction_score = (
+        max(0, min(100, raw_reaction_score))
+        if isinstance(raw_reaction_score, int) and not isinstance(raw_reaction_score, bool)
+        else 0
+    )
+    return {
+        "winner_index": winner,
+        "score": score,
+        "react": bool(payload.get("react") is True) if payload else False,
+        "reaction_score": reaction_score,
+        "reason_codes": reasons,
+    }

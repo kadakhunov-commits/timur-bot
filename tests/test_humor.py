@@ -184,6 +184,7 @@ def test_other_reactions_are_neutral_and_text_feedback_still_explicit() -> None:
     assert classify_text_feedback("ахахахах!!!") == "funny"
     assert classify_text_feedback("ЛОООЛ") == "funny"
     assert classify_text_feedback("кринж") == "unfunny"
+    assert classify_text_feedback("туп") == "unfunny"
 
 
 def test_human_laugh_scene_is_positive_and_retrievable_by_structure() -> None:

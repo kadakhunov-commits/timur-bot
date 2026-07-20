@@ -56,7 +56,6 @@ class AppConfig:
     max_voice_chars: int
     base_reply_chance: float
     chain_reply_chance: float
-    mem_reply_chance: float
     photo_random_reply_chance: float
     voice_reply_chance: float
     memes: List[str]
@@ -71,7 +70,9 @@ class AppConfig:
     default_bio: str
     default_toxicity_level: int
     default_active_mode: str
+    bot_rivals: Dict[str, Dict[str, Any]]
     adaptive_humor_defaults: Dict[str, Any]
+    rolling_memory_defaults: Dict[str, Any]
     funny_scan_defaults: Dict[str, Any]
     funny_scan_lexicon: Dict[str, Any]
     mood_events_catalog: Dict[str, Any]
@@ -199,6 +200,51 @@ def _normalize_adaptive_humor_defaults(raw: Any) -> Dict[str, Any]:
     }
 
 
+def _normalize_rolling_memory_defaults(raw: Any) -> Dict[str, Any]:
+    data = raw if isinstance(raw, dict) else {}
+    return {
+        "schema_version": 1,
+        "enabled": bool(data.get("enabled", True)),
+        "sample_rate": max(0.0, min(1.0, float(data.get("sample_rate", 0.10)))),
+        "recall_rate": max(0.0, min(1.0, float(data.get("recall_rate", 0.15)))),
+        "ttl_days": max(1, min(30, int(data.get("ttl_days", 4)))),
+        "max_items_per_chat": max(1, min(1000, int(data.get("max_items_per_chat", 120)))),
+        "max_pending_per_chat": max(1, min(200, int(data.get("max_pending_per_chat", 30)))),
+        "process_interval_seconds": max(10, min(3600, int(data.get("process_interval_seconds", 60)))),
+        "max_summaries_per_chat_per_day": max(
+            1, min(500, int(data.get("max_summaries_per_chat_per_day", 20)))
+        ),
+        "daily_token_budget_per_chat": max(
+            500, min(1_000_000, int(data.get("daily_token_budget_per_chat", 8000)))
+        ),
+        "context_messages": max(1, min(8, int(data.get("context_messages", 3)))),
+        "summary_max_chars": max(40, min(500, int(data.get("summary_max_chars", 180)))),
+        "summary_max_tokens": max(40, min(500, int(data.get("summary_max_tokens", 120)))),
+    }
+
+
+def _normalize_bot_rivals(raw: Any) -> Dict[str, Dict[str, Any]]:
+    if not isinstance(raw, dict):
+        return {}
+    rivals: Dict[str, Dict[str, Any]] = {}
+    for raw_username, raw_settings in raw.items():
+        if not isinstance(raw_settings, dict):
+            continue
+        username = str(raw_username or "").strip().lstrip("@").casefold()
+        prompt = str(raw_settings.get("prompt", "") or "").strip()
+        if not username or not prompt:
+            continue
+        try:
+            reply_chance = float(raw_settings.get("reply_chance", 0.0))
+        except (TypeError, ValueError):
+            reply_chance = 0.0
+        rivals[username] = {
+            "reply_chance": max(0.0, min(1.0, reply_chance)),
+            "prompt": prompt,
+        }
+    return rivals
+
+
 def _normalize_funny_scan_lexicon(raw: Any) -> Dict[str, Any]:
     data = raw if isinstance(raw, dict) else {}
     reaction_weights_raw = data.get("reaction_weights") if isinstance(data.get("reaction_weights"), dict) else {}
@@ -307,6 +353,8 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
     models = runtime.get("models") or {}
     funny_scan_defaults = _normalize_funny_scan_defaults(runtime.get("funny_scan"))
     adaptive_humor_defaults = _normalize_adaptive_humor_defaults(runtime.get("adaptive_humor"))
+    rolling_memory_defaults = _normalize_rolling_memory_defaults(runtime.get("rolling_memory"))
+    bot_rivals = _normalize_bot_rivals(persona.get("bot_rivals"))
     funny_scan_lexicon = _normalize_funny_scan_lexicon(lexicon.get("funny_scan_lexicon"))
     mood_events_catalog = _normalize_mood_events_catalog(mood_events_raw)
 
@@ -376,7 +424,6 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
         max_voice_chars=int(limits.get("max_voice_chars", 140)),
         base_reply_chance=float(probs.get("base_reply_chance", 0.08)),
         chain_reply_chance=float(probs.get("chain_reply_chance", 0.16)),
-        mem_reply_chance=float(probs.get("mem_reply_chance", 0.08)),
         photo_random_reply_chance=float(probs.get("photo_random_reply_chance", 0.22)),
         voice_reply_chance=float(probs.get("voice_reply_chance", 0.015)),
         memes=[str(x) for x in (lexicon.get("memes") or [])],
@@ -391,7 +438,9 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
         default_bio=str(defaults.get("bio", "")),
         default_toxicity_level=int(defaults.get("toxicity_level", 45)),
         default_active_mode=active_mode,
+        bot_rivals=bot_rivals,
         adaptive_humor_defaults=adaptive_humor_defaults,
+        rolling_memory_defaults=rolling_memory_defaults,
         funny_scan_defaults=funny_scan_defaults,
         funny_scan_lexicon=funny_scan_lexicon,
         mood_events_catalog=mood_events_catalog,

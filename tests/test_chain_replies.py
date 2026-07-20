@@ -139,10 +139,52 @@ def test_ambient_reply_is_one_short_message_and_does_not_open_dialogue() -> None
 
     assert sent is True
     assert len(message.reply_calls) == 1
-    assert len(str(message.reply_calls[0]["text"])) <= 60
+    assert len(str(message.reply_calls[0]["text"])) <= 45
     chat = runtime.get_chat_mem(memory, 123)
     assert chat["memory_layers"]["adaptive_humor"]["dialogue"] == {}
     assert chat["memory_layers"]["humor_scenes_v2"][-1]["output_kind"] == "ambient"
+
+
+def test_vision_style_reply_without_humor_plan_obeys_direct_short_limit() -> None:
+    memory = runtime.default_memory()
+    message = DummyMessage()
+    update = SimpleNamespace(effective_message=message)
+    long_reply = "это очень длинная реакция на фотографию, которая начинает объяснять шутку вместо короткой точной добивки"
+
+    with (
+        patch.object(runtime, "save_memory"),
+        patch.object(runtime, "_store_bot_claim_memory"),
+        patch.object(runtime, "_is_main_chat", return_value=True),
+        patch.object(runtime.billing, "register_bot_reply"),
+        patch.object(runtime.billing, "should_apply_free_watermark", return_value=(False, "")),
+        patch.object(runtime.random, "random", return_value=1.0),
+    ):
+        sent = asyncio.run(runtime.send_reply_with_style(update, None, memory, long_reply))
+
+    assert sent is True
+    assert len(str(message.reply_calls[0]["text"])) <= 70
+
+
+def test_explicit_long_reply_can_bypass_casual_limit() -> None:
+    memory = runtime.default_memory()
+    message = DummyMessage()
+    update = SimpleNamespace(effective_message=message)
+    long_story = " ".join(["история"] * 20)
+
+    with (
+        patch.object(runtime, "save_memory"),
+        patch.object(runtime, "_store_bot_claim_memory"),
+        patch.object(runtime, "_is_main_chat", return_value=True),
+        patch.object(runtime.billing, "register_bot_reply"),
+        patch.object(runtime.billing, "should_apply_free_watermark", return_value=(False, "")),
+        patch.object(runtime.random, "random", return_value=1.0),
+    ):
+        sent = asyncio.run(
+            runtime.send_reply_with_style(update, None, memory, long_story, allow_long_reply=True)
+        )
+
+    assert sent is True
+    assert message.reply_calls[0]["text"] == long_story
 
 
 def test_technical_fallback_does_not_open_sticky_dialogue() -> None:
@@ -202,7 +244,7 @@ def test_watermark_is_included_inside_final_ambient_length_limit() -> None:
 
     final_text = str(message.reply_calls[0]["text"])
     assert sent is True
-    assert len(final_text) <= 60
+    assert len(final_text) <= 45
     assert final_text.endswith("free тимур")
 
 

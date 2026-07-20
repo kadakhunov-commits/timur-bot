@@ -7,19 +7,23 @@ from timur_bot.services.bot_logic import (
     logger,
     start_funny_scan_loop,
     start_life_loop,
+    start_rolling_memory_loop,
     stop_funny_scan_loop,
     stop_life_loop,
+    stop_rolling_memory_loop,
 )
 
 
 async def _post_init(application: Application) -> None:
     await start_life_loop(application)
     await start_funny_scan_loop(application)
+    await start_rolling_memory_loop(application)
 
 
 async def _post_shutdown(application: Application) -> None:
     del application
     await stop_funny_scan_loop()
+    await stop_rolling_memory_loop()
     await stop_life_loop()
 
 

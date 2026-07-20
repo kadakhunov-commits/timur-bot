@@ -10,7 +10,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 FUNNY_REACTIONS = {"❤", "❤️"}
 FUNNY_TEXT = {"лол", "lol", "ахах", "ахаха", "хаха", "пхаха", "ору", "ор"}
-UNFUNNY_TEXT = {"несмешно", "не смешно", "кринж", "хуйня", "не смешной"}
+UNFUNNY_TEXT = {"несмешно", "не смешно", "кринж", "хуйня", "не смешной", "туп", "тупо"}
 
 HUMOR_SCHEMA_VERSION = 2
 MAX_HUMOR_SCENES = 400

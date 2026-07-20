@@ -31,12 +31,11 @@ limits:
 probabilities:
   base_reply_chance: 0.08
   chain_reply_chance: 0.16
-  mem_reply_chance: 0.08
   photo_random_reply_chance: 0.22
   voice_reply_chance: 0.015
 
 adaptive_humor:
-  schema_version: 4
+  schema_version: 5
   enabled: true
   auto_learn: true
   live_snipe_enabled: true
@@ -52,8 +51,23 @@ adaptive_humor:
   director_max_tokens: 180
   critic_max_tokens: 40
   background_daily_token_budget: 12000
-  ambient_reply_max_chars: 60
-  direct_reply_max_chars: 120
+  ambient_reply_max_chars: 45
+  direct_reply_max_chars: 70
+
+rolling_memory:
+  schema_version: 1
+  enabled: true
+  sample_rate: 0.10
+  recall_rate: 0.15
+  ttl_days: 4
+  max_items_per_chat: 120
+  max_pending_per_chat: 30
+  process_interval_seconds: 60
+  max_summaries_per_chat_per_day: 20
+  daily_token_budget_per_chat: 8000
+  context_messages: 3
+  summary_max_chars: 180
+  summary_max_tokens: 120
 
 funny_scan:
   enabled: false

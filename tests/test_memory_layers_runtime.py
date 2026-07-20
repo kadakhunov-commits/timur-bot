@@ -40,7 +40,7 @@ def test_direct_model_question_prompt_contains_truthful_runtime_model() -> None:
     assert len(messages[0]["content"]) < 4_500
 
 
-def test_saved_v1_adaptive_defaults_migrate_to_v4_runtime_values() -> None:
+def test_saved_v1_adaptive_defaults_migrate_to_v5_runtime_values() -> None:
     memory = runtime.default_memory()
     memory["config"]["adaptive_humor"] = {
         "participation_rate": 0.30,
@@ -56,7 +56,7 @@ def test_saved_v1_adaptive_defaults_migrate_to_v4_runtime_values() -> None:
 
     settings = runtime._adaptive_humor_settings(memory)
 
-    assert settings["schema_version"] == 4
+    assert settings["schema_version"] == 5
     assert settings["participation_rate"] == 0.225
     assert settings["reply_timeout_seconds"] == 6
     assert settings["snipe_cooldown_minutes"] == 10
@@ -74,7 +74,7 @@ def test_saved_v2_default_reply_timeout_migrates_to_six_seconds() -> None:
 
     settings = runtime._adaptive_humor_settings(memory)
 
-    assert settings["schema_version"] == 4
+    assert settings["schema_version"] == 5
     assert settings["reply_timeout_seconds"] == 6
 
 
@@ -87,9 +87,24 @@ def test_saved_v3_default_participation_rate_is_halved_once() -> None:
 
     settings = runtime._adaptive_humor_settings(memory)
 
-    assert settings["schema_version"] == 4
+    assert settings["schema_version"] == 5
     assert settings["participation_rate"] == 0.225
     assert runtime._random_photo_reply_chance(memory) == runtime.PHOTO_RANDOM_REPLY_CHANCE / 2
+
+
+def test_saved_v4_default_reply_lengths_migrate_to_short_limits() -> None:
+    memory = runtime.default_memory()
+    memory["config"]["adaptive_humor"] = {
+        "schema_version": 4,
+        "ambient_reply_max_chars": 60,
+        "direct_reply_max_chars": 120,
+    }
+
+    settings = runtime._adaptive_humor_settings(memory)
+
+    assert settings["schema_version"] == 5
+    assert settings["ambient_reply_max_chars"] == 45
+    assert settings["direct_reply_max_chars"] == 70
 
 
 def test_direct_reply_context_contains_timurs_previous_message_and_reply_edge() -> None:
@@ -129,6 +144,7 @@ def test_get_chat_mem_has_memory_layers() -> None:
     assert isinstance(layers.get("recent_messages", []), list)
     assert isinstance(layers.get("recent_facts", []), list)
     assert isinstance(layers.get("long_facts", []), list)
+    assert isinstance(layers.get("rolling_memory", {}), dict)
 
 
 def test_runtime_premium_chat_gets_all_plus_features_independently_of_scan_role() -> None:
@@ -321,6 +337,112 @@ def test_ordinary_participation_is_left_to_the_quality_filter_after_gap() -> Non
 
     assert decision.should_reply is False
     assert "качественному фильтру" in decision.reason
+
+
+def _rival_message(
+    *,
+    text: str = "у меня есть план",
+    username: str = "sglypa_tg_bot",
+    is_bot: bool = True,
+    reply_to_user_id: int | None = None,
+) -> SimpleNamespace:
+    reply_to_message = None
+    if reply_to_user_id is not None:
+        reply_to_message = SimpleNamespace(
+            message_id=90,
+            from_user=SimpleNamespace(id=reply_to_user_id, is_bot=True),
+        )
+    return SimpleNamespace(
+        chat_id=58,
+        message_id=100,
+        text=text,
+        caption=None,
+        from_user=SimpleNamespace(
+            id=77,
+            first_name="сглыпа",
+            username=username,
+            is_bot=is_bot,
+        ),
+        reply_to_message=reply_to_message,
+    )
+
+
+def test_bot_rival_requires_exact_username_and_bot_flag() -> None:
+    assert runtime._bot_rival_settings(_rival_message()) is not None
+    assert runtime._bot_rival_settings(_rival_message(username="SGLYPA_TG_BOT")) is not None
+    assert runtime._bot_rival_settings(_rival_message(username="other_bot")) is None
+    assert runtime._bot_rival_settings(_rival_message(is_bot=False)) is None
+
+
+def test_bot_rival_reply_uses_configured_probability_boundary() -> None:
+    memory = runtime.default_memory()
+    message = _rival_message(text="тимур я тут главный")
+
+    with patch.object(runtime.random, "random", return_value=0.149):
+        accepted = runtime.should_reply_decision(memory, message, bot_id=999)
+    with patch.object(runtime.random, "random", return_value=0.15):
+        rejected = runtime.should_reply_decision(memory, message, bot_id=999)
+
+    assert accepted.should_reply is True
+    assert accepted.threshold == 0.15
+    assert accepted.allow_ambient_fallback is False
+    assert rejected.should_reply is False
+    assert rejected.allow_ambient_fallback is False
+
+
+def test_bot_rival_reply_to_timur_is_always_ignored() -> None:
+    memory = runtime.default_memory()
+    message = _rival_message(text="тимур отвечаю", reply_to_user_id=999)
+
+    with patch.object(runtime.random, "random") as roll:
+        decision = runtime.should_reply_decision(memory, message, bot_id=999)
+
+    assert decision.should_reply is False
+    assert decision.allow_ambient_fallback is False
+    roll.assert_not_called()
+
+
+def test_bot_rival_prompt_is_scoped_to_current_rival() -> None:
+    memory = runtime.default_memory()
+
+    rival_prompt = runtime.build_chat_messages(memory, _rival_message())[0]["content"]
+    human_prompt = runtime.build_chat_messages(memory, _rival_message(is_bot=False))[0]["content"]
+
+    assert "отношение к текущему собеседнику" in rival_prompt
+    assert "ты считаешь себя заметно умнее сглыпы" in rival_prompt
+    assert "отношение к текущему собеседнику" not in human_prompt
+
+
+def test_text_handler_does_not_run_ambient_snipe_after_rival_abstention() -> None:
+    class CachedBot:
+        id = 999
+
+    message = _rival_message()
+    update = SimpleNamespace(effective_message=message)
+    context = SimpleNamespace(bot=CachedBot())
+    memory = runtime.default_memory()
+    decision = runtime.ReplyDecision(
+        False,
+        "rival roll missed",
+        allow_ambient_fallback=False,
+    )
+
+    with (
+        patch.object(runtime, "load_memory", return_value=memory),
+        patch.object(runtime, "_handle_admin_pending_text", new=AsyncMock(return_value=False)),
+        patch.object(runtime, "_handle_text_feedback", new=AsyncMock(return_value=False)),
+        patch.object(runtime, "update_memory_with_message"),
+        patch.object(runtime, "_observe_chat_humor"),
+        patch.object(runtime, "_apply_message_mood_impact", return_value=False),
+        patch.object(runtime, "_sync_mood_state"),
+        patch.object(runtime, "_handle_mood_probe", new=AsyncMock(return_value=False)),
+        patch.object(runtime, "should_reply_decision", return_value=decision),
+        patch.object(runtime, "_maybe_send_adaptive_snipe", new=AsyncMock(return_value=False)) as snipe,
+        patch.object(runtime, "save_memory"),
+    ):
+        asyncio.run(runtime.text_handler(update, context))
+
+    snipe.assert_not_awaited()
 
 
 def test_text_handler_uses_cached_bot_id_without_get_me_request() -> None:
