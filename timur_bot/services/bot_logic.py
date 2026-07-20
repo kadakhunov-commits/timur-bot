@@ -212,7 +212,7 @@ OPENAI_BASE_URL = APP_CONFIG.openai_base_url
 GEMINI_API_KEY = APP_CONFIG.gemini_api_key
 MINIAPP_URL = APP_CONFIG.miniapp_url
 
-TEXT_TRANSPORT_TIMEOUT_SECONDS = 7.0
+TEXT_TRANSPORT_TIMEOUT_SECONDS = 9.0
 POLZA_IGNORED_TEXT_PROVIDERS = ("DeepInfra",)
 
 
@@ -624,6 +624,13 @@ def _adaptive_humor_settings(memory: Dict[str, Any]) -> Dict[str, Any]:
         if settings.get("direct_reply_max_chars") in (None, _PREVIOUS_DEFAULT_DIRECT_REPLY_MAX_CHARS):
             settings["direct_reply_max_chars"] = ADAPTIVE_HUMOR_DEFAULTS["direct_reply_max_chars"]
         settings["schema_version"] = 5
+        schema_version = 5
+    if schema_version < 6:
+        # The previous six-second generation deadline was shorter than the
+        # transport timeout, so it cancelled otherwise healthy provider calls.
+        if settings.get("reply_timeout_seconds") in (None, 6):
+            settings["reply_timeout_seconds"] = ADAPTIVE_HUMOR_DEFAULTS["reply_timeout_seconds"]
+        settings["schema_version"] = 6
     for key, value in ADAPTIVE_HUMOR_DEFAULTS.items():
         settings.setdefault(key, value)
     settings["enabled"] = bool(settings.get("enabled", True))
@@ -634,7 +641,7 @@ def _adaptive_humor_settings(memory: Dict[str, Any]) -> Dict[str, Any]:
         ("min_human_messages_between_replies", 1, 50),
         ("min_human_messages_between_checks", 1, 100),
         ("interjection_timeout_seconds", 1, 10),
-        ("reply_timeout_seconds", 1, 15),
+        ("reply_timeout_seconds", int(TEXT_TRANSPORT_TIMEOUT_SECONDS) + 1, 15),
         ("dialogue_window_minutes", 1, 60),
         ("snipe_cooldown_minutes", 1, 24 * 60),
         ("min_human_messages", 1, 200),

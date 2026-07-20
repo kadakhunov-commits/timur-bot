@@ -35,7 +35,7 @@ probabilities:
   voice_reply_chance: 0.015
 
 adaptive_humor:
-  schema_version: 5
+  schema_version: 6
   enabled: true
   auto_learn: true
   live_snipe_enabled: true
@@ -43,7 +43,7 @@ adaptive_humor:
   min_human_messages_between_replies: 3
   min_human_messages_between_checks: 3
   interjection_timeout_seconds: 3
-  reply_timeout_seconds: 6
+  reply_timeout_seconds: 10
   dialogue_window_minutes: 10
   snipe_cooldown_minutes: 10
   min_human_messages: 3
