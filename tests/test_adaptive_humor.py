@@ -413,7 +413,7 @@ def test_runtime_daily_budget_prevents_background_api_calls() -> None:
     metered.assert_not_awaited()
 
 
-def test_direct_api_call_disables_reasoning_uses_proven_providers_and_keeps_sixty_tokens() -> None:
+def test_direct_api_call_avoids_unstable_provider_and_keeps_sixty_tokens() -> None:
     response = SimpleNamespace(
         choices=[SimpleNamespace(message=SimpleNamespace(content="короткий ответ"))],
     )
@@ -431,8 +431,8 @@ def test_direct_api_call_disables_reasoning_uses_proven_providers_and_keeps_sixt
     assert create.await_args.kwargs["extra_body"] == {
         "reasoning": {"enabled": False},
         "provider": {
-            "only": ["DeepInfra", "Baidu"],
-            "order": ["DeepInfra", "Baidu"],
+            "ignore": ["DeepInfra"],
+            "sort": "latency",
             "allow_fallbacks": True,
         },
     }
@@ -479,8 +479,11 @@ def test_metered_fallback_is_conservative_without_provider_usage() -> None:
     assert text == "❤️ смешно"
     assert tokens >= len(messages[0]["content"].encode("utf-8"))
     assert create.await_args.kwargs["extra_body"]["reasoning"] == {"enabled": False}
-    assert create.await_args.kwargs["extra_body"]["provider"]["only"] == ["DeepInfra", "Baidu"]
-    assert create.await_args.kwargs["extra_body"]["provider"]["order"] == ["DeepInfra", "Baidu"]
+    assert create.await_args.kwargs["extra_body"]["provider"] == {
+        "ignore": ["DeepInfra"],
+        "sort": "latency",
+        "allow_fallbacks": True,
+    }
 
 
 def test_non_reply_laugh_is_feedback_and_not_an_invitation_to_answer() -> None:

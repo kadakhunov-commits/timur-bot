@@ -213,7 +213,7 @@ GEMINI_API_KEY = APP_CONFIG.gemini_api_key
 MINIAPP_URL = APP_CONFIG.miniapp_url
 
 TEXT_TRANSPORT_TIMEOUT_SECONDS = 7.0
-POLZA_TEXT_PROVIDERS = ("DeepInfra", "Baidu")
+POLZA_IGNORED_TEXT_PROVIDERS = ("DeepInfra",)
 
 
 def _text_completion_extra_body() -> Dict[str, Any]:
@@ -221,8 +221,8 @@ def _text_completion_extra_body() -> Dict[str, Any]:
         return {
             "reasoning": {"enabled": False},
             "provider": {
-                "only": list(POLZA_TEXT_PROVIDERS),
-                "order": list(POLZA_TEXT_PROVIDERS),
+                "ignore": list(POLZA_IGNORED_TEXT_PROVIDERS),
+                "sort": "latency",
                 "allow_fallbacks": True,
             },
         }
@@ -3902,7 +3902,11 @@ def build_chat_messages(
 async def call_openai_text(messages: List[Dict[str, Any]]) -> str:
     started = time.perf_counter()
     prompt_chars = sum(len(str(item.get("content", ""))) for item in messages)
-    provider_route = ",".join(POLZA_TEXT_PROVIDERS) if "polza.ai" in OPENAI_BASE_URL.lower() else "default"
+    provider_route = (
+        "auto_latency(ignore=DeepInfra)"
+        if "polza.ai" in OPENAI_BASE_URL.lower()
+        else "default"
+    )
     set_llm_outcome(status="started", model=TEXT_MODEL, provider_route=provider_route)
     trace_event(
         logger,
