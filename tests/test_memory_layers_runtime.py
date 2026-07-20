@@ -40,7 +40,7 @@ def test_direct_model_question_prompt_contains_truthful_runtime_model() -> None:
     assert len(messages[0]["content"]) < 4_500
 
 
-def test_saved_v1_adaptive_defaults_migrate_to_v3_runtime_values() -> None:
+def test_saved_v1_adaptive_defaults_migrate_to_v4_runtime_values() -> None:
     memory = runtime.default_memory()
     memory["config"]["adaptive_humor"] = {
         "participation_rate": 0.30,
@@ -56,8 +56,8 @@ def test_saved_v1_adaptive_defaults_migrate_to_v3_runtime_values() -> None:
 
     settings = runtime._adaptive_humor_settings(memory)
 
-    assert settings["schema_version"] == 3
-    assert settings["participation_rate"] == 0.45
+    assert settings["schema_version"] == 4
+    assert settings["participation_rate"] == 0.225
     assert settings["reply_timeout_seconds"] == 6
     assert settings["snipe_cooldown_minutes"] == 10
     assert settings["min_human_messages"] == 3
@@ -74,8 +74,22 @@ def test_saved_v2_default_reply_timeout_migrates_to_six_seconds() -> None:
 
     settings = runtime._adaptive_humor_settings(memory)
 
-    assert settings["schema_version"] == 3
+    assert settings["schema_version"] == 4
     assert settings["reply_timeout_seconds"] == 6
+
+
+def test_saved_v3_default_participation_rate_is_halved_once() -> None:
+    memory = runtime.default_memory()
+    memory["config"]["adaptive_humor"] = {
+        "schema_version": 3,
+        "participation_rate": 0.45,
+    }
+
+    settings = runtime._adaptive_humor_settings(memory)
+
+    assert settings["schema_version"] == 4
+    assert settings["participation_rate"] == 0.225
+    assert runtime._random_photo_reply_chance(memory) == runtime.PHOTO_RANDOM_REPLY_CHANCE / 2
 
 
 def test_direct_reply_context_contains_timurs_previous_message_and_reply_edge() -> None:

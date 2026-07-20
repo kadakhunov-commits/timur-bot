@@ -36,11 +36,11 @@ probabilities:
   voice_reply_chance: 0.015
 
 adaptive_humor:
-  schema_version: 2
+  schema_version: 4
   enabled: true
   auto_learn: true
   live_snipe_enabled: true
-  participation_rate: 0.45
+  participation_rate: 0.225
   min_human_messages_between_replies: 3
   min_human_messages_between_checks: 3
   interjection_timeout_seconds: 3

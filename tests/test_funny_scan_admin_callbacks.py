@@ -121,3 +121,19 @@ def test_funny_callbacks_allow_second_owner(monkeypatch: pytest.MonkeyPatch) -> 
     asyncio.run(runtime.admin_callback_handler(update, context))
 
     assert "смешные моменты" in query.edited_text
+
+
+def test_frequency_callback_updates_shared_participation_rate(monkeypatch: pytest.MonkeyPatch) -> None:
+    memory = runtime.default_memory()
+    state = default_funny_scan_state()
+    monkeypatch.setattr(runtime, "load_memory", lambda: memory)
+    monkeypatch.setattr(runtime, "save_memory", lambda _memory: None)
+    monkeypatch.setattr(runtime, "_load_funny_scan_state", lambda: state)
+
+    query = DummyQuery("adm:frequency_set:225:1")
+    update = _make_update(query)
+    context = DummyContext()
+    asyncio.run(runtime.admin_callback_handler(update, context))
+
+    assert runtime._adaptive_humor_settings(memory)["participation_rate"] == 0.225
+    assert "22,5%" in query.edited_text

@@ -255,6 +255,7 @@ ARCHETYPE_LEXICON = APP_CONFIG.archetype_lexicon
 PERSONA_MODES = APP_CONFIG.persona_modes
 FUNNY_SCAN_RUNTIME_DEFAULTS = APP_CONFIG.funny_scan_defaults
 ADAPTIVE_HUMOR_DEFAULTS = APP_CONFIG.adaptive_humor_defaults
+_PREVIOUS_DEFAULT_PARTICIPATION_RATE = 0.45
 FUNNY_SCAN_LEXICON = APP_CONFIG.funny_scan_lexicon
 MOOD_EVENTS_CATALOG = APP_CONFIG.mood_events_catalog
 MOOD_DEFAULTS = (
@@ -554,6 +555,17 @@ def _adaptive_humor_settings(memory: Dict[str, Any]) -> Dict[str, Any]:
         if settings.get("reply_timeout_seconds") in (None, 3):
             settings["reply_timeout_seconds"] = ADAPTIVE_HUMOR_DEFAULTS["reply_timeout_seconds"]
         settings["schema_version"] = 3
+        schema_version = 3
+    if schema_version < 4:
+        # The previous default was 45%. Lower only that legacy default, so an
+        # admin's deliberate custom frequency remains untouched on upgrade.
+        try:
+            participation_rate = float(settings.get("participation_rate", _PREVIOUS_DEFAULT_PARTICIPATION_RATE))
+        except (TypeError, ValueError):
+            participation_rate = _PREVIOUS_DEFAULT_PARTICIPATION_RATE
+        if abs(participation_rate - _PREVIOUS_DEFAULT_PARTICIPATION_RATE) < 1e-9:
+            settings["participation_rate"] = _PREVIOUS_DEFAULT_PARTICIPATION_RATE / 2
+        settings["schema_version"] = 4
     for key, value in ADAPTIVE_HUMOR_DEFAULTS.items():
         settings.setdefault(key, value)
     settings["enabled"] = bool(settings.get("enabled", True))
@@ -581,6 +593,18 @@ def _adaptive_humor_settings(memory: Dict[str, Any]) -> Dict[str, Any]:
             parsed = float(ADAPTIVE_HUMOR_DEFAULTS[key]) if key == "participation_rate" else int(ADAPTIVE_HUMOR_DEFAULTS[key])
         settings[key] = max(low, min(high, parsed))
     return settings
+
+
+def _format_reply_frequency(rate: float) -> str:
+    percent = max(0.0, min(100.0, float(rate) * 100))
+    raw = f"{percent:.1f}".rstrip("0").rstrip(".")
+    return f"{raw.replace('.', ',')}%"
+
+
+def _random_photo_reply_chance(memory: Dict[str, Any]) -> float:
+    """Scale unsolicited photo replies with the shared participation setting."""
+    rate = float(_adaptive_humor_settings(memory)["participation_rate"])
+    return max(0.0, min(1.0, PHOTO_RANDOM_REPLY_CHANCE * rate / _PREVIOUS_DEFAULT_PARTICIPATION_RATE))
 
 
 def _is_main_chat(memory: Dict[str, Any], chat_id: int) -> bool:
@@ -5519,6 +5543,9 @@ def _admin_main_keyboard(chat_id: int) -> InlineKeyboardMarkup:
                 InlineKeyboardButton("вредность", callback_data=f"adm:heat_menu:{chat_id}"),
             ],
             [
+                InlineKeyboardButton("частота ответов", callback_data=f"adm:frequency_menu:{chat_id}"),
+            ],
+            [
                 InlineKeyboardButton("облака ассоциаций", callback_data=f"adm:cloud_menu:{chat_id}"),
                 InlineKeyboardButton("смешные моменты", callback_data=f"adm:funny:menu:{chat_id}"),
             ],
@@ -5782,6 +5809,28 @@ def _admin_heat_keyboard(chat_id: int, heat: int) -> InlineKeyboardMarkup:
     )
 
 
+def _admin_reply_frequency_keyboard(chat_id: int, participation_rate: float) -> InlineKeyboardMarkup:
+    presets = (
+        (100, "очень редко · 10%"),
+        (225, "редко, но метко · 22,5%"),
+        (450, "обычно · 45%"),
+        (700, "часто · 70%"),
+    )
+    rows: List[List[InlineKeyboardButton]] = []
+    for value, title in presets:
+        selected = abs(participation_rate - value / 1000) < 1e-9
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    f"{'● ' if selected else ''}{title}",
+                    callback_data=f"adm:frequency_set:{value}:{chat_id}",
+                )
+            ]
+        )
+    rows.append([InlineKeyboardButton("назад", callback_data=f"adm:root:{chat_id}")])
+    return InlineKeyboardMarkup(rows)
+
+
 def _admin_cloud_users_keyboard(memory: Dict[str, Any], chat_id: int) -> InlineKeyboardMarkup:
     chat_mem = get_chat_mem(memory, chat_id)
     participants = chat_mem.get("participants", {})
@@ -5813,11 +5862,13 @@ def _format_admin_status(memory: Dict[str, Any], chat_id: int) -> str:
     funny_settings = _get_funny_scan_settings(memory)
     funny_state = _load_funny_scan_state()
     funny_new = len(list_candidates(funny_state, status=STATUS_NEW, limit=9999))
+    participation_rate = float(_adaptive_humor_settings(memory)["participation_rate"])
     return (
         "админ панель тимура\n"
         f"чат: {chat_id}\n"
         f"режим: {get_active_mode(memory)}\n"
         f"вредность: {get_toxicity_level(memory)}/100\n"
+        f"частота случайных ответов: {_format_reply_frequency(participation_rate)}\n"
         f"scanner: {'on' if funny_settings.get('enabled') else 'off'} | new={funny_new}\n"
         f"персонажей в памяти: {participants_cnt}\n"
         f"связей user-user: {relations_cnt}\n"
@@ -6950,6 +7001,31 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
         )
         return
 
+    if action == "frequency_menu":
+        chat_id = int(parts[2])
+        participation_rate = float(_adaptive_humor_settings(memory)["participation_rate"])
+        await query.edit_message_text(
+            (
+                "частота случайных ответов\n"
+                f"сейчас: {_format_reply_frequency(participation_rate)}\n\n"
+                "прямые обращения к Тимуру и ответы на его сообщения остаются без случайного молчания."
+            ),
+            reply_markup=_admin_reply_frequency_keyboard(chat_id, participation_rate),
+        )
+        return
+
+    if action == "frequency_set" and len(parts) >= 4:
+        value = int(parts[2])
+        chat_id = int(parts[3])
+        participation_rate = max(0.0, min(1.0, value / 1000))
+        _adaptive_humor_settings(memory)["participation_rate"] = participation_rate
+        save_memory(memory)
+        await query.edit_message_text(
+            f"частота случайных ответов: {_format_reply_frequency(participation_rate)}",
+            reply_markup=_admin_reply_frequency_keyboard(chat_id, participation_rate),
+        )
+        return
+
     if action == "heat_delta" and len(parts) >= 4:
         delta = int(parts[2])
         chat_id = int(parts[3])
@@ -7449,10 +7525,11 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
         if not decision.should_reply:
             roll = random.random()
+            photo_chance = _random_photo_reply_chance(memory)
             decision = ReplyDecision(
-                roll < PHOTO_RANDOM_REPLY_CHANCE,
+                roll < photo_chance,
                 "случайный ответ на фото по вероятности",
-                threshold=PHOTO_RANDOM_REPLY_CHANCE,
+                threshold=photo_chance,
                 roll=roll,
             )
 
