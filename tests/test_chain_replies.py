@@ -187,7 +187,7 @@ def test_explicit_long_reply_can_bypass_casual_limit() -> None:
     assert message.reply_calls[0]["text"] == long_story
 
 
-def test_technical_fallback_does_not_open_sticky_dialogue() -> None:
+def test_direct_reply_removed_by_context_guard_is_not_sent() -> None:
     memory = runtime.default_memory()
     message = DummyMessage()
     update = SimpleNamespace(effective_message=message)
@@ -200,21 +200,22 @@ def test_technical_fallback_does_not_open_sticky_dialogue() -> None:
         patch.object(runtime.billing, "should_apply_free_watermark", return_value=(False, "")),
         patch.object(runtime.random, "random", return_value=1.0),
     ):
-        sent = asyncio.run(
-            runtime.send_reply_with_style(
-                update,
-                None,
-                memory,
-                runtime.TECHNICAL_FALLBACK_REPLY,
-                humor_plan={"mode": "direct", "context": []},
-                open_dialogue=False,
+        with patch.object(runtime, "strip_stale_context_references", return_value=""):
+            sent = asyncio.run(
+                runtime.send_reply_with_style(
+                    update,
+                    None,
+                    memory,
+                    "нерелевантная отсылка",
+                    humor_plan={"mode": "direct", "context": []},
+                    open_dialogue=False,
+                )
             )
-        )
 
-    assert sent is True
-    assert message.reply_calls[0]["text"] == runtime.TECHNICAL_FALLBACK_REPLY
+    assert sent is False
+    assert message.reply_calls == []
     chat = runtime.get_chat_mem(memory, 123)
-    assert chat["memory_layers"]["adaptive_humor"]["dialogue"] == {}
+    assert chat.get("memory_layers", {}).get("adaptive_humor", {}).get("dialogue", {}) == {}
 
 
 def test_watermark_is_included_inside_final_ambient_length_limit() -> None:

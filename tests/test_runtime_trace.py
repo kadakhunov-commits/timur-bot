@@ -8,7 +8,7 @@ os.environ.setdefault("TELEGRAM_BOT_TOKEN", "test-token")
 os.environ.setdefault("OPENAI_API_KEY", "test-api-key")
 
 from timur_bot.services import bot_logic as runtime
-from timur_bot.services.runtime_trace import finish_trace, start_trace, trace_event
+from timur_bot.services.runtime_trace import finish_trace, get_llm_outcome, set_llm_outcome, start_trace, trace_event
 
 
 def test_runtime_trace_correlates_events_and_redacts_secrets(caplog) -> None:
@@ -36,7 +36,23 @@ def test_runtime_trace_correlates_events_and_redacts_secrets(caplog) -> None:
     assert "line one line two" in lines[1]
 
 
-def test_text_handler_traces_provider_failure_fallback_and_delivery(caplog) -> None:
+def test_llm_outcome_from_wait_for_child_is_visible_to_parent() -> None:
+    async def child() -> str:
+        set_llm_outcome(status="provider_error", status_code=429)
+        return ""
+
+    async def scenario() -> dict:
+        tokens = start_trace(runtime.logger, kind="text", chat_id=1, message_id=2)
+        try:
+            await asyncio.wait_for(child(), timeout=1)
+            return get_llm_outcome()
+        finally:
+            finish_trace(runtime.logger, tokens, outcome="test")
+
+    assert asyncio.run(scenario()) == {"status": "provider_error", "status_code": 429}
+
+
+def test_text_handler_traces_provider_failure_and_stays_silent(caplog) -> None:
     message = SimpleNamespace(
         chat_id=-1002,
         message_id=77,
@@ -76,14 +92,20 @@ def test_text_handler_traces_provider_failure_fallback_and_delivery(caplog) -> N
         patch.object(runtime, "build_chat_messages", return_value=[{"role": "user", "content": "test"}]),
         patch.object(runtime, "_run_with_typing", side_effect=provider_failure),
         patch.object(runtime, "send_reply_with_style", new=AsyncMock(return_value=True)) as send_reply,
+        patch.object(runtime, "save_memory") as save_memory,
     ):
         asyncio.run(runtime.text_handler(update, context))
 
-    send_reply.assert_awaited_once()
-    assert send_reply.await_args.args[3] == runtime.TECHNICAL_FALLBACK_REPLY
+    send_reply.assert_not_awaited()
+    save_memory.assert_called_once_with(memory)
     trace_lines = [line for line in caplog.messages if line.startswith("TRACE ")]
     trace_ids = {part for line in trace_lines for part in line.split() if part.startswith("trace_id=")}
     assert len(trace_ids) == 1
-    assert any('stage="fallback"' in line and 'reason="provider_error"' in line for line in trace_lines)
+    assert any(
+        'stage="fallback"' in line
+        and 'event="reply_suppressed"' in line
+        and 'reason="provider_error"' in line
+        for line in trace_lines
+    )
     assert any("llm_status_code=429" in line and 'llm_error_type="RateLimitError"' in line for line in trace_lines)
-    assert any('outcome="technical_fallback_sent"' in line for line in trace_lines)
+    assert any('outcome="llm_failure_silenced"' in line for line in trace_lines)

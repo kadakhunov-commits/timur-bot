@@ -14,6 +14,7 @@ import subprocess
 import time
 import uuid
 import weakref
+from contextlib import nullcontext
 from urllib.parse import urlencode, urlsplit, urlunsplit, parse_qsl
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -176,6 +177,11 @@ from timur_bot.services.runtime_trace import (
     start_trace,
     trace_event,
 )
+from timur_bot.services.llm_load_control import (
+    foreground_activity as foreground_llm_activity,
+    release_background as release_background_llm,
+    reserve_background as reserve_background_llm,
+)
 from timur_bot.services.summary import (
     SUMMARY_MAX_MESSAGES,
     SummaryWindow,
@@ -221,9 +227,6 @@ def _text_completion_extra_body() -> Dict[str, Any]:
             },
         }
     return {}
-
-
-TECHNICAL_FALLBACK_REPLY = "щас туплю повтори"
 
 
 client = OpenAI(
@@ -1134,18 +1137,19 @@ async def _score_probe_attempt_llm(user_text: str, event: Dict[str, Any]) -> flo
             "Верни только JSON: {\"score\": number}.\n"
             f"privacy={int(event.get('privacy_level', 0))}; user_text={user_text.strip()}"
         )
-        response = await asyncio.to_thread(
-            client.chat.completions.create,
-            model=TEXT_MODEL,
-            messages=[
-                {"role": "system", "content": "Ты строгий модератор эмпатии и границ в диалоге."},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.0,
-            max_tokens=60,
-            response_format={"type": "json_object"},
-            extra_body=_text_completion_extra_body(),
-        )
+        with foreground_llm_activity("mood_probe"):
+            response = await asyncio.to_thread(
+                client.chat.completions.create,
+                model=TEXT_MODEL,
+                messages=[
+                    {"role": "system", "content": "Ты строгий модератор эмпатии и границ в диалоге."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.0,
+                max_tokens=60,
+                response_format={"type": "json_object"},
+                extra_body=_text_completion_extra_body(),
+            )
         content = (response.choices[0].message.content or "").strip()
         payload = json.loads(content)
         return _clamp_float(payload.get("score"), 0.0, 100.0, 50.0)
@@ -2584,17 +2588,19 @@ async def _call_openai_lore_episode_payload(
         proactive=proactive,
     )
     try:
-        response = await asyncio.to_thread(
-            client.chat.completions.create,
-            model=TEXT_MODEL,
-            messages=[
-                {"role": "system", "content": get_system_prompt(memory)},
-                {"role": "user", "content": prompt},
-            ],
-            max_tokens=280,
-            temperature=0.92,
-            extra_body=_text_completion_extra_body(),
-        )
+        activity = nullcontext() if proactive else foreground_llm_activity("on_demand_lore")
+        with activity:
+            response = await asyncio.to_thread(
+                client.chat.completions.create,
+                model=TEXT_MODEL,
+                messages=[
+                    {"role": "system", "content": get_system_prompt(memory)},
+                    {"role": "user", "content": prompt},
+                ],
+                max_tokens=280,
+                temperature=0.92,
+                extra_body=_text_completion_extra_body(),
+            )
         raw = (response.choices[0].message.content or "").strip()
         payload = _extract_json_object(raw)
         if payload:
@@ -3910,13 +3916,14 @@ async def call_openai_text(messages: List[Dict[str, Any]]) -> str:
         transport_timeout_seconds=TEXT_TRANSPORT_TIMEOUT_SECONDS,
     )
     try:
-        response = await async_client.chat.completions.create(
-            model=TEXT_MODEL,
-            messages=messages,
-            max_tokens=60,
-            temperature=0.75,
-            extra_body=_text_completion_extra_body(),
-        )
+        with foreground_llm_activity("direct_text_reply"):
+            response = await async_client.chat.completions.create(
+                model=TEXT_MODEL,
+                messages=messages,
+                max_tokens=60,
+                temperature=0.75,
+                extra_body=_text_completion_extra_body(),
+            )
         text = (response.choices[0].message.content or "").strip()
         usage = getattr(response, "usage", None)
         completion_details = getattr(usage, "completion_tokens_details", None)
@@ -3984,13 +3991,14 @@ async def call_openai_text(messages: List[Dict[str, Any]]) -> str:
 
 async def call_openai_with_params(messages: List[Dict[str, Any]], *, max_tokens: int, temperature: float) -> str:
     try:
-        response = await async_client.chat.completions.create(
-            model=TEXT_MODEL,
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            extra_body=_text_completion_extra_body(),
-        )
+        with foreground_llm_activity("user_requested_summary"):
+            response = await async_client.chat.completions.create(
+                model=TEXT_MODEL,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                extra_body=_text_completion_extra_body(),
+            )
         return (response.choices[0].message.content or "").strip()
     except Exception as e:
         logger.error("Ошибка OpenAI при генерации summary: %s", e)
@@ -4121,6 +4129,8 @@ async def _maybe_send_adaptive_snipe(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
     memory: Dict[str, Any],
+    *,
+    respect_load_guard: bool = False,
 ) -> bool:
     message = update.effective_message
     if not message:
@@ -4244,6 +4254,18 @@ async def _maybe_send_adaptive_snipe(
             token_budget=daily_budget,
         )
         return False
+    writer_load_reservation = reserve_background_llm("adaptive_humor_writer") if respect_load_guard else None
+    if writer_load_reservation is not None and not writer_load_reservation.acquired:
+        record_humor_decision(chat_mem, action="SILENCE", sent=False, reason_codes=["foreground_priority"])
+        _adaptive_metric(chat_mem, "load_guard_abstain")
+        trace_event(
+            logger,
+            "adaptive_humor",
+            "abstained",
+            reason=writer_load_reservation.reason,
+            retry_after_seconds=round(writer_load_reservation.retry_after_seconds, 1),
+        )
+        return False
     writer_reserved = reserve_background_tokens(chat_mem, writer_ceiling)
     trace_event(
         logger,
@@ -4255,12 +4277,16 @@ async def _maybe_send_adaptive_snipe(
         reserved_tokens=writer_reserved,
     )
     try:
-        writer_raw, writer_tokens = await call_openai_metered(
-            writer_messages,
-            max_tokens=int(settings["director_max_tokens"]),
-            temperature=0.9,
-            purpose="adaptive_humor_writer",
-        )
+        try:
+            writer_raw, writer_tokens = await call_openai_metered(
+                writer_messages,
+                max_tokens=int(settings["director_max_tokens"]),
+                temperature=0.9,
+                purpose="adaptive_humor_writer",
+            )
+        finally:
+            if writer_load_reservation is not None:
+                release_background_llm(writer_load_reservation)
     except asyncio.CancelledError:
         record_humor_decision(
             chat_mem,
@@ -4372,6 +4398,26 @@ async def _maybe_send_adaptive_snipe(
             token_budget=daily_budget,
         )
         return False
+    critic_load_reservation = reserve_background_llm("adaptive_humor_critic") if respect_load_guard else None
+    if critic_load_reservation is not None and not critic_load_reservation.acquired:
+        record_humor_decision(
+            chat_mem,
+            action="SILENCE",
+            sent=False,
+            reason_codes=["foreground_priority"],
+            token_usage=writer_charged,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            charge_usage=False,
+        )
+        _adaptive_metric(chat_mem, "load_guard_abstain")
+        trace_event(
+            logger,
+            "adaptive_humor",
+            "abstained",
+            reason=critic_load_reservation.reason,
+            retry_after_seconds=round(critic_load_reservation.retry_after_seconds, 1),
+        )
+        return False
     critic_reserved = reserve_background_tokens(chat_mem, critic_ceiling)
     trace_event(
         logger,
@@ -4382,12 +4428,16 @@ async def _maybe_send_adaptive_snipe(
         reserved_tokens=critic_reserved,
     )
     try:
-        critic_raw, critic_tokens = await call_openai_metered(
-            critic_prompt,
-            max_tokens=int(settings["critic_max_tokens"]),
-            temperature=0.1,
-            purpose="adaptive_humor_critic",
-        )
+        try:
+            critic_raw, critic_tokens = await call_openai_metered(
+                critic_prompt,
+                max_tokens=int(settings["critic_max_tokens"]),
+                temperature=0.1,
+                purpose="adaptive_humor_critic",
+            )
+        finally:
+            if critic_load_reservation is not None:
+                release_background_llm(critic_load_reservation)
     except asyncio.CancelledError:
         record_humor_decision(
             chat_mem,
@@ -4589,16 +4639,17 @@ async def call_openai_vision(
         max_tokens=100,
     )
     try:
-        response = await asyncio.to_thread(
-            client.chat.completions.create,
-            model=VISION_MODEL,
-            messages=[
-                {"role": "system", "content": get_system_prompt(memory)},
-                {"role": "user", "content": msg_content},
-            ],
-            max_tokens=100,
-            temperature=0.85,
-        )
+        with foreground_llm_activity("vision_reply"):
+            response = await asyncio.to_thread(
+                client.chat.completions.create,
+                model=VISION_MODEL,
+                messages=[
+                    {"role": "system", "content": get_system_prompt(memory)},
+                    {"role": "user", "content": msg_content},
+                ],
+                max_tokens=100,
+                temperature=0.85,
+            )
         text = (response.choices[0].message.content or "").strip()
         latency_ms = int((time.perf_counter() - started) * 1000)
         set_llm_outcome(
@@ -4828,7 +4879,7 @@ def _telegram_send_failure_policy(exc: Exception) -> str:
     return "retry"
 
 
-async def _emit_proactive_story(application: Any) -> None:
+async def _emit_proactive_story(application: Any, *, respect_load_guard: bool = False) -> None:
     memory = load_memory()
     cfg = memory.setdefault("config", {})
     life = _ensure_life_config(cfg)
@@ -4869,7 +4920,22 @@ async def _emit_proactive_story(application: Any) -> None:
             save_memory(memory)
         return
 
-    text = await _generate_story_text(memory, proactive=True, chat_id=chat_id)
+    load_reservation = reserve_background_llm("proactive_lore") if respect_load_guard else None
+    if load_reservation is not None and not load_reservation.acquired:
+        logger.info(
+            "Проактивная история отложена ради живого ответа: chat_id=%s reason=%s retry_after_seconds=%.1f",
+            chat_id,
+            load_reservation.reason,
+            load_reservation.retry_after_seconds,
+        )
+        if mood_changed:
+            save_memory(memory)
+        return
+    try:
+        text = await _generate_story_text(memory, proactive=True, chat_id=chat_id)
+    finally:
+        if load_reservation is not None:
+            release_background_llm(load_reservation)
     text = enforce_reply_guardrails(text)
     if not text:
         if mood_changed:
@@ -4944,7 +5010,7 @@ async def _life_loop(application: Any) -> None:
     try:
         while True:
             try:
-                await _emit_proactive_story(application)
+                await _emit_proactive_story(application, respect_load_guard=True)
             except Exception as e:
                 logger.error("Ошибка life loop: %s", e)
             await asyncio.sleep(LIFE_LOOP_INTERVAL_SECONDS)
@@ -5082,7 +5148,12 @@ def _candidate_from_stage2(
     return merged
 
 
-async def _run_funny_scan_once(application: Any, *, trigger: str) -> Dict[str, Any]:
+async def _run_funny_scan_once(
+    application: Any,
+    *,
+    trigger: str,
+    respect_load_guard: bool = False,
+) -> Dict[str, Any]:
     if _FUNNY_SCAN_LOCK.locked():
         return {"busy": True}
     async with _FUNNY_SCAN_LOCK:
@@ -5161,17 +5232,30 @@ async def _run_funny_scan_once(application: Any, *, trigger: str) -> Dict[str, A
                         summary["deduped"] += 1
                         continue
 
-                try:
-                    llm_result, tokens_used = await asyncio.to_thread(
-                        evaluate_candidate_with_llm,
-                        client,
-                        model=str(adapted_settings.get("llm_model", TEXT_MODEL)),
-                        candidate=draft,
-                        max_context_messages=int(adapted_settings.get("llm_max_context_messages", 12)),
-                        max_chars_per_message=int(adapted_settings.get("llm_max_chars_per_message", 220)),
-                        review_threshold=int(adapted_settings.get("review_threshold", 70)),
-                        learning_examples=learning_profile.get("examples", []) if isinstance(learning_profile, dict) else [],
+                load_reservation = reserve_background_llm("funny_scan") if respect_load_guard else None
+                if load_reservation is not None and not load_reservation.acquired:
+                    logger.info(
+                        "Funny scan deferred: chat_id=%s reason=%s retry_after_seconds=%.1f",
+                        chat_id,
+                        load_reservation.reason,
+                        load_reservation.retry_after_seconds,
                     )
+                    return summary
+                try:
+                    try:
+                        llm_result, tokens_used = await asyncio.to_thread(
+                            evaluate_candidate_with_llm,
+                            client,
+                            model=str(adapted_settings.get("llm_model", TEXT_MODEL)),
+                            candidate=draft,
+                            max_context_messages=int(adapted_settings.get("llm_max_context_messages", 12)),
+                            max_chars_per_message=int(adapted_settings.get("llm_max_chars_per_message", 220)),
+                            review_threshold=int(adapted_settings.get("review_threshold", 70)),
+                            learning_examples=learning_profile.get("examples", []) if isinstance(learning_profile, dict) else [],
+                        )
+                    finally:
+                        if load_reservation is not None:
+                            release_background_llm(load_reservation)
                 except Exception as e:
                     logger.error("funny scan LLM failed (chat=%s): %s", chat_id, e)
                     continue
@@ -5253,7 +5337,7 @@ async def _funny_scan_loop(application: Any) -> None:
                         elapsed = (datetime.utcnow() - last_dt).total_seconds()
                         due = elapsed >= max(60, int(settings.get("scan_schedule_minutes", 60)) * 60)
                     if due:
-                        await _run_funny_scan_once(application, trigger="scheduled")
+                        await _run_funny_scan_once(application, trigger="scheduled", respect_load_guard=True)
             except Exception as e:
                 logger.error("Ошибка funny scan loop: %s", e)
             await asyncio.sleep(FUNNY_SCAN_LOOP_INTERVAL_SECONDS)
@@ -5286,7 +5370,11 @@ async def stop_funny_scan_loop() -> None:
 # ROLLING MEMORY LOOP
 # =========================
 
-async def _process_rolling_memory_once(*, chat_id: int | None = None) -> Dict[str, int]:
+async def _process_rolling_memory_once(
+    *,
+    chat_id: int | None = None,
+    respect_load_guard: bool = False,
+) -> Dict[str, int]:
     summary = {"attempted": 0, "created": 0, "rejected": 0, "errors": 0}
     async with _ROLLING_MEMORY_LOCK:
         memory = load_memory()
@@ -5321,6 +5409,16 @@ async def _process_rolling_memory_once(*, chat_id: int | None = None) -> Dict[st
                 )
                 continue
 
+            load_reservation = reserve_background_llm("rolling_memory_summary") if respect_load_guard else None
+            if load_reservation is not None and not load_reservation.acquired:
+                logger.info(
+                    "Rolling memory deferred: chat_id=%s candidate_id=%s reason=%s retry_after_seconds=%.1f",
+                    current_chat_id,
+                    candidate.get("id"),
+                    load_reservation.reason,
+                    load_reservation.retry_after_seconds,
+                )
+                continue
             summary["attempted"] += 1
             logger.info(
                 "Rolling memory processing started: chat_id=%s candidate_id=%s attempt=%s context_messages=%s pending=%s active=%s",
@@ -5331,12 +5429,16 @@ async def _process_rolling_memory_once(*, chat_id: int | None = None) -> Dict[st
                 len(state.get("pending", [])),
                 len(state.get("items", [])),
             )
-            raw, token_usage = await call_openai_metered(
-                messages,
-                max_tokens=int(settings["summary_max_tokens"]),
-                temperature=0.2,
-                purpose="rolling_memory_summary",
-            )
+            try:
+                raw, token_usage = await call_openai_metered(
+                    messages,
+                    max_tokens=int(settings["summary_max_tokens"]),
+                    temperature=0.2,
+                    purpose="rolling_memory_summary",
+                )
+            finally:
+                if load_reservation is not None:
+                    release_background_llm(load_reservation)
 
             # The LLM call yields control. Reload before committing so a message
             # saved while the request was in flight cannot be overwritten.
@@ -5410,7 +5512,7 @@ async def _rolling_memory_loop() -> None:
     try:
         while True:
             try:
-                await _process_rolling_memory_once()
+                await _process_rolling_memory_once(respect_load_guard=True)
             except Exception as e:
                 logger.error("Ошибка rolling memory loop: %s", e)
             memory = load_memory()
@@ -5805,7 +5907,6 @@ async def send_reply_with_style(
         "delivery",
         "started",
         reply_chars=len(reply_text or ""),
-        technical_fallback=reply_text == TECHNICAL_FALLBACK_REPLY,
         force_voice=force_voice,
         is_snipe=is_snipe,
         allow_long_reply=allow_long_reply,
@@ -5879,7 +5980,8 @@ async def _send_reply_with_style_locked(
             logger.info("Удалена нерелевантная старая отсылка из прямого ответа")
         if not guarded_reply:
             open_dialogue = False
-        reply_text = guarded_reply or TECHNICAL_FALLBACK_REPLY
+            trace_event(logger, "delivery", "suppressed", reason="direct_reply_removed_by_context_guard")
+        reply_text = guarded_reply
 
     reply_text = enforce_reply_guardrails(reply_text)
     settings = _adaptive_humor_settings(memory)
@@ -8115,7 +8217,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             await _run_with_typing(
                 context,
                 message.chat_id,
-                _maybe_send_adaptive_snipe(update, context, memory),
+                _maybe_send_adaptive_snipe(update, context, memory, respect_load_guard=True),
                 timeout_seconds=float(_adaptive_humor_settings(memory)["interjection_timeout_seconds"]),
                 show_typing=False,
             )
@@ -8176,21 +8278,22 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             call_openai_text(messages),
             timeout_seconds=float(_adaptive_humor_settings(memory)["reply_timeout_seconds"]),
         )
-        technical_fallback = not bool(reply_text)
         if not reply_text:
             llm_outcome = get_llm_outcome()
             trace_event(
                 logger,
                 "fallback",
-                "technical_reply_selected",
+                "reply_suppressed",
                 level=logging.WARNING,
                 reason=llm_outcome.get("status") or "empty_generation",
                 llm_status_code=llm_outcome.get("status_code"),
                 llm_error_type=llm_outcome.get("error_type"),
                 llm_latency_ms=llm_outcome.get("latency_ms"),
             )
-            logger.warning("Прямой LLM-ответ пустой, отправляю нелипкую техническую заглушку")
-            reply_text = TECHNICAL_FALLBACK_REPLY
+            logger.warning("Прямой LLM-ответ пустой или завершился ошибкой; бот промолчит")
+            save_memory(memory)
+            handler_outcome = "llm_failure_silenced"
+            return
 
         force_voice = is_voice_codeword(user_text)
         sent = await send_reply_with_style(
@@ -8200,11 +8303,8 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             reply_text,
             force_voice=force_voice,
             humor_plan=humor_plan,
-            open_dialogue=not technical_fallback,
         )
-        handler_outcome = "technical_fallback_sent" if technical_fallback and sent else (
-            "reply_sent" if sent else "reply_not_sent"
-        )
+        handler_outcome = "reply_sent" if sent else "reply_not_sent"
     except Exception as e:
         handler_outcome = "exception"
         trace_event(

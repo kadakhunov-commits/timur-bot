@@ -95,7 +95,12 @@ def finish_trace(logger: logging.Logger, tokens: tuple[Any, Any], *, outcome: st
 
 
 def set_llm_outcome(**fields: Any) -> None:
-    _LLM_OUTCOME.set(dict(fields))
+    # asyncio.create_task copies context variables, but mutable values retain
+    # identity. Mutating the request-local dict makes the child call's outcome
+    # visible to the parent handler after wait_for() completes.
+    outcome = _LLM_OUTCOME.get()
+    outcome.clear()
+    outcome.update(fields)
 
 
 def get_llm_outcome() -> dict[str, Any]:
