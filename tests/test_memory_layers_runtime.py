@@ -36,7 +36,7 @@ def test_direct_model_question_prompt_contains_truthful_runtime_model() -> None:
 
     messages = runtime.build_chat_messages(memory, message, humor_plan=runtime.build_humor_plan(memory, message))
 
-    assert "честный технический ответ — deepseek v4 flash" in messages[0]["content"]
+    assert "честный технический ответ — gpt 5.6 luna" in messages[0]["content"]
     assert len(messages[0]["content"]) < 4_500
 
 

@@ -7,7 +7,7 @@ premium_chat_ids:
   - -1002011983899
 
 models:
-  text: "deepseek/deepseek-v4-flash"
+  text: "openai/gpt-5.6-luna"
   vision: "gpt-4o-mini"
   voice: "gemini-3.1-flash-tts-preview"
   voice_name: "Kore"
