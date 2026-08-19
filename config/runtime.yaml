@@ -30,12 +30,12 @@ limits:
 
 probabilities:
   base_reply_chance: 0.08
-  chain_reply_chance: 0.16
-  photo_random_reply_chance: 0.22
+  chain_reply_chance: 0.05
+  photo_random_reply_chance: 0.12
   voice_reply_chance: 0.015
 
 adaptive_humor:
-  schema_version: 8
+  schema_version: 9
   enabled: true
   auto_learn: true
   live_snipe_enabled: true
@@ -45,12 +45,13 @@ adaptive_humor:
   reply_timeout_seconds: 10
   dialogue_window_minutes: 10
   snipe_cooldown_minutes: 10
+  max_auto_replies: 2
   candidate_threshold: 85
   director_max_tokens: 350
   critic_max_tokens: 40
   background_daily_token_budget: 12000
-  ambient_reply_max_chars: 45
-  direct_reply_max_chars: 55
+  ambient_reply_max_chars: 35
+  direct_reply_max_chars: 45
 
 rolling_memory:
   schema_version: 1

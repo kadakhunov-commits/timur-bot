@@ -180,7 +180,7 @@ def _normalize_funny_scan_defaults(raw: Any) -> Dict[str, Any]:
 def _normalize_adaptive_humor_defaults(raw: Any) -> Dict[str, Any]:
     data = raw if isinstance(raw, dict) else {}
     return {
-        "schema_version": 8,
+        "schema_version": 9,
         "enabled": bool(data.get("enabled", True)),
         "auto_learn": bool(data.get("auto_learn", True)),
         "live_snipe_enabled": bool(data.get("live_snipe_enabled", True)),
@@ -190,12 +190,13 @@ def _normalize_adaptive_humor_defaults(raw: Any) -> Dict[str, Any]:
         "dialogue_window_minutes": max(1, int(data.get("dialogue_window_minutes", 10))),
         "snipe_cooldown_minutes": max(1, int(data.get("snipe_cooldown_minutes", 10))),
         "min_human_messages": max(1, int(data.get("min_human_messages", 3))),
+        "max_auto_replies": max(1, min(10, int(data.get("max_auto_replies", 2)))),
         "candidate_threshold": max(0, min(100, int(data.get("candidate_threshold", 85)))),
         "director_max_tokens": max(80, min(500, int(data.get("director_max_tokens", 350)))),
         "critic_max_tokens": max(20, min(100, int(data.get("critic_max_tokens", 40)))),
         "background_daily_token_budget": max(1000, min(100000, int(data.get("background_daily_token_budget", 12000)))),
-        "ambient_reply_max_chars": max(20, min(120, int(data.get("ambient_reply_max_chars", 60)))),
-        "direct_reply_max_chars": max(40, min(500, int(data.get("direct_reply_max_chars", 55)))),
+        "ambient_reply_max_chars": max(20, min(120, int(data.get("ambient_reply_max_chars", 35)))),
+        "direct_reply_max_chars": max(40, min(500, int(data.get("direct_reply_max_chars", 45)))),
     }
 
 

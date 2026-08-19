@@ -111,9 +111,12 @@ from timur_bot.services.humor import (
 )
 from timur_bot.services.conversation_policy import (
     activate_dialogue,
+    auto_reply_streak_blocked,
     continue_dialogue,
     mark_snipe_sent,
+    note_auto_reply_sent,
     note_human_message,
+    reset_auto_reply_streak,
     snipe_gate,
 )
 from timur_bot.services.adaptive_humor import (
@@ -354,6 +357,8 @@ class ReplyDecision:
     threshold: float | None = None
     roll: float | None = None
     allow_ambient_fallback: bool = True
+    auto: bool = False
+    clears_streak: bool = False
 
 
 class MemoryState(dict):
@@ -680,6 +685,16 @@ def _adaptive_humor_settings(memory: Dict[str, Any]) -> Dict[str, Any]:
         if settings.get("interjection_timeout_seconds") in (None, 3):
             settings["interjection_timeout_seconds"] = ADAPTIVE_HUMOR_DEFAULTS["interjection_timeout_seconds"]
         settings["schema_version"] = 8
+    if schema_version < 9:
+        # Shorter default limits: long replies are rarely funny, and the auto
+        # reply cap breaks consecutive un-invited response loops. Only the old
+        # shipped defaults are migrated; deliberate custom limits survive.
+        if settings.get("ambient_reply_max_chars") in (None, 45):
+            settings["ambient_reply_max_chars"] = ADAPTIVE_HUMOR_DEFAULTS["ambient_reply_max_chars"]
+        if settings.get("direct_reply_max_chars") in (None, 55):
+            settings["direct_reply_max_chars"] = ADAPTIVE_HUMOR_DEFAULTS["direct_reply_max_chars"]
+        settings["schema_version"] = 9
+        schema_version = 9
     for key, value in ADAPTIVE_HUMOR_DEFAULTS.items():
         settings.setdefault(key, value)
     settings["enabled"] = bool(settings.get("enabled", True))
@@ -698,6 +713,7 @@ def _adaptive_humor_settings(memory: Dict[str, Any]) -> Dict[str, Any]:
         ("background_daily_token_budget", 1000, 100000),
         ("ambient_reply_max_chars", 20, 120),
         ("direct_reply_max_chars", 40, 500),
+        ("max_auto_replies", 1, 10),
     ):
         try:
             parsed = float(settings.get(key, ADAPTIVE_HUMOR_DEFAULTS[key])) if key == "participation_rate" else int(settings.get(key, ADAPTIVE_HUMOR_DEFAULTS[key]))
@@ -3438,31 +3454,49 @@ def should_reply_decision(memory: Dict[str, Any], message: Message, bot_id: int)
             allow_ambient_fallback=False,
         )
 
+    settings = _adaptive_humor_settings(memory)
+    chat_mem = get_chat_mem(memory, message.chat_id)
+
     if message.reply_to_message and message.reply_to_message.from_user:
         if message.reply_to_message.from_user.id == bot_id:
-            return ReplyDecision(True, "прямой ответ на сообщение Тимура")
+            reset_auto_reply_streak(chat_mem)
+            return ReplyDecision(
+                True,
+                "прямой ответ на сообщение Тимура",
+                clears_streak=True,
+            )
 
     if is_name_mentioned(text):
-        return ReplyDecision(True, "в тексте упомянуто имя Тимура")
+        reset_auto_reply_streak(chat_mem)
+        return ReplyDecision(True, "в тексте упомянуто имя Тимура", clears_streak=True)
 
     if _looks_like_mood_probe(text):
-        return ReplyDecision(True, "пользователь спрашивает про состояние Тимура")
+        reset_auto_reply_streak(chat_mem)
+        return ReplyDecision(True, "пользователь спрашивает про состояние Тимура", clears_streak=True)
 
     if looks_like_address_to_bot(text):
-        return ReplyDecision(True, "сообщение похоже на обращение к Тимуру")
+        reset_auto_reply_streak(chat_mem)
+        return ReplyDecision(True, "сообщение похоже на обращение к Тимуру", clears_streak=True)
 
     if message.reply_to_message and message.reply_to_message.from_user:
         return ReplyDecision(False, "сообщение адресовано другому участнику")
 
-    settings = _adaptive_humor_settings(memory)
-    chat_mem = get_chat_mem(memory, message.chat_id)
     if settings.get("enabled") and continue_dialogue(
         chat_mem,
         user_id=tg_user.id,
         text=text,
         window_minutes=int(settings["dialogue_window_minutes"]),
     ):
-        return ReplyDecision(True, "сообщение продолжает активный диалог с Тимуром")
+        # A topic match is not an invitation. Once Timur has answered too many
+        # consecutive un-addressed messages he goes quiet until someone calls
+        # him again, which breaks the message-reply-message-reply spiral.
+        if auto_reply_streak_blocked(chat_mem, max_auto_replies=int(settings["max_auto_replies"])):
+            return ReplyDecision(
+                False,
+                "лимит авто-ответов без приглашения исчерпан",
+                allow_ambient_fallback=False,
+            )
+        return ReplyDecision(True, "сообщение продолжает активный диалог с Тимуром", auto=True)
 
     return ReplyDecision(False, "обычный случай: передаю активность качественному фильтру")
 
@@ -4697,6 +4731,7 @@ async def _maybe_send_adaptive_snipe(
         return reacted
     if sent:
         logger.info("adaptive interjection sent: critic=%s", candidate_score)
+        note_auto_reply_sent(chat_mem)
     record_humor_decision(
         chat_mem,
         action="JOKE" if sent else ("REACT" if reacted else "SILENCE"),
@@ -8529,6 +8564,8 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         bot_username = str(getattr(context.bot, "username", "") or "")
         if _fact_check_settings(memory).get("enabled") and mention_targets_bot(_mention_texts(message), bot_username):
             handled = await _handle_fact_check(update, context, memory)
+            if handled:
+                reset_auto_reply_streak(get_chat_mem(memory, message.chat_id))
             save_memory(memory)
             handler_outcome = "fact_check_completed" if handled else "fact_check_skipped"
             return
@@ -8567,6 +8604,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
         decision = should_reply_decision(memory, message, bot_id)
         _log_reply_decision("тексту", decision)
+        decision_auto = bool(decision.auto)
         if not decision.should_reply:
             if not decision.allow_ambient_fallback:
                 save_memory(memory)
@@ -8608,6 +8646,9 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 logger.info("Vision-ответ на фото из reply получился пустым, пропускаю отправку")
                 return
             sent = await send_reply_with_style(update, context, memory, reply_text, humor_plan=None)
+            if sent and decision_auto:
+                note_auto_reply_sent(get_chat_mem(memory, message.chat_id))
+                save_memory(memory)
             handler_outcome = "vision_reply_sent" if sent else "vision_reply_not_sent"
             return
 
@@ -8662,6 +8703,9 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             force_voice=force_voice,
             humor_plan=humor_plan,
         )
+        if sent and decision_auto:
+            note_auto_reply_sent(get_chat_mem(memory, message.chat_id))
+            save_memory(memory)
         handler_outcome = "reply_sent" if sent else "reply_not_sent"
     except Exception as e:
         handler_outcome = "exception"
@@ -8729,9 +8773,11 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
         if message.reply_to_message and message.reply_to_message.from_user:
             if message.reply_to_message.from_user.id == bot_id:
+                reset_auto_reply_streak(chat_mem)
                 decision = ReplyDecision(True, "фото отправлено в ответ на сообщение Тимура")
 
         if not decision.should_reply and (message.caption or "") and is_name_mentioned(message.caption):
+            reset_auto_reply_streak(chat_mem)
             decision = ReplyDecision(True, "в подписи к фото упомянуто имя Тимура")
 
         if not decision.should_reply:
@@ -8742,6 +8788,7 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 "случайный ответ на фото по вероятности",
                 threshold=photo_chance,
                 roll=roll,
+                auto=True,
             )
 
         _log_reply_decision("фото", decision)
@@ -8778,6 +8825,9 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             return
 
         sent = await send_reply_with_style(update, context, memory, reply_text, humor_plan=None)
+        if sent and getattr(decision, "auto", False):
+            note_auto_reply_sent(chat_mem)
+            save_memory(memory)
         handler_outcome = "vision_reply_sent" if sent else "vision_reply_not_sent"
     except Exception as e:
         handler_outcome = "exception"

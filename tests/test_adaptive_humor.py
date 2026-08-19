@@ -241,7 +241,7 @@ def test_runtime_ambient_path_uses_writer_then_independent_critic() -> None:
         '{"should_attempt":true,"setup":"план вместо действия","target":"разрыв",'
         '"scene_type":"contradiction","relation":"pile_on","forbidden_moves":["definition"],'
         '"candidates":['
-        '{"text":"планируете не приехать, всё сходится","mechanism":"logic","callback_key":""},'
+        '{"text":"не приедете, но план есть","mechanism":"logic","callback_key":""},'
         '{"text":"поездка уже почти обсудилась","mechanism":"status","callback_key":""},'
         '{"text":"главное не тревожить план поездкой","mechanism":"image","callback_key":""},'
         '{"text":"сомнения можно было не будить","mechanism":"understatement","callback_key":""}]}'
@@ -262,7 +262,7 @@ def test_runtime_ambient_path_uses_writer_then_independent_critic() -> None:
     assert metered.await_count == 2
     assert metered.await_args_list[0].kwargs["max_tokens"] == 350
     assert metered.await_args_list[1].kwargs["max_tokens"] == 40
-    assert sender.await_args.args[3] == "планируете не приехать, всё сходится"
+    assert sender.await_args.args[3] == "не приедете, но план есть"
     assert sender.await_args.kwargs["is_snipe"] is True
     layers = ensure_humor_schema(runtime.get_chat_mem(memory, 777))
     assert layers["humor_daily_usage_v2"][datetime.utcnow().date().isoformat()] == 120

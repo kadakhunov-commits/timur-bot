@@ -253,8 +253,8 @@ def test_unfunny_feedback_blocks_mechanism_and_callback_in_next_snipe() -> None:
     writer = _writer_json(
         should_attempt=True,
         candidates=[
-            ("план поездки снова победил", "status", "trip"),
-            ("не приехать по плану почти получилось", "logic", ""),
+            ("план снова победил", "status", "trip"),
+            ("не приехать, но план есть", "logic", ""),
         ],
     )
     critic = '{"winner_index":0,"score":90,"reaction_score":0,"react":false,"reason_codes":["local"]}'
@@ -266,4 +266,4 @@ def test_unfunny_feedback_blocks_mechanism_and_callback_in_next_snipe() -> None:
     assert "заблокированные фидбеком" in writer_prompt
     assert "status" in writer_prompt
     assert sent is True
-    assert sender.await_args.args[3] == "не приехать по плану почти получилось"
+    assert sender.await_args.args[3] == "не приехать, но план есть"

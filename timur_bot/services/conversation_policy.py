@@ -209,3 +209,27 @@ def mark_snipe_sent(chat_mem: Dict[str, Any], *, now: datetime | None = None) ->
     state = ensure_policy_state(chat_mem)
     state["last_snipe_ts"] = (now or _now()).isoformat()
     state["human_messages_since_snipe"] = 0
+
+
+def reset_auto_reply_streak(chat_mem: Dict[str, Any]) -> None:
+    """A message addressed to Timur clears the run of uninvited replies."""
+    state = ensure_policy_state(chat_mem)
+    state["auto_reply_streak"] = 0
+
+
+def note_auto_reply_sent(chat_mem: Dict[str, Any]) -> None:
+    state = ensure_policy_state(chat_mem)
+    state["auto_reply_streak"] = int(state.get("auto_reply_streak", 0)) + 1
+
+
+def auto_reply_streak_blocked(chat_mem: Dict[str, Any], *, max_auto_replies: int) -> bool:
+    """Block ambient auto-responses after too many uninvited replies in a row.
+
+    The streak counts delivered bot outputs and is only cleared by an explicit
+    address (mention, reply to Timur, name in text). Without this loop guard a
+    dialogue that "continues" itself or an eager follow-up roll can keep Timur
+    talking to a chat that stopped writing to him.
+    """
+    state = ensure_policy_state(chat_mem)
+    limit = max(1, int(max_auto_replies))
+    return int(state.get("auto_reply_streak", 0)) >= limit

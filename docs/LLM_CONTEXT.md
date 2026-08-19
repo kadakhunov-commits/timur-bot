@@ -97,6 +97,10 @@ reply на claim, запись в humor_decisions_v2 + memory_layers.fact_check
 - `export_funny_candidates` и `curate_funny_examples` — поиск исторических моментов вида «сцена → реплика → смех» и их ручная или LLM-разметка;
 - `humor_replay` — слепое сравнение baseline/v2 на `tests/fixtures/humor_replay.json` (режим `legacy,v2`) или на анонимизированном quality-корпусе (режим `prev,v2`, `--fixture tests/fixtures/humor_quality_scenes.json`). Считает gate accuracy, anchoring, template/repeat violations; с проверкой контрактов, аудитом и лимитом API-вызовов.
 
+### A/B системных промптов (persona_ab)
+
+`python3 -m timur_bot.tools.persona_ab [--scopes all|ambient|direct] [--variants A,B,C,D] [--no-judge]` — слепой A/B вариантов системного промпта на тех же реальных сценах через прод-пайплайн `build_chat_messages` + реальная модель + слепой судья (funny/cringe/natural) и детерминированные метрики длины/шаблонов. Не меняет `memory.json`. Текущий победитель (D: короче + анти-кринж + живой пацан) уже зафиксирован в `config/persona.yaml`; полный отчёт в `docs/PERSONA_AB_REPORT.md`.
+
 `funny_scan` — scheduler для owner: находит смешные кластеры по сердцам и маркерам смеха, запускает LLM-review и отдаёт кандидатов на проверку. По умолчанию выключен. Это исследовательский контур, а не источник автоматических ответов в чате.
 
 ## Техническая карта
@@ -109,7 +113,7 @@ reply на claim, запись в humor_decisions_v2 + memory_layers.fact_check
 | Конфигурация | `config/persona.yaml`, `config/runtime.yaml`, `core/config.py` | Голос, лимиты, модели и нормализация параметров. |
 | Память | `services/self_model.py`, `participant_memory.py`, `fact_memory.py`, `fact_recall.py`, `episodes.py`, `rolling_memory.py` | Что Тимур может вспомнить и на каких условиях. |
 | Качество | `tests/test_adaptive_humor.py`, `test_humor.py`, `test_conversation_policy.py`, `test_humor_replay.py`, `test_humor_quality_scenes.py`, `test_humor_quality_replay.py`, `tests/fixtures/humor_quality_scenes.json` | Исполняемые требования к безопасному и смешному поведению и quality-gates по категориям сцен. |
-| Операции | `README.md`, `ARCHITECTURE.MD`, `SUBSCRIPTION.md` | Запуск, импорт, деплой и тарифы. |
+| Операции | `README.md`, `ARCHITECTURE.MD`, `SUBSCRIPTION.md`, `docs/LLM_CONTEXT.md`, `docs/HUMOR_REDESIGN_REPORT.md`, `docs/PERSONA_AB_REPORT.md` | Запуск, импорт, деплой, тарифы, продуктовая цель, отчёт редизайна и отчёт A/B промптов. |
 
 `memory.json` и `billing_state.json` — локальное изменяемое состояние; они могут содержать личные данные и не должны попадать в diff или prompt целиком. Конфиги YAML — версия продукта. Секреты — только в `.env`.
 
