@@ -816,6 +816,32 @@ def recent_humor_outputs(chat_mem: Dict[str, Any], *, limit: int = 50) -> List[D
     ][-max(1, limit) :]
 
 
+def feedback_blocked_signals(chat_mem: Dict[str, Any]) -> Dict[str, List[str]]:
+    """Mechanisms and callbacks explicitly rated unfunny by the chat.
+
+    These feed straight into the next writer/critic pass so confirmed-bad
+    patterns are not regenerated for attention.
+    """
+    layers = ensure_humor_schema(chat_mem)
+    mechanisms: List[str] = []
+    callbacks: List[str] = []
+    for scene in layers.get("humor_scenes_v2", []):
+        if scene.get("source") != "bot":
+            continue
+        if not any(
+            item.get("rating") == "unfunny" for item in scene.get("feedback", []) if isinstance(item, dict)
+        ):
+            continue
+        mechanism = _clean(scene.get("mechanism"), limit=80)
+        if mechanism and mechanism not in mechanisms:
+            mechanisms.append(mechanism)
+        for key in scene.get("callback_keys", []):
+            cleaned = _clean(key, limit=80)
+            if cleaned and cleaned not in callbacks:
+                callbacks.append(cleaned)
+    return {"mechanisms": mechanisms[-8:], "callbacks": callbacks[-8:]}
+
+
 def callback_keys_on_cooldown(chat_mem: Dict[str, Any], *, now: datetime | None = None) -> set[str]:
     current = now or datetime.utcnow()
     human_index = _human_message_index(chat_mem)

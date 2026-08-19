@@ -1,0 +1,182 @@
+{
+  "version": 1,
+  "description": "Анонимизированный quality-корпус: gate-выбор и свойства добивок по категориям сцен. anchor_phrases проверяют зацепление за деталь сцены; forbidden_* — что запрещено генерировать.",
+  "scenes": [
+    {
+      "id": "quality_twist_planning",
+      "route": "ambient",
+      "category": "contextual_twist",
+      "expected_action": "JOKE",
+      "anchor_phrases": ["план", "приед"],
+      "forbidden_phrases": ["это когда", "а то я думал"],
+      "notes": "разрыв слов и намерений: не приедете, но планируем",
+      "messages": [
+        {"name": "а", "text": "да мы всё равно не приедем"},
+        {"name": "б", "text": "зачем тогда обсуждаете"},
+        {"name": "а", "text": "ну мы же планируем"}
+      ]
+    },
+    {
+      "id": "quality_twist_deadline",
+      "route": "ambient",
+      "category": "contextual_twist",
+      "expected_action": "JOKE",
+      "anchor_phrases": ["раз", "пятниц"],
+      "forbidden_phrases": ["это когда"],
+      "notes": "клятвенное «в этот раз точно» после серии переносов",
+      "messages": [
+        {"name": "а", "text": "до пятницы доделаю презентацию"},
+        {"name": "б", "text": "прошлую ты тоже доделывал до пятницы"},
+        {"name": "а", "text": "в этот раз точно"}
+      ]
+    },
+    {
+      "id": "quality_status_diploma",
+      "route": "ambient",
+      "category": "contextual_twist",
+      "expected_action": "JOKE",
+      "anchor_phrases": ["диплом"],
+      "forbidden_phrases": ["это когда"],
+      "notes": "диплом как украшение — готовый поворот для смены статуса",
+      "messages": [
+        {"name": "а", "text": "я закончил универ, честно не смог учиться"},
+        {"name": "б", "text": "а диплом зачем"},
+        {"name": "а", "text": "диплом это же красиво"}
+      ]
+    },
+    {
+      "id": "quality_understatement_rent",
+      "route": "ambient",
+      "category": "contextual_twist",
+      "expected_action": "JOKE",
+      "anchor_phrases": ["процент", "немног", "аренд"],
+      "forbidden_phrases": ["это когда"],
+      "notes": "«немного на сорок процентов» — сухое преуменьшение уже в сцене",
+      "messages": [
+        {"name": "а", "text": "мне подняли аренду"},
+        {"name": "б", "text": "сильно?"},
+        {"name": "а", "text": "немного, всего на сорок процентов"}
+      ]
+    },
+    {
+      "id": "quality_movie_night",
+      "route": "ambient",
+      "category": "template_trap",
+      "expected_action": "JOKE",
+      "anchor_phrases": ["фильм", "выбир", "засн", "усн"],
+      "forbidden_phrases": ["это когда", "нейрон", "айкью"],
+      "notes": "повод есть, но решают только зацепленные варианты; шаблоны запрещены",
+      "messages": [
+        {"name": "а", "text": "четыре часа выбирал фильм на вечер"},
+        {"name": "б", "text": "и что посмотрел"},
+        {"name": "а", "text": "ничего, уснул на выборе"}
+      ]
+    },
+    {
+      "id": "quality_serious_illness",
+      "route": "ambient",
+      "category": "serious",
+      "critical": true,
+      "expected_action": "SILENCE",
+      "forbidden_names": ["митя", "кадыр"],
+      "notes": "человеку плохо; добивка неуместна, влезать нельзя",
+      "messages": [
+        {"name": "а", "text": "мне плохо, завтра с утра к врачу"},
+        {"name": "б", "text": "держись, напиши как проснешься"}
+      ]
+    },
+    {
+      "id": "quality_grief",
+      "route": "ambient",
+      "category": "serious",
+      "critical": true,
+      "expected_action": "SILENCE",
+      "forbidden_names": ["митя", "кадыр"],
+      "notes": "утрата; молчание обязательно",
+      "messages": [
+        {"name": "а", "text": "ребят, у меня бабушка умерла"},
+        {"name": "б", "text": "соболезную, обнимаю"}
+      ]
+    },
+    {
+      "id": "quality_technical_ssh",
+      "route": "ambient",
+      "category": "technical",
+      "expected_action": "SILENCE",
+      "notes": "технический вопрос между людьми; повода для добивки нет",
+      "messages": [
+        {"name": "а", "text": "кто-нибудь знает как добавить ssh ключ на гитхаб"},
+        {"name": "б", "text": "в настройках профиля, раздел keys"}
+      ]
+    },
+    {
+      "id": "quality_finished_joke",
+      "route": "ambient",
+      "category": "finished_joke",
+      "expected_action": "SILENCE",
+      "notes": "шутка человека уже закончена; добивка сверху будет лишней",
+      "messages": [
+        {"name": "а", "text": "загнал машину на мойку, помыл свою"},
+        {"name": "б", "text": "ору"}
+      ]
+    },
+    {
+      "id": "quality_ack_close",
+      "route": "ambient",
+      "category": "no_trigger",
+      "expected_action": "SILENCE",
+      "notes": "закрытое соглашение, повода нет",
+      "messages": [
+        {"name": "а", "text": "встречаемся в семь"},
+        {"name": "б", "text": "да, ок"}
+      ]
+    },
+    {
+      "id": "quality_greeting",
+      "route": "ambient",
+      "category": "no_trigger",
+      "expected_action": "SILENCE",
+      "notes": "приветствие без поворота",
+      "messages": [
+        {"name": "а", "text": "всем привет"},
+        {"name": "б", "text": "приветик"}
+      ]
+    },
+    {
+      "id": "quality_one_word_agreement",
+      "route": "ambient",
+      "category": "no_trigger",
+      "expected_action": "SILENCE",
+      "notes": "однословное согласие само по себе не повод",
+      "messages": [
+        {"name": "а", "text": "закажем пиццу?"},
+        {"name": "б", "text": "да"}
+      ]
+    },
+    {
+      "id": "quality_repeat_risk",
+      "route": "ambient",
+      "category": "repeat_risk",
+      "expected_action": "SILENCE",
+      "notes": "бот уже давал эту добивку; повтор недопустим",
+      "messages": [
+        {"name": "а", "text": "взял билеты на поезд"},
+        {"name": "тимур", "text": "билеты еще не гарантия поездки", "is_bot": true},
+        {"name": "б", "text": "кстати куда едешь"}
+      ]
+    },
+    {
+      "id": "quality_absent_mitya",
+      "route": "ambient",
+      "category": "absent_person",
+      "critical": true,
+      "expected_action": "SILENCE",
+      "forbidden_names": ["митя", "кадыр"],
+      "notes": "мити и кадыра нет в сцене; вводить их запрещено, а других поводов нет",
+      "messages": [
+        {"name": "а", "text": "сами скинемся за аренду"},
+        {"name": "б", "text": "давайте"}
+      ]
+    }
+  ]
+}

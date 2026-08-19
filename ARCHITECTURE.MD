@@ -1,50 +1,106 @@
-# Architecture
+# Архитектура
 
-## Обзор
+## Назначение и запуск
 
-Проект разделён на слои:
+Timur Bot — Telegram-бот с заданной персоной, краткой и долгой памятью чата, vision-ответами, голосом, личными историями, Mini App и подписочным ограничением функций.
 
-- `timur_bot/core` — инфраструктура и загрузка конфигов.
-- `timur_bot/services` — бизнес-логика бота и чистые утилиты обработки текста.
-- `timur_bot/handlers` — Telegram handlers (chat/admin/billing/owner).
-- `timur_bot/app` — wiring роутера и запуск приложения.
+Точка входа для локального запуска — `python -m timur_bot` (`timur_bot/__main__.py`). Для Amvera `run_combined.py` запускает polling-бота в главном потоке и Flask Mini App в фоновом потоке.
 
-Точка входа: `python -m timur_bot` (файл `timur_bot/__main__.py`).
+## Границы слоёв
 
-## Поток запроса
+| Слой | Ответственность |
+| --- | --- |
+| `timur_bot/core/config.py` | Загрузка и нормализация YAML-конфигов и переменных окружения. |
+| `timur_bot/app` | Сборка Telegram-приложения, регистрация handler-ов, старт и остановка фоновых циклов. |
+| `timur_bot/handlers` | Тонкие re-export-обёртки над командами из runtime. Новую логику не следует добавлять сюда без необходимости. |
+| `timur_bot/services` | Runtime, память, юмор, policy, LLM-вызовы, TTS, обработка изображений и чистые доменные функции. |
+| `timur_bot/web` и `miniapp` | Flask-раздача Mini App, версия runtime и браузерная админка. |
+| `billing_system.py` | Состояние подписок, entitlement-ы, квоты, мок-платёжный путь и реферальная механика. |
 
-1. Telegram update попадает в handler через `app/router.py`.
-2. Handler вызывает runtime-функции из `services/bot_logic.py`.
-3. `bot_logic.py`:
-   - читает/обновляет память (`memory.json`);
-   - применяет правила ответа (вероятности, лимиты, режимы);
-   - собирает prompt-контекст;
-   - вызывает OpenAI text/vision;
-   - учитывает биллинг (`billing_system.py`).
+Центральный runtime — `timur_bot/services/bot_logic.py`. Он большой, потому что соединяет Telegram, память, LLM, отправку и фоновые циклы. Новые чистые правила предпочтительно выносить в профильный модуль `services/`, а в `bot_logic.py` оставлять orchestration.
 
-## Конфиги
+## Поток обычного сообщения
 
-`core/config.py` загружает:
+1. `app/router.py` отправляет update в `text_handler`, `photo_handler`, `reaction_handler` или командный handler.
+2. Runtime дедуплицирует event, записывает сообщение в `memory.json`, обновляет профиль участника, факты, policy и очередь rolling memory.
+3. Сообщение с явной обратной связью (`лол`, `несмешно` и т. п.) записывается как обучение и не получает ответ «в ответ на лол».
+4. `should_reply_decision` решает, нужен ли прямой ответ. Если нет, может сработать отдельный ambient-путь adaptive humor.
+5. Для прямого ответа `build_chat_messages` собирает system prompt, режим, настроение, доступную по тарифу память, сцену последних сообщений и план юмора; затем вызывается text или vision LLM.
+6. `send_reply_with_style` применяет лимиты, защитные правила, watermark, цепочки сообщений, голос при необходимости и сохраняет отправленный ответ как humor scene.
 
-- `config/persona.yaml`
-- `config/lexicon.yaml`
-- `config/runtime.yaml`
-- `.env` (секреты и endpoint)
+## Память и состояние
 
-Принцип приоритета:
+`memory.json` — изменяемое runtime-состояние, а не конфиг и не место для секретов. `load_memory` нормализует схему, а `save_memory` пишет через временный файл и выполняет трёхстороннее слияние при конкурирующих сохранениях.
 
-- секреты (`TELEGRAM_BOT_TOKEN`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`) — только `.env`;
-- продуктовые настройки — YAML;
-- при отсутствии опциональных ключей применяются дефолты.
+Основные уровни памяти:
 
-## Тестовый контур
+- `history` и `log` — ограниченная свежая переписка;
+- `participants`, `user_relations` — профиль участника, его стиль и связи;
+- факт-граф и `self_model` — факты о людях и консистентная self-card Тимура;
+- `episodes` — значимые эпизоды для тарифа Plus;
+- rolling memory — краткие LLM-сводки sampled-фрагментов с TTL;
+- `humor_scenes_v2` — структурированные сцены, варианты, выбранный ответ и feedback;
+- `fact_check` — rate-limit-окно и счётчики вердиктов для mention-факт-чека (`services/fact_check.py`).
 
-- `tests/test_baseline_snapshots.py` — snapshot базовой логики.
-- `tests/test_refactor_parity.py` — parity старой/новой логики.
-- `tests/test_router_smoke.py` — проверка регистрации handlers.
-- `tests/test_config_loader.py` — валидация загрузчика YAML.
+Содержимое памяти может включать персональные данные переписки. Не коммитить `memory.json`, выгрузки Telegram, `data/*.jsonl` или файлы из `.env`; при диагностике выводить только нужные метаданные.
 
-## Контекст для AI-агентов
+## Юмор: два разных контура
 
-Единая точка входа для контекста AI-ассистентов: `AGENTS.md`.
-Там зафиксированы ключевые команды, соглашения и ограничения по проекту.
+### Прямой ответ
+
+Когда Тимура адресно вызывают, `choose_humor_plan` и `format_humor_prompt` помогают обычному LLM-ответу быть контекстным. `config/persona.yaml` задаёт голос и жёстко запрещает нейро-шаблоны, универсальные оскорбления и объяснение шутки. Прямой ответ должен сначала отвечать по смыслу; шутка необязательна.
+
+### Adaptive humor
+
+Когда адресного вызова нет, `_maybe_send_adaptive_snipe` может добавить короткую реплику в живую беседу. Контур защищён единым `snipe_gate` (cooldown + разрыв человеческих сообщений), вероятностью участия, лимитами символов, приоритетом foreground-запросов и дневным токен-бюджетом.
+
+1. Writer получает ограниченную сцену и предлагает два-три варианта либо выбирает молчание. Подтверждённый negative-фидбек (`/unfunny`, текстовая критика) передаётся в prompt и фильтр как заблокированные механизмы и callback-и.
+2. Локальные фильтры отсеивают шаблоны, повтор, отсутствующих людей, заблокированные фидбеком механизмы, устаревшие callback-и и слишком длинный текст.
+3. Независимый Critic выбирает вариант или молчание. Реплика отправляется только при score не ниже `candidate_threshold`; готовую шутку человека Critic может отметить сердцем.
+4. Отправка, решения и реакция сохраняются в `humor_scenes_v2`, что позволяет учиться только на проверяемом контексте.
+
+Positive-сигналы: сердечная реакция на сообщение Тимура, reply-реакция с явным смехом и owner-команда `/funny`. Negative-сигналы: `/unfunny` и явная текстовая критика. Нейтральные реакции не считаются доказательством смешности.
+
+Старые `joke_bank` и `funny_examples`, включая `/bit` и импорт курации, намеренно помещаются в `legacy_humor_v1` в обратимый карантин. Активный adaptive-пайплайн их не извлекает как готовые шутки; он может использовать только подтверждённые `humor_scenes_v2`. Это важно не сломать «накоплением мемов».
+
+### Offline funny scan и replay
+
+`funny_scan` — отдельный owner-пайплайн. Он по истории источников ищет кластеры смеха и реакций, оценивает их эвристикой и LLM, затем доставляет кандидаты на ручную проверку или пересылку. Он по умолчанию выключен и хранит состояние отдельно.
+
+`timur_bot.tools.humor_replay` — слепой replay-бенчмарк. Его используют для сравнения вариантов юмора до включения изменения: fixture → baseline (pinned `legacy` one-shot или замороженный `prev` writer/critic) + v2 → blind judge → audit с лимитом API-вызовов. Дополнительно считает детерминированные objective-метрики: gate accuracy, anchoring по `anchor_phrases`, template/repeat violations. Отдельный анонимизированный корпус `tests/fixtures/humor_quality_scenes.json` используется как quality-фикстура и сравнивает `prev,v2`.
+
+## Конфигурация и приоритеты
+
+`core/config.py` читает `config/persona.yaml`, `config/lexicon.yaml`, `config/runtime.yaml`, опциональный `config/mood_events.yaml` и `.env`.
+
+- Секреты и пути runtime (`TELEGRAM_BOT_TOKEN`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `GEMINI_API_KEY`, `MEMORY_PATH`, `BILLING_PATH`) — только в окружении.
+- Дефолтная персона, словари, модели и лимиты — в YAML.
+- Оперативные owner-настройки (`/setprompt`, `/setstyle`, `/setheat`, `/mode`) сохраняются в `memory.json` и перекрывают дефолт там, где это предусмотрено runtime.
+- Подписка гейтит глубину памяти, режимы, voice, watermark и дневную квоту через `feature_gate.py`; источник истины по entitlement-ам — `billing_system.py`.
+
+## Фоновые циклы и внешние возможности
+
+После запуска `app/runner.py` стартует три фоновых цикла: life/mood stories, funny scan и rolling memory. Все они должны останавливаться в `post_shutdown` и не конкурировать с foreground LLM-запросом.
+
+Другие пользовательские возможности:
+
+- Факт-чек по mention («@тимур это правда?»). Триггер — только mention-entity бота; claim берётся из replied-сообщения (reply-target), иначе из самого упоминания. `services/fact_check.py` фильтрует маркеры, проверяет rate-limit (`max_per_chat_per_hour`), нормализует ответ по меткам («правда», «скорее правда», «полуправда», «скорее нет», «враньё», «не проверяемо»; fallback — «не проверяемо»). LLM-вызов `call_openai_fact_check` использует polza веб-плагин (`plugins: [{"id": "web", "max_results": N}]`) при `web_search` и `polza.ai` в `OPENAI_BASE_URL`. Вердикт — reply на claim. Решения и запросы пишутся в `humor_decisions_v2` и `memory_layers.fact_check`.
+- `summary.py` — LLM-сводка выбранного окна чата;
+- `voice_tts.py` — Gemini TTS → OGG/Opus;
+- `noire.py` — чёрно-белая обработка изображения;
+- `secure_face.py` — локальное сопоставление лиц и маскирование по референсам;
+- `web/admin_panel.py` — Mini App, `/healthz`, `/version` и cache-control.
+
+## Проверка изменений
+
+Минимум после изменения — `pytest -q`. Для затрагивания рефакторинга базовой логики дополнительно запускать:
+
+```bash
+pytest -q tests/test_baseline_snapshots.py tests/test_refactor_parity.py
+```
+
+Для изменения юмора выбирать узкие тесты из `tests/test_adaptive_humor.py`, `tests/test_humor.py`, `tests/test_conversation_policy.py` и `tests/test_humor_replay.py`; затем при изменении LLM-поведения запускать replay dry-run или контролируемый benchmark.
+
+## Контекст для следующей LLM
+
+Начинать с `AGENTS.md`, этого документа и [LLM_CONTEXT.md](docs/LLM_CONTEXT.md). Последний описывает текущую продуктовую цель «сделать Тимура смешнее» и безопасную траекторию её реализации.

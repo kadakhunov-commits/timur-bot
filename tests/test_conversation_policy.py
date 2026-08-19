@@ -3,26 +3,11 @@ from datetime import datetime, timedelta
 from timur_bot.services.conversation_policy import (
     activate_dialogue,
     continue_dialogue,
-    interjection_check_allowed,
-    mark_interjection_checked,
-    mark_reply_sent,
     mark_snipe_sent,
     note_human_message,
-    ordinary_reply_allowed,
     snipe_allowed,
+    snipe_gate,
 )
-
-
-def test_regular_participation_has_message_gap_and_is_reset_by_reply() -> None:
-    chat = {}
-    note_human_message(chat)
-    assert not ordinary_reply_allowed(chat, min_human_messages=2)
-
-    note_human_message(chat)
-    assert ordinary_reply_allowed(chat, min_human_messages=2)
-
-    mark_reply_sent(chat)
-    assert not ordinary_reply_allowed(chat, min_human_messages=2)
 
 
 def test_dialogue_owner_gets_immediate_followup_and_dialogue_expires() -> None:
@@ -111,6 +96,12 @@ def test_dialogue_does_not_continue_on_generic_question_words() -> None:
     )
 
 
+def test_snipe_gate_is_allowed_before_first_snipe() -> None:
+    chat = {}
+    assert snipe_gate(chat, cooldown_minutes=30, min_human_messages=3)
+    assert snipe_allowed(chat, cooldown_minutes=30, min_human_messages=3)
+
+
 def test_snipe_requires_both_time_and_new_human_messages() -> None:
     chat = {}
     now = datetime(2026, 7, 15, 12, 0, 0)
@@ -122,15 +113,22 @@ def test_snipe_requires_both_time_and_new_human_messages() -> None:
     assert snipe_allowed(chat, cooldown_minutes=30, min_human_messages=12, now=now + timedelta(minutes=30))
 
 
-def test_snipe_and_quality_checks_are_bounded_by_new_messages() -> None:
+def test_snipe_gate_blocks_on_cooldown_and_passes_after_gap() -> None:
     chat = {}
-    for _ in range(4):
+    now = datetime(2026, 7, 15, 12, 0, 0)
+    mark_snipe_sent(chat, now=now)
+    for _ in range(3):
         note_human_message(chat)
 
-    assert not snipe_allowed(chat, cooldown_minutes=30, min_human_messages=12)
-    assert not interjection_check_allowed(chat, min_human_messages=5)
+    assert not snipe_gate(chat, cooldown_minutes=10, min_human_messages=3, now=now + timedelta(minutes=9))
+    assert snipe_gate(chat, cooldown_minutes=10, min_human_messages=3, now=now + timedelta(minutes=10))
 
-    note_human_message(chat)
-    assert interjection_check_allowed(chat, min_human_messages=5)
-    mark_interjection_checked(chat)
-    assert not interjection_check_allowed(chat, min_human_messages=5)
+
+def test_snipe_gate_still_blocked_when_messages_gap_missing() -> None:
+    chat = {}
+    now = datetime(2026, 7, 15, 12, 0, 0)
+    mark_snipe_sent(chat, now=now)
+    for _ in range(2):
+        note_human_message(chat)
+
+    assert not snipe_gate(chat, cooldown_minutes=10, min_human_messages=3, now=now + timedelta(hours=2))

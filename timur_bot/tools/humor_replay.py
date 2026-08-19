@@ -1,8 +1,10 @@
-"""Live blind replay benchmark for the pinned legacy and current v2 workflows.
+"""Live blind replay benchmark for pinned baseline and current v2 workflows.
 
-Ambient scenes compare the exact old one-shot prompt from the previous runtime
-against the current Director/Writer -> hard filters -> Critic pipeline. Direct
-and daily-lore scenes are contract checks because they are not ambient jokes.
+Ambient scenes compare a pinned baseline (the exact old one-shot "legacy" prompt
+or the frozen pre-redesign writer/critic "prev" pipeline) against the current
+Writer -> hard filters -> Critic pipeline. Direct and daily-lore scenes are
+contract checks because they are not ambient jokes. Reports are extended with
+deterministic quality facts (gate accuracy, anchoring, template/repeat hits).
 The command never mutates bot memory.
 """
 
@@ -14,7 +16,7 @@ import random
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Sequence
+from typing import Any, Callable, Dict, Iterable, List, Sequence
 
 from openai import OpenAI
 
@@ -25,6 +27,7 @@ from timur_bot.services.adaptive_humor import (
     filter_candidates,
     parse_critic,
     parse_director,
+    render_scene,
 )
 from timur_bot.services.humor import ensure_daily_signature
 
@@ -46,6 +49,10 @@ VALID_SEMANTIC_CONTRACTS = {
     "choice_criteria",
     "bot_identity",
 }
+VALID_COMPARE_PAIRS = ({"legacy", "v2"}, {"prev", "v2"})
+AMBIENT_WRITER_CALLS = {"legacy": 1, "prev": 2, "v2": 2}
+AMBIENT_JUDGE_CALLS = 1
+DIRECT_CALLS_PER_SCENE = 2
 DEFAULT_MAX_API_CALLS = 320
 
 
@@ -124,7 +131,7 @@ def validate_replay_scenes(scenes: Sequence[Dict[str, Any]]) -> None:
         for message in messages:
             if not isinstance(message, dict) or not str(message.get("text", "")).strip():
                 raise ValueError(f"{scene_id}: invalid message")
-        for field in ("required_all_phrases", "required_any_phrases", "forbidden_names", "forbidden_phrases"):
+        for field in ("required_all_phrases", "required_any_phrases", "forbidden_names", "forbidden_phrases", "anchor_phrases"):
             value = scene.get(field, [])
             if not isinstance(value, list) or any(not str(item).strip() for item in value):
                 raise ValueError(f"{scene_id}: {field} must be a list of non-empty strings")
@@ -137,19 +144,24 @@ def validate_replay_scenes(scenes: Sequence[Dict[str, Any]]) -> None:
 
 
 def validate_compare(model_names: Sequence[str]) -> None:
-    if len(model_names) != 2 or len(set(model_names)) != 2 or set(model_names) != {"legacy", "v2"}:
-        raise ValueError("--compare must contain legacy,v2 exactly once")
+    if len(model_names) != 2 or len(set(model_names)) != 2 or set(model_names) not in VALID_COMPARE_PAIRS:
+        raise ValueError("--compare must be legacy,v2 or prev,v2 (each name once)")
 
 
-def estimate_max_api_calls(scenes: Sequence[Dict[str, Any]], runs: int) -> int:
+def estimate_max_api_calls(
+    scenes: Sequence[Dict[str, Any]],
+    runs: int,
+    model_names: Sequence[str] = ("legacy", "v2"),
+) -> int:
     validate_replay_scenes(scenes)
+    validate_compare(model_names)
     per_run = 0
     for scene in scenes:
         route = str(scene.get("route", "ambient"))
         if route == "ambient":
-            per_run += 4  # legacy + writer + possible critic + blind judge
+            per_run += sum(AMBIENT_WRITER_CALLS[str(name)] for name in model_names) + AMBIENT_JUDGE_CALLS
         elif route == "direct":
-            per_run += 2  # direct answer + independent semantic contract judge
+            per_run += DIRECT_CALLS_PER_SCENE
     return per_run * max(1, int(runs))
 
 
@@ -174,21 +186,21 @@ def _strict_json(text: str) -> Dict[str, Any]:
 
 
 def _valid_director_schema(payload: Dict[str, Any]) -> bool:
-    required = {"should_attempt", "setup", "target", "scene_type", "relation", "forbidden_moves", "candidates"}
-    if set(payload) != required:
+    required = {"should_attempt", "setup", "scene_type", "relation", "candidates"}
+    if set(payload) - {"latest_message_funny"} != required:
         return False
     if (
         not isinstance(payload.get("should_attempt"), bool)
-        or not all(isinstance(payload.get(key), str) for key in ("setup", "target", "scene_type", "relation"))
-        or not isinstance(payload.get("forbidden_moves"), list)
-        or not all(isinstance(item, str) for item in payload.get("forbidden_moves", []))
+        or not all(isinstance(payload.get(key), str) for key in ("setup", "scene_type", "relation"))
         or not isinstance(payload.get("candidates"), list)
     ):
+        return False
+    if "latest_message_funny" in payload and not isinstance(payload["latest_message_funny"], bool):
         return False
     candidates = payload["candidates"]
     if payload["should_attempt"] is False:
         return candidates == []
-    if len(candidates) != 4:
+    if not 2 <= len(candidates) <= 4:
         return False
     return all(
         isinstance(item, dict)
@@ -312,27 +324,83 @@ def run_legacy(llm: ReplayLLM, _persona: str, scene: Dict[str, Any]) -> Dict[str
     return {"action": "JOKE", "text": text}
 
 
-def run_v2_ambient(llm: ReplayLLM, _persona: str, scene: Dict[str, Any]) -> Dict[str, Any]:
+def _prev_writer_messages(history: Iterable[Dict[str, Any]], *, max_chars: int = 60) -> List[Dict[str, str]]:
+    """Exact writer prompt pinned from the pre-redesign adaptive_humor.py."""
+    scene = render_scene(history)
+    bounded_chars = max(1, int(max_chars))
+    system = (
+        "Ты Director и Writer коротких реплик в живом русском чате друзей. Ты НЕ судья своих вариантов. "
+        "Сначала пойми буквальный смысл и социальную динамику сцены. Если незакрытого комического поворота нет, "
+        "верни should_attempt=false и пустой candidates. Не считай однословное согласие или техническое уточнение "
+        "поводом само по себе. Если повод есть, создай ровно четыре варианта разными механизмами: логическое "
+        "продолжение, смена статуса, конкретный образ и сухое преуменьшение. Каждый вариант — одна естественная "
+        f"реплика до {bounded_chars} знаков. Не вводи людей и факты, которых нет в сцене; не повторяй исходную фразу; не пиши "
+        "словарные определения, 'а то я думал', универсальные оскорбления или объяснение шутки. Callback допустим "
+        "только при прямой связи со сценой. Отдельно отметь latest_message_funny=true, только если последнее "
+        "сообщение человека — уже законченная и действительно смешная шутка, достойная ❤️; не отмечай так "
+        "просто приятное, грустное, грубое или техническое сообщение. Верни только JSON без markdown: "
+        '{"should_attempt":true,"latest_message_funny":false,"setup":"...","target":"...","scene_type":"...","relation":"...",'
+        '"forbidden_moves":["..."],"candidates":[{"text":"...","mechanism":"...","callback_key":""}]}. '
+        "Никаких score, winner или самооценки."
+    )
+    return [{"role": "system", "content": system}, {"role": "user", "content": f"сцена:\n{scene or '<пусто>'}"}]
+
+
+_PREV_DIRECTOR_KEYS = {"should_attempt", "setup", "target", "scene_type", "relation", "forbidden_moves", "candidates"}
+
+
+def _valid_prev_director_schema(payload: Dict[str, Any]) -> bool:
+    if set(payload) != _PREV_DIRECTOR_KEYS:
+        return False
+    if (
+        not isinstance(payload.get("should_attempt"), bool)
+        or not all(isinstance(payload.get(key), str) for key in ("setup", "target", "scene_type", "relation"))
+        or not isinstance(payload.get("forbidden_moves"), list)
+        or not all(isinstance(item, str) for item in payload.get("forbidden_moves", []))
+        or not isinstance(payload.get("candidates"), list)
+    ):
+        return False
+    candidates = payload["candidates"]
+    if payload["should_attempt"] is False:
+        return candidates == []
+    if len(candidates) != 4:
+        return False
+    return all(
+        isinstance(item, dict)
+        and set(item) == {"text", "mechanism", "callback_key"}
+        and all(isinstance(item.get(key), str) for key in ("text", "mechanism", "callback_key"))
+        and bool(str(item.get("text", "")).strip())
+        for item in candidates
+    )
+
+
+def _run_two_stage_ambient(
+    llm: ReplayLLM,
+    scene: Dict[str, Any],
+    *,
+    writer_messages: List[Dict[str, str]],
+    writer_max_tokens: int,
+    valid_schema: Any,
+    expected_candidates: Callable[[List[Dict[str, Any]]], bool],
+    trace_director_keys: Sequence[str],
+) -> Dict[str, Any]:
     history = _history(scene)
-    writer_raw = llm.complete(director_writer_messages(history), max_tokens=180, temperature=0.9)
+    writer_raw = llm.complete(writer_messages, max_tokens=writer_max_tokens, temperature=0.9)
     writer_payload = _strict_json(writer_raw)
     if not writer_payload:
         return {"action": "ERROR", "text": "", "error": "writer_invalid_json", "trace": {}}
-    if not _valid_director_schema(writer_payload):
+    if not valid_schema(writer_payload):
         return {"action": "ERROR", "text": "", "error": "writer_invalid_schema", "trace": {}}
     director = parse_director(writer_raw)
     trace: Dict[str, Any] = {
-        "director": {
-            key: director.get(key)
-            for key in ("should_attempt", "setup", "target", "scene_type", "relation", "forbidden_moves")
-        },
+        "director": {key: director.get(key) for key in trace_director_keys},
         "writer_candidates": list(director.get("candidates", [])),
         "filtered_candidates": [],
         "critic": None,
     }
     if writer_payload["should_attempt"] is False:
         return {"action": "SILENCE", "text": "", "trace": trace}
-    if not director.get("should_attempt") or len(director.get("candidates", [])) != 4:
+    if not director.get("should_attempt") or not expected_candidates(director.get("candidates", [])):
         return {"action": "ERROR", "text": "", "error": "writer_invalid_schema", "trace": trace}
     known_names = {"митя", "кадыр"}
     known_names.update(str(item.get("name", "")) for item in history if item.get("name"))
@@ -357,6 +425,31 @@ def run_v2_ambient(llm: ReplayLLM, _persona: str, scene: Dict[str, Any]) -> Dict
     if winner is None or score < 85:
         return {"action": "SILENCE", "text": "", "trace": trace}
     return {"action": "JOKE", "text": str(candidates[winner]["text"]), "trace": trace}
+
+
+def run_prev_ambient(llm: ReplayLLM, _persona: str, scene: Dict[str, Any]) -> Dict[str, Any]:
+    """Pinned pre-redesign pipeline: 4-candidate writer, 180 tokens, critic gate."""
+    return _run_two_stage_ambient(
+        llm,
+        scene,
+        writer_messages=_prev_writer_messages(_history(scene)),
+        writer_max_tokens=180,
+        valid_schema=_valid_prev_director_schema,
+        expected_candidates=lambda candidates: len(candidates) == 4,
+        trace_director_keys=("should_attempt", "setup", "scene_type", "relation"),
+    )
+
+
+def run_v2_ambient(llm: ReplayLLM, _persona: str, scene: Dict[str, Any]) -> Dict[str, Any]:
+    return _run_two_stage_ambient(
+        llm,
+        scene,
+        writer_messages=director_writer_messages(_history(scene)),
+        writer_max_tokens=350,
+        valid_schema=_valid_director_schema,
+        expected_candidates=lambda candidates: 2 <= len(candidates) <= 4,
+        trace_director_keys=("should_attempt", "setup", "scene_type", "relation"),
+    )
 
 
 def run_v2_direct(llm: ReplayLLM, persona: str, scene: Dict[str, Any]) -> Dict[str, str]:
@@ -574,24 +667,78 @@ def _public_output(output: Dict[str, Any]) -> Dict[str, str]:
     }
 
 
-def _map_blind_winner(winner: str, *, swapped: bool) -> str:
+def _normalized_tokens(value: Any) -> set[str]:
+    clean = re.sub(r"\s+", " ", str(value or "")).strip().lower().replace("ё", "е")
+    clean = re.sub(r"[^a-zа-я0-9]+", " ", clean, flags=re.I).strip()
+    return {token for token in clean.split() if len(token) >= 4}
+
+
+def _repeats_scene(text: str, scene: Dict[str, Any]) -> bool:
+    candidate = _normalized_tokens(text)
+    if len(candidate) < 3:
+        return False
+    for row in scene.get("messages", []):
+        source = _normalized_tokens(row.get("text", ""))
+        if not source:
+            continue
+        overlap = len(candidate & source) / min(len(candidate), len(source))
+        if overlap >= 0.8:
+            return True
+    return False
+
+
+def measure_scene_quality(scene: Dict[str, Any], output: Dict[str, Any]) -> Dict[str, Any]:
+    """Deterministic quality facts for one ambient output on one scene.
+
+    Anchoring is only measured when the fixture provides anchor phrases; the
+    metric must stay able to disprove a change instead of rubber-stamping it.
+    """
+    from timur_bot.services.adaptive_humor import BAD_TEMPLATE_PATTERNS
+
+    action = str(output.get("action", "ERROR"))
+    text = str(output.get("text", ""))
+    template_hit = action == "JOKE" and any(
+        pattern.search(text) for pattern in BAD_TEMPLATE_PATTERNS
+    )
+    lowered = text.lower().replace("ё", "е")
+    anchor_phrases = [str(item).lower().replace("ё", "е") for item in scene.get("anchor_phrases", [])]
+    anchored: bool | None = None
+    if action == "JOKE" and anchor_phrases:
+        anchored = any(phrase in lowered for phrase in anchor_phrases)
+    return {
+        "action_match": action == str(scene.get("expected_action")),
+        "gate": action in ("JOKE", "SILENCE"),
+        "anchored": anchored,
+        "template_hit": template_hit,
+        "repeats_scene": action == "JOKE" and _repeats_scene(text, scene),
+        "length_chars": len(text),
+    }
+
+
+def _map_blind_winner(
+    winner: str,
+    *,
+    swapped: bool,
+    baseline_name: str,
+) -> str:
     normalized = winner.upper()
     if normalized not in {"A", "B"}:
         return "tie"
-    legacy_won = (normalized == "B") if swapped else (normalized == "A")
-    return "legacy" if legacy_won else "v2"
+    baseline_won = (normalized == "B") if swapped else (normalized == "A")
+    return baseline_name if baseline_won else "v2"
 
 
 def blind_judge(
     llm: ReplayLLM,
     scene: Dict[str, Any],
-    legacy: Dict[str, str],
+    baseline: Dict[str, str],
     v2: Dict[str, str],
     *,
     rng: random.Random,
+    baseline_name: str = "legacy",
 ) -> str:
     swapped = bool(rng.getrandbits(1))
-    option_a, option_b = (v2, legacy) if swapped else (legacy, v2)
+    option_a, option_b = (v2, baseline) if swapped else (baseline, v2)
     prompt = {
         "scene": _history(scene),
         "expected_action": scene["expected_action"],
@@ -620,7 +767,53 @@ def blind_judge(
     payload = _strict_json(raw)
     if not payload or str(payload.get("winner", "")).upper() not in {"A", "B", "TIE"}:
         return "error"
-    return _map_blind_winner(str(payload["winner"]), swapped=swapped)
+    return _map_blind_winner(str(payload["winner"]), swapped=swapped, baseline_name=baseline_name)
+
+
+def _ambient_runner(name: str) -> Callable[..., Dict[str, Any]]:
+    runners = {
+        "legacy": run_legacy,
+        "prev": run_prev_ambient,
+        "v2": run_v2_ambient,
+    }
+    return runners[name]
+
+
+def _empty_side_quality() -> Dict[str, Any]:
+    return {
+        "ambient_outputs": 0,
+        "action_matches": 0,
+        "gate_accuracy": None,
+        "anchored_measured": 0,
+        "anchored": 0,
+        "anchor_rate": None,
+        "template_hits": 0,
+        "repeats_scene": 0,
+    }
+
+
+def _accumulate_side_quality(side: Dict[str, Any], quality: Dict[str, Any]) -> None:
+    if not quality["gate"]:
+        return
+    side["ambient_outputs"] += 1
+    if quality["action_match"]:
+        side["action_matches"] += 1
+    if quality["anchored"] is not None:
+        side["anchored_measured"] += 1
+        if quality["anchored"]:
+            side["anchored"] += 1
+    if quality["template_hit"]:
+        side["template_hits"] += 1
+    if quality["repeats_scene"]:
+        side["repeats_scene"] += 1
+
+
+def _finalize_side_quality(side: Dict[str, Any]) -> Dict[str, Any]:
+    outputs = int(side["ambient_outputs"])
+    side["gate_accuracy"] = round(side["action_matches"] / outputs, 4) if outputs else None
+    measured = int(side["anchored_measured"])
+    side["anchor_rate"] = round(side["anchored"] / measured, 4) if measured else None
+    return side
 
 
 def run_benchmark(
@@ -635,12 +828,15 @@ def run_benchmark(
     validate_compare(model_names)
     scene_list = list(scenes)
     validate_replay_scenes(scene_list)
+    baseline_name = str(model_names[0]) if model_names[0] != "v2" else str(model_names[1])
+    baseline_runner = _ambient_runner(baseline_name)
     rng = random.Random(42)
-    totals = {"legacy": 0, "v2": 0, "tie": 0, "error": 0}
+    totals = {baseline_name: 0, "v2": 0, "tie": 0, "error": 0}
     per_scene: Dict[str, Dict[str, int]] = {}
     contract_failures: List[Dict[str, Any]] = []
     critical_failures: List[Dict[str, Any]] = []
     records: List[Dict[str, Any]] = []
+    quality = {baseline_name: _empty_side_quality(), "v2": _empty_side_quality()}
     parse_errors = 0
     bounded_runs = max(1, int(runs))
     ambient_comparisons = 0
@@ -696,15 +892,18 @@ def run_benchmark(
                     continue
 
                 ambient_comparisons += 1
-                bucket = per_scene.setdefault(scene_id, {"legacy": 0, "v2": 0, "tie": 0, "error": 0})
+                bucket = per_scene.setdefault(scene_id, {baseline_name: 0, "v2": 0, "tie": 0, "error": 0})
                 try:
-                    legacy = run_legacy(llm, persona, scene)
+                    baseline = baseline_runner(llm, persona, scene)
                 except ReplayCallError:
-                    current_record["error"] = "legacy_api_error"
+                    current_record["error"] = f"{baseline_name}_api_error"
                     totals["error"] += 1
                     bucket["error"] += 1
                     continue
-                current_record["legacy"] = legacy
+                current_record[baseline_name] = baseline
+                current_record["quality"] = {
+                    baseline_name: measure_scene_quality(scene, _public_output(baseline))
+                }
                 try:
                     v2 = run_v2_ambient(llm, persona, scene)
                 except ReplayCallError:
@@ -714,6 +913,9 @@ def run_benchmark(
                     continue
                 current_record["v2"] = v2
                 v2_public = _public_output(v2)
+                current_record["quality"]["v2"] = measure_scene_quality(scene, v2_public)
+                _accumulate_side_quality(quality[baseline_name], current_record["quality"][baseline_name])
+                _accumulate_side_quality(quality["v2"], current_record["quality"]["v2"])
                 if bool(scene.get("critical", False)):
                     critical_errors = validate_contract(scene, v2_public)
                     current_record["critical_contract_errors"] = critical_errors
@@ -723,7 +925,7 @@ def run_benchmark(
                         )
                 generation_errors = [
                     str(output.get("error", "generation_error"))
-                    for output in (legacy, v2_public)
+                    for output in (baseline, v2_public)
                     if output.get("action") == "ERROR"
                 ]
                 if generation_errors:
@@ -733,7 +935,7 @@ def run_benchmark(
                     bucket["error"] += 1
                     continue
                 try:
-                    winner = blind_judge(llm, scene, legacy, v2_public, rng=rng)
+                    winner = blind_judge(llm, scene, baseline, v2_public, rng=rng, baseline_name=baseline_name)
                 except ReplayCallError:
                     winner = "error"
                     current_record["error"] = "judge_api_error"
@@ -749,19 +951,21 @@ def run_benchmark(
         if current_record is not None:
             current_record["error"] = "interrupted"
 
-    decided = totals["legacy"] + totals["v2"]
+    decided = totals[baseline_name] + totals["v2"]
     for scene in scene_list:
         if scene.get("route") != "ambient" or not scene.get("critical"):
             continue
         scene_id = str(scene["id"])
-        legacy_wins = int(per_scene.get(scene_id, {}).get("legacy", 0))
+        baseline_wins = int(per_scene.get(scene_id, {}).get(baseline_name, 0))
         v2_wins = int(per_scene.get(scene_id, {}).get("v2", 0))
-        if legacy_wins:
-            critical_failures.append({"scene": scene_id, "errors": [f"legacy_wins:{legacy_wins}"]})
+        if baseline_wins:
+            critical_failures.append({"scene": scene_id, "errors": [f"{baseline_name}_wins:{baseline_wins}"]})
         if scene.get("expected_action") == "JOKE" and v2_wins < 1:
             critical_failures.append({"scene": scene_id, "errors": ["no_v2_win"]})
     v2_rate = totals["v2"] / decided if decided else 0.0
     decided_rate = decided / ambient_comparisons if ambient_comparisons else 0.0
+    v2_quality = _finalize_side_quality(quality["v2"])
+    _finalize_side_quality(quality[baseline_name])
     passed = (
         decided > 0
         and v2_rate >= 0.65
@@ -770,10 +974,13 @@ def run_benchmark(
         and llm.api_errors == 0
         and not contract_failures
         and not critical_failures
+        and v2_quality["template_hits"] == 0
+        and v2_quality["repeats_scene"] == 0
         and not interrupted
     )
     return {
-        "benchmark_scope": "ambient pinned legacy vs v2 on isolated scene memory; direct/daily are contracts",
+        "benchmark_scope": f"ambient pinned {baseline_name} vs v2 on isolated scene memory; direct/daily are contracts",
+        "compare": f"{baseline_name},v2",
         "scenes": len(scene_list),
         "runs": bounded_runs,
         "ambient_comparisons": ambient_comparisons,
@@ -781,6 +988,7 @@ def run_benchmark(
         "decided_rate": round(decided_rate, 4),
         "minimum_decided_rate": round(max(0.0, min(1.0, float(min_decided_rate))), 4),
         "v2_win_rate_without_ties": round(v2_rate, 4),
+        "ambient_quality": {baseline_name: quality[baseline_name], "v2": v2_quality},
         "contract_failures": contract_failures,
         "critical_failures": critical_failures,
         "api_calls": llm.calls,
@@ -809,7 +1017,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         validate_compare(model_names)
     except ValueError as exc:
         parser.error(str(exc))
-    estimated_calls = estimate_max_api_calls(scenes, args.runs)
+    estimated_calls = estimate_max_api_calls(scenes, args.runs, model_names)
     if estimated_calls > max(0, int(args.max_api_calls)):
         parser.error(
             f"estimated API calls {estimated_calls} exceed --max-api-calls={args.max_api_calls}; "

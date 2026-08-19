@@ -16,8 +16,9 @@ MAX_SCENE_MESSAGES = 8
 MAX_SCENE_CHARS = 1200
 MAX_AMBIENT_REPLY_CHARS = 60
 MAX_CANDIDATES = 4
+MIN_CANDIDATES = 2
 
-_BAD_TEMPLATE_PATTERNS = (
+BAD_TEMPLATE_PATTERNS = (
     re.compile(r"(?:^|[\s—-])(?:это|\S+)\s*[—-]\s*это когда\b", re.I),
     re.compile(r"\bэто когда\b", re.I),
     re.compile(r"\bа то я думал[аи]?\b", re.I),
@@ -117,29 +118,34 @@ def director_writer_messages(
     humor_hint: str = "",
     *,
     blocked_callback_keys: Iterable[str] = (),
+    blocked_mechanisms: Iterable[str] = (),
     max_chars: int = MAX_AMBIENT_REPLY_CHARS,
 ) -> List[Dict[str, str]]:
     scene = render_scene(history)
     bounded_chars = max(1, int(max_chars))
     blocked = [_clean(item, limit=80) for item in blocked_callback_keys if _clean(item, limit=80)]
+    blocked_mechs = [_clean(item, limit=80) for item in blocked_mechanisms if _clean(item, limit=80)]
     system = (
-        "Ты Director и Writer коротких реплик в живом русском чате друзей. Ты НЕ судья своих вариантов. "
+        "Ты Writer коротких реплик в живом русском чате друзей. Ты НЕ судья своих вариантов. "
         "Сначала пойми буквальный смысл и социальную динамику сцены. Если незакрытого комического поворота нет, "
-        "верни should_attempt=false и пустой candidates. Не считай однословное согласие или техническое уточнение "
-        "поводом само по себе. Если повод есть, создай ровно четыре варианта разными механизмами: логическое "
-        "продолжение, смена статуса, конкретный образ и сухое преуменьшение. Каждый вариант — одна естественная "
-        f"реплика до {bounded_chars} знаков. Не вводи людей и факты, которых нет в сцене; не повторяй исходную фразу; не пиши "
-        "словарные определения, 'а то я думал', универсальные оскорбления или объяснение шутки. Callback допустим "
-        "только при прямой связи со сценой. Отдельно отметь latest_message_funny=true, только если последнее "
-        "сообщение человека — уже законченная и действительно смешная шутка, достойная ❤️; не отмечай так "
-        "просто приятное, грустное, грубое или техническое сообщение. Верни только JSON без markdown: "
-        '{"should_attempt":true,"latest_message_funny":false,"setup":"...","target":"...","scene_type":"...","relation":"...",'
-        '"forbidden_moves":["..."],"candidates":[{"text":"...","mechanism":"...","callback_key":""}]}. '
+        "верни should_attempt=false и пустой candidates. Не считай однословное согласие, серьёзную тему или "
+        "техническое уточнение поводом само по себе. Если повод есть, создай два-три варианта разными механизмами "
+        f"(короткие labels: logic, status, image, understatement). Каждый вариант — одна естественная реплика до "
+        f"{bounded_chars} знаков, зацепленная за конкретную деталь сцены. Не вводи людей и факты, которых нет в сцене; "
+        "не повторяй исходную фразу; не пиши словарные определения, 'а то я думал', универсальные оскорбления или "
+        "объяснение шутки. Callback допустим только при прямой связи со сценой. Отдельно отметь "
+        "latest_message_funny=true, только если последнее сообщение человека — уже законченная и действительно "
+        "смешная шутка, достойная ❤️; не отмечай так просто приятное, грустное, грубое или техническое сообщение. "
+        "Верни только JSON без markdown: "
+        '{"should_attempt":true,"latest_message_funny":false,"setup":"...","scene_type":"...","relation":"...",'
+        '"candidates":[{"text":"...","mechanism":"...","callback_key":""}]}. '
         "Никаких score, winner или самооценки."
     )
     user_parts = [f"сцена:\n{scene or '<пусто>'}"]
     if humor_hint.strip():
         user_parts.append(f"вкус чата (не копировать дословно):\n{_clean(humor_hint, limit=500)}")
+    if blocked_mechs:
+        user_parts.append("механизмы, заблокированные фидбеком чата (не использовать): " + ", ".join(blocked_mechs[:8]))
     if blocked:
         user_parts.append("callbacks на кулдауне: " + ", ".join(blocked[:12]))
     return [{"role": "system", "content": system}, {"role": "user", "content": "\n\n".join(user_parts)}]
@@ -151,10 +157,8 @@ def parse_director(text: str) -> Dict[str, Any]:
         "should_attempt": False,
         "latest_message_funny": False,
         "setup": "",
-        "target": "",
         "scene_type": "",
         "relation": "",
-        "forbidden_moves": [],
         "candidates": [],
     }
     if not payload or any(key in payload for key in ("score", "winner", "winner_index")):
@@ -164,29 +168,23 @@ def parse_director(text: str) -> Dict[str, Any]:
     required_types = {
         "should_attempt": bool,
         "setup": str,
-        "target": str,
         "scene_type": str,
         "relation": str,
-        "forbidden_moves": list,
         "candidates": list,
     }
     if any(key not in payload or not isinstance(payload[key], expected) for key, expected in required_types.items()):
-        return result
-    if not all(isinstance(item, str) for item in payload["forbidden_moves"]):
         return result
     result.update(
         {
             "should_attempt": payload.get("should_attempt") is True,
             "latest_message_funny": payload.get("latest_message_funny") is True,
             "setup": _clean(payload.get("setup"), limit=240),
-            "target": _clean(payload.get("target"), limit=120),
             "scene_type": _clean(payload.get("scene_type"), limit=80),
             "relation": _clean(payload.get("relation"), limit=80),
         }
     )
-    result["forbidden_moves"] = [_clean(item, limit=120) for item in payload["forbidden_moves"] if _clean(item, limit=120)][:8]
     raw_candidates = payload["candidates"]
-    if result["should_attempt"] and len(raw_candidates) != MAX_CANDIDATES:
+    if result["should_attempt"] and not MIN_CANDIDATES <= len(raw_candidates) <= MAX_CANDIDATES:
         return {**result, "should_attempt": False, "candidates": []}
     if not result["should_attempt"] and raw_candidates:
         return result
@@ -346,6 +344,7 @@ def filter_candidates(
     recent_outputs: Iterable[Any] = (),
     known_participant_names: Iterable[str] = (),
     blocked_callback_keys: Iterable[str] = (),
+    blocked_mechanisms: Iterable[str] = (),
     max_chars: int = MAX_AMBIENT_REPLY_CHARS,
 ) -> List[Dict[str, str]]:
     rows = list(history)
@@ -379,6 +378,7 @@ def filter_candidates(
         for item in blocked_callback_keys
         if str(item).strip() == "*" or _normalized(item)
     }
+    blocked_mechs = {_normalized(item) for item in blocked_mechanisms if _normalized(item)}
     result: List[Dict[str, str]] = []
     seen: List[str] = []
 
@@ -396,7 +396,7 @@ def filter_candidates(
             callback_key = derived_callback_key
         if not text or len(text) > max(1, int(max_chars)) or "\n" in original_text or "\r" in original_text:
             continue
-        if any(pattern.search(text) for pattern in _BAD_TEMPLATE_PATTERNS):
+        if any(pattern.search(text) for pattern in BAD_TEMPLATE_PATTERNS):
             continue
         if mechanism and "callback" in _normalized(mechanism) and not callback_key:
             continue
@@ -419,6 +419,8 @@ def filter_candidates(
         if callback_key and ("*" in blocked or _normalized(callback_key) in blocked):
             continue
         if any(blocked_key != "*" and blocked_key in _normalized(text) for blocked_key in blocked):
+            continue
+        if mechanism and _normalized(mechanism) in blocked_mechs:
             continue
         if len(recent_mechanisms) == 2 and mechanism and all(_normalized(mechanism) == _normalized(x) for x in recent_mechanisms):
             continue

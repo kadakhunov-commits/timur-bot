@@ -93,6 +93,7 @@ from timur_bot.services.humor import (
     classify_text_feedback,
     ensure_daily_signature,
     ensure_humor_schema,
+    feedback_blocked_signals,
     find_humor_scene,
     format_bits,
     format_humor_prompt,
@@ -111,14 +112,9 @@ from timur_bot.services.humor import (
 from timur_bot.services.conversation_policy import (
     activate_dialogue,
     continue_dialogue,
-    interjection_check_allowed,
-    mark_interjection_checked,
-    mark_reply_sent,
-    mark_snipe_attempt,
     mark_snipe_sent,
     note_human_message,
-    ordinary_reply_allowed,
-    snipe_allowed,
+    snipe_gate,
 )
 from timur_bot.services.adaptive_humor import (
     critic_messages,
@@ -126,8 +122,18 @@ from timur_bot.services.adaptive_humor import (
     filter_candidates,
     parse_critic_decision,
     parse_director,
+    render_scene,
     strip_stale_context_references,
     text_fingerprint,
+)
+from timur_bot.services.fact_check import (
+    build_fact_check_messages,
+    extract_fact_check_payload,
+    fact_check_request_allowed,
+    mark_fact_check_request,
+    mention_targets_bot,
+    normalize_fact_check_reply,
+    note_fact_check_verdict,
 )
 from timur_bot.services.fact_memory import (
     build_fact_record,
@@ -280,6 +286,7 @@ BOT_RIVALS = APP_CONFIG.bot_rivals
 FUNNY_SCAN_RUNTIME_DEFAULTS = APP_CONFIG.funny_scan_defaults
 ADAPTIVE_HUMOR_DEFAULTS = APP_CONFIG.adaptive_humor_defaults
 ROLLING_MEMORY_DEFAULTS = APP_CONFIG.rolling_memory_defaults
+FACT_CHECK_DEFAULTS = APP_CONFIG.fact_check_defaults
 _PREVIOUS_DEFAULT_PARTICIPATION_RATE = 0.45
 _PREVIOUS_DEFAULT_AMBIENT_REPLY_MAX_CHARS = 60
 _PREVIOUS_DEFAULT_DIRECT_REPLY_MAX_CHARS = 120
@@ -579,6 +586,27 @@ def _rolling_memory_settings(memory: Dict[str, Any]) -> Dict[str, Any]:
     return current
 
 
+def _fact_check_settings(memory: Dict[str, Any]) -> Dict[str, Any]:
+    cfg = memory.setdefault("config", {})
+    settings = cfg.setdefault("fact_check", {})
+    for key, value in FACT_CHECK_DEFAULTS.items():
+        settings.setdefault(key, value)
+    settings["enabled"] = bool(settings.get("enabled", True))
+    settings["web_search"] = bool(settings.get("web_search", True))
+    for key, low, high in (
+        ("web_max_results", 1, 10),
+        ("max_per_chat_per_hour", 0, 60),
+        ("max_chars", 60, 500),
+        ("timeout_seconds", 5, 60),
+    ):
+        try:
+            parsed = int(settings.get(key, FACT_CHECK_DEFAULTS[key]))
+        except (TypeError, ValueError):
+            parsed = int(FACT_CHECK_DEFAULTS[key])
+        settings[key] = max(low, min(high, parsed))
+    return settings
+
+
 def _adaptive_humor_settings(memory: Dict[str, Any]) -> Dict[str, Any]:
     cfg = memory.setdefault("config", {})
     settings = cfg.setdefault("adaptive_humor", {})
@@ -586,8 +614,6 @@ def _adaptive_humor_settings(memory: Dict[str, Any]) -> Dict[str, Any]:
     if schema_version < 2:
         old_defaults = {
             "participation_rate": 0.30,
-            "min_human_messages_between_replies": 2,
-            "min_human_messages_between_checks": 5,
             "reply_timeout_seconds": 6,
             "snipe_cooldown_minutes": 30,
             "min_human_messages": 12,
@@ -639,6 +665,21 @@ def _adaptive_humor_settings(memory: Dict[str, Any]) -> Dict[str, Any]:
         if settings.get("direct_reply_max_chars") in (None, 70):
             settings["direct_reply_max_chars"] = ADAPTIVE_HUMOR_DEFAULTS["direct_reply_max_chars"]
         settings["schema_version"] = 7
+        schema_version = 7
+    if schema_version < 8:
+        # The ambient path collapsed three message-gap counters into one gate.
+        # Retire the duplicate keys and migrate only the previous defaults:
+        # the 180-token writer budget truncated candidate JSON and the
+        # 3-second timeout cancelled healthy writer+critic pairs.
+        retired = settings.setdefault("legacy_v1_settings", {})
+        for key in ("min_human_messages_between_replies", "min_human_messages_between_checks"):
+            if key in settings:
+                retired[key] = settings.pop(key)
+        if settings.get("director_max_tokens") in (None, 180):
+            settings["director_max_tokens"] = ADAPTIVE_HUMOR_DEFAULTS["director_max_tokens"]
+        if settings.get("interjection_timeout_seconds") in (None, 3):
+            settings["interjection_timeout_seconds"] = ADAPTIVE_HUMOR_DEFAULTS["interjection_timeout_seconds"]
+        settings["schema_version"] = 8
     for key, value in ADAPTIVE_HUMOR_DEFAULTS.items():
         settings.setdefault(key, value)
     settings["enabled"] = bool(settings.get("enabled", True))
@@ -646,15 +687,13 @@ def _adaptive_humor_settings(memory: Dict[str, Any]) -> Dict[str, Any]:
     settings["live_snipe_enabled"] = bool(settings.get("live_snipe_enabled", True))
     for key, low, high in (
         ("participation_rate", 0, 1),
-        ("min_human_messages_between_replies", 1, 50),
-        ("min_human_messages_between_checks", 1, 100),
-        ("interjection_timeout_seconds", 1, 10),
+        ("interjection_timeout_seconds", 1, 30),
         ("reply_timeout_seconds", int(TEXT_TRANSPORT_TIMEOUT_SECONDS) + 1, 15),
         ("dialogue_window_minutes", 1, 60),
         ("snipe_cooldown_minutes", 1, 24 * 60),
         ("min_human_messages", 1, 200),
         ("candidate_threshold", 0, 100),
-        ("director_max_tokens", 80, 300),
+        ("director_max_tokens", 80, 500),
         ("critic_max_tokens", 20, 100),
         ("background_daily_token_budget", 1000, 100000),
         ("ambient_reply_max_chars", 20, 120),
@@ -4027,6 +4066,76 @@ async def call_openai_with_params(messages: List[Dict[str, Any]], *, max_tokens:
         return ""
 
 
+def _fact_check_extra_body(settings: Dict[str, Any]) -> Dict[str, Any]:
+    """Fact-check requests may use the provider's web plugin (polza ``plugins``)."""
+    body = dict(_text_completion_extra_body())
+    if bool(settings.get("web_search")) and "polza.ai" in OPENAI_BASE_URL.lower():
+        plugins = [{"id": "web", "max_results": int(settings.get("web_max_results", 4))}]
+        if isinstance(body.get("plugins"), list):
+            plugins = body["plugins"] + plugins
+        body["plugins"] = plugins
+    return body
+
+
+async def call_openai_fact_check(
+    messages: List[Dict[str, Any]],
+    *,
+    max_tokens: int,
+    temperature: float,
+    timeout_seconds: float,
+    settings: Dict[str, Any],
+) -> str:
+    started = time.perf_counter()
+    web_search = bool(settings.get("web_search")) and "polza.ai" in OPENAI_BASE_URL.lower()
+    set_llm_outcome(status="started", model=TEXT_MODEL, fact_check=True, web_search=web_search)
+    try:
+        with foreground_llm_activity("fact_check"):
+            response = await async_client.chat.completions.create(
+                model=TEXT_MODEL,
+                messages=messages,
+                max_tokens=max(40, int(max_tokens)),
+                temperature=temperature,
+                timeout=max(5.0, float(timeout_seconds)),
+                extra_body=_fact_check_extra_body(settings),
+            )
+        text = (response.choices[0].message.content or "").strip()
+        usage = getattr(response, "usage", None)
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        set_llm_outcome(
+            status="success" if text else "empty_response",
+            model=TEXT_MODEL,
+            fact_check=True,
+            web_search=web_search,
+            latency_ms=latency_ms,
+            visible_chars=len(text),
+        )
+        trace_event(
+            logger,
+            "llm",
+            "fact_check_completed",
+            latency_ms=latency_ms,
+            web_search=web_search,
+            prompt_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
+            completion_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
+            visible_chars=len(text),
+        )
+        return text
+    except Exception as e:
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        set_llm_outcome(
+            status="provider_error",
+            model=TEXT_MODEL,
+            fact_check=True,
+            web_search=web_search,
+            latency_ms=latency_ms,
+            status_code=getattr(e, "status_code", None),
+            error_type=type(e).__name__,
+        )
+        trace_event(logger, "llm", "fact_check_failed", level=logging.ERROR, latency_ms=latency_ms, error=e)
+        logger.error("Ошибка fact-check генерации после %s мс: %s", latency_ms, e)
+        return ""
+
+
 async def call_openai_metered(
     messages: List[Dict[str, Any]],
     *,
@@ -4187,33 +4296,15 @@ async def _maybe_send_adaptive_snipe(
         _adaptive_metric(chat_mem, "disabled")
         trace_event(logger, "adaptive_humor", "abstained", reason="disabled")
         return False
-    check_allowed = interjection_check_allowed(
-        chat_mem,
-        min_human_messages=int(settings["min_human_messages_between_checks"]),
-    )
-    reply_gap_allowed = check_allowed and ordinary_reply_allowed(
-        chat_mem,
-        min_human_messages=int(settings["min_human_messages_between_replies"]),
-    )
-    cooldown_allowed = reply_gap_allowed and snipe_allowed(
+    if not snipe_gate(
         chat_mem,
         cooldown_minutes=int(settings["snipe_cooldown_minutes"]),
         min_human_messages=int(settings["min_human_messages"]),
-    )
-    if not cooldown_allowed:
+    ):
         _adaptive_metric(chat_mem, "cooldown_abstain")
-        trace_event(
-            logger,
-            "adaptive_humor",
-            "abstained",
-            reason="conversation_gate",
-            check_allowed=check_allowed,
-            reply_gap_allowed=reply_gap_allowed,
-            cooldown_allowed=cooldown_allowed,
-        )
+        trace_event(logger, "adaptive_humor", "abstained", reason="conversation_gate")
         return False
 
-    mark_interjection_checked(chat_mem)
     participation_roll = random.random()
     if participation_roll >= float(settings["participation_rate"]):
         _adaptive_metric(chat_mem, "participation_abstain")
@@ -4243,10 +4334,12 @@ async def _maybe_send_adaptive_snipe(
         )
         return False
 
-    mark_snipe_attempt(chat_mem)
     started = time.perf_counter()
     history = snapshot_scene_context(chat_mem, trigger_message_id=message.message_id, limit=8, reply_depth=3)
     blocked_callbacks = callback_keys_on_cooldown(chat_mem)
+    feedback_blocks = feedback_blocked_signals(chat_mem)
+    blocked_callbacks |= set(feedback_blocks["callbacks"])
+    blocked_mechanisms = list(feedback_blocks["mechanisms"])
     recent_outputs = recent_humor_outputs(chat_mem, limit=50)
     known_names = [
         str(value.get("name") or value.get("username") or "")
@@ -4275,6 +4368,7 @@ async def _maybe_send_adaptive_snipe(
         history,
         humor_hint=humor_hint,
         blocked_callback_keys=blocked_callbacks,
+        blocked_mechanisms=blocked_mechanisms,
         max_chars=int(settings["ambient_reply_max_chars"]),
     )
     writer_ceiling = _completion_token_ceiling(writer_messages, int(settings["director_max_tokens"]))
@@ -4376,6 +4470,7 @@ async def _maybe_send_adaptive_snipe(
             recent_outputs=filter_recent_outputs,
             known_participant_names=known_names,
             blocked_callback_keys=blocked_callbacks,
+            blocked_mechanisms=blocked_mechanisms,
             max_chars=int(settings["ambient_reply_max_chars"]),
         )
         if director.get("should_attempt")
@@ -5908,6 +6003,207 @@ async def reaction_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         logger.info("Heart feedback пропущен: message_id=%s не найден", reaction.message_id)
 
 
+def _mention_texts(message: Message) -> List[str]:
+    texts: List[str] = []
+    raw = str(getattr(message, "text", None) or getattr(message, "caption", None) or "")
+    for entity in list(getattr(message, "entities", None) or []) + list(getattr(message, "caption_entities", None) or []):
+        entity_type = str(getattr(entity, "type", "") or "")
+        if entity_type != "mention":
+            continue
+        entity_text = getattr(entity, "extract", None)
+        if callable(entity_text):
+            try:
+                extracted = str(entity_text(raw) or "").strip()
+            except Exception:
+                extracted = ""
+            if extracted:
+                texts.append(extracted)
+                continue
+        offset = int(getattr(entity, "offset", 0) or 0)
+        length = int(getattr(entity, "length", 0) or 0)
+        if length:
+            texts.append(raw[offset : offset + length].strip())
+    return [item for item in texts if item]
+
+
+def _replied_row_dict(message: Message) -> Dict[str, Any] | None:
+    reply = getattr(message, "reply_to_message", None)
+    if reply is None:
+        return None
+    author = getattr(reply, "from_user", None)
+    return {
+        "text": (getattr(reply, "text", None) or "").strip(),
+        "user_id": int(getattr(author, "id", 0) or 0) if author else 0,
+        "name": str(getattr(author, "first_name", "") or "") if author else "",
+        "username": str(getattr(author, "username", "") or "") if author else "",
+        "is_bot": bool(getattr(author, "is_bot", False)) if author else True,
+        "message_id": int(getattr(reply, "message_id", 0) or 0),
+    }
+
+
+def _fact_check_silent(chat: Dict[str, Any], reason: str) -> None:
+    _adaptive_metric(chat, "fact_check_abstain")
+    trace_event(logger, "adaptive_humor", "fact_check_abstained", reason=reason)
+
+
+async def _send_fact_check_verdict(
+    context: ContextTypes.DEFAULT_TYPE,
+    memory: Dict[str, Any],
+    update: Update,
+    *,
+    verdict_text: str,
+    claim_message_id: int,
+    trigger_message_id: int,
+    payload: Dict[str, Any],
+) -> bool:
+    message = update.effective_message
+    chat_mem = get_chat_mem(memory, message.chat_id)
+    bot = getattr(context, "bot", None)
+    if bot is None:
+        getter = getattr(message, "get_bot", None)
+        if callable(getter):
+            try:
+                bot = getter()
+            except TypeError:
+                bot = None
+    if bot is None or not hasattr(bot, "send_message"):
+        return False
+    bot_id = int(getattr(bot, "id", 0) or 0)
+    history_ids = {int(row.get("message_id", 0) or 0) for row in chat_mem.get("history", [])}
+    reply_target = int(claim_message_id or 0) if int(claim_message_id or 0) in history_ids else int(trigger_message_id or 0)
+    try:
+        sent = await bot.send_message(chat_id=message.chat_id, text=verdict_text, reply_to_message_id=reply_target or None)
+    except Exception as exc:
+        logger.error("Fact-check verdict delivery failed: %s", exc)
+        return False
+    try:
+        billing.register_bot_reply(message.chat_id)
+    except Exception as exc:
+        logger.error("Ошибка учета fact-check ответа: %s", exc)
+    plan = {
+        "action": "FACT_CHECK",
+        "mode": "fact_check",
+        "setup": str(payload.get("claim_text", ""))[:240],
+        "context": snapshot_scene_context(chat_mem, trigger_message_id=int(reply_target or trigger_message_id)),
+        "trigger_message_id": int(reply_target or trigger_message_id),
+    }
+    record_bot_output(
+        chat_mem,
+        message_id=int(getattr(sent, "message_id", 0) or 0),
+        text=verdict_text,
+        plan=plan,
+        output_kind="fact_check",
+        trigger_message_id=int(reply_target or trigger_message_id),
+        reply_to_message_id=int(reply_target or 0),
+    )
+    _store_bot_claim_memory(memory, message, verdict_text)
+    save_memory(memory)
+    return True
+
+
+async def _handle_fact_check(update: Update, context: ContextTypes.DEFAULT_TYPE, memory: Dict[str, Any]) -> bool:
+    message = update.effective_message
+    if not message or not getattr(message, "text", None):
+        return False
+    bot_username = str(getattr(context.bot, "username", "") or "")
+    bot_id = int(getattr(context.bot, "id", 0) or 0)
+    mention_texts = _mention_texts(message)
+    if not mention_targets_bot(mention_texts, bot_username):
+        return False
+
+    log_tokens = start_trace(
+        logger,
+        kind="fact_check",
+        chat_id=message.chat_id,
+        message_id=int(getattr(message, "message_id", 0) or 0),
+    )
+    settings = _fact_check_settings(memory)
+    chat_mem = get_chat_mem(memory, message.chat_id)
+    outcome = "failed"
+    try:
+        author = _resolve_author_from_message(message)
+        if not settings.get("enabled") or not author:
+            _fact_check_silent(chat_mem, "disabled" if not settings.get("enabled") else "unknown_author")
+            outcome = "disabled" if not settings.get("enabled") else "unknown_author"
+            return False
+
+        payload = extract_fact_check_payload(
+            text=message.text,
+            mention_texts=mention_texts,
+            bot_username=bot_username,
+            reply_message=_replied_row_dict(message),
+            author_user_id=int(author.get("user_id", 0) or 0),
+            bot_id=bot_id,
+        )
+        if not payload.get("triggered") or not str(payload.get("claim_text", "")).strip():
+            _fact_check_silent(chat_mem, "no_claim")
+            outcome = "no_claim"
+            return False
+
+        max_per_hour = int(settings.get("max_per_chat_per_hour", 6))
+        if not fact_check_request_allowed(chat_mem, max_per_hour=max_per_hour):
+            _fact_check_silent(chat_mem, "rate_limit")
+            record_humor_decision(chat_mem, action="FACT_CHECK", sent=False, reason_codes=["rate_limit"], charge_usage=False)
+            outcome = "rate_limited"
+            return False
+        mark_fact_check_request(chat_mem)
+
+        history = snapshot_scene_context(chat_mem, trigger_message_id=int(message.message_id), limit=7, reply_depth=2)
+        scene = render_scene(history)
+        claim_text = str(payload.get("claim_text", ""))
+        claim_author_id = int(payload.get("claim_author_id", 0) or 0)
+        try:
+            facts_prompt = build_fact_recall_bundle(chat_mem, claim_text).get("prompt", "")
+        except Exception:
+            facts_prompt = ""
+        dossier = build_participant_dossier(chat_mem, claim_author_id) if claim_author_id else ""
+        messages_list = build_fact_check_messages(
+            get_system_prompt(memory),
+            claim=claim_text,
+            author_name=str(payload.get("claim_author_name", "")),
+            scene=scene,
+            facts_prompt=facts_prompt,
+            dossier=dossier,
+            max_chars=int(settings.get("max_chars", 160)),
+            web_search=bool(settings.get("web_search")),
+        )
+        raw_verdict = await call_openai_fact_check(
+            messages_list,
+            max_tokens=max(60, int(settings.get("max_chars", 160)) // 2),
+            temperature=0.2,
+            timeout_seconds=float(settings.get("timeout_seconds", 25)),
+            settings=settings,
+        )
+        normalized = normalize_fact_check_reply(raw_verdict, max_chars=int(settings.get("max_chars", 160)))
+        verdict_label = normalized["label"]
+        sent = await _send_fact_check_verdict(
+            context,
+            memory,
+            update,
+            verdict_text=normalized["text"],
+            claim_message_id=int(payload.get("claim_message_id", 0) or 0),
+            trigger_message_id=int(getattr(message, "message_id", 0) or 0),
+            payload=payload,
+        )
+        note_fact_check_verdict(chat_mem, label=verdict_label)
+        record_humor_decision(
+            get_chat_mem(memory, message.chat_id),
+            action="FACT_CHECK",
+            sent=sent,
+            reason_codes=[f"verdict:{verdict_label}"] + (["fallback_label"] if normalized["fallback_used"] else []),
+            charge_usage=False,
+        )
+        outcome = "sent" if sent else "send_failed"
+        trace_event(logger, "fact_check", "verdict", label=verdict_label, sent=sent, claim_source=payload.get("claim_source"))
+        return sent
+    except Exception as e:
+        outcome = "exception"
+        trace_event(logger, "handler", "failed", level=logging.ERROR, error_type=type(e).__name__, error=e)
+        raise
+    finally:
+        finish_trace(logger, log_tokens, outcome=outcome)
+
+
 # =========================
 # ОТПРАВКА
 # =========================
@@ -6161,7 +6457,6 @@ async def _send_reply_with_style_locked(
                 sender = getattr(message, "from_user", None)
                 if sender and open_dialogue and not is_snipe:
                     activate_dialogue(chat_mem, initiator_id=sender.id, text=_extract_message_text(message))
-                mark_reply_sent(chat_mem)
                 if is_snipe:
                     mark_snipe_sent(chat_mem)
                 save_memory(memory)
@@ -6210,7 +6505,6 @@ async def _send_reply_with_style_locked(
                     sender = getattr(message, "from_user", None)
                     if sender and open_dialogue:
                         activate_dialogue(chat_mem, initiator_id=sender.id, text=_extract_message_text(message))
-                    mark_reply_sent(chat_mem)
                     first_finalized = True
                 save_memory(memory)
                 if index < len(parts) - 1:
@@ -6222,7 +6516,6 @@ async def _send_reply_with_style_locked(
                     sender = getattr(message, "from_user", None)
                     if sender and open_dialogue:
                         activate_dialogue(chat_mem, initiator_id=sender.id, text=_extract_message_text(message))
-                    mark_reply_sent(chat_mem)
                     save_memory(memory)
                 logger.error("Chain reply stopped after partial delivery: %s", e)
                 return True
@@ -6247,7 +6540,6 @@ async def _send_reply_with_style_locked(
     sender = getattr(message, "from_user", None)
     if sender and open_dialogue and not is_snipe:
         activate_dialogue(chat_mem, initiator_id=sender.id, text=_extract_message_text(message))
-    mark_reply_sent(chat_mem)
     if is_snipe:
         mark_snipe_sent(chat_mem)
     save_memory(memory)
@@ -8233,6 +8525,13 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         if _apply_message_mood_impact(memory, message):
             save_memory(memory)
         _sync_mood_state(memory, allow_event_roll=True)
+
+        bot_username = str(getattr(context.bot, "username", "") or "")
+        if _fact_check_settings(memory).get("enabled") and mention_targets_bot(_mention_texts(message), bot_username):
+            handled = await _handle_fact_check(update, context, memory)
+            save_memory(memory)
+            handler_outcome = "fact_check_completed" if handled else "fact_check_skipped"
+            return
 
         user_text = _extract_message_text(message)
         if _looks_like_story_request(user_text):

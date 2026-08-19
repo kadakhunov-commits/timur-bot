@@ -30,11 +30,12 @@ def test_replay_cli_dry_run_makes_no_api_calls(capsys) -> None:
 
 
 def test_blind_winner_mapping_survives_ab_swap() -> None:
-    assert replay._map_blind_winner("A", swapped=False) == "legacy"
-    assert replay._map_blind_winner("B", swapped=False) == "v2"
-    assert replay._map_blind_winner("A", swapped=True) == "v2"
-    assert replay._map_blind_winner("B", swapped=True) == "legacy"
-    assert replay._map_blind_winner("TIE", swapped=True) == "tie"
+    assert replay._map_blind_winner("A", swapped=False, baseline_name="legacy") == "legacy"
+    assert replay._map_blind_winner("B", swapped=False, baseline_name="legacy") == "v2"
+    assert replay._map_blind_winner("A", swapped=True, baseline_name="legacy") == "v2"
+    assert replay._map_blind_winner("B", swapped=True, baseline_name="legacy") == "legacy"
+    assert replay._map_blind_winner("TIE", swapped=True, baseline_name="legacy") == "tie"
+    assert replay._map_blind_winner("A", swapped=False, baseline_name="prev") == "prev"
 
 
 def test_compare_validation_and_cost_ceiling_apply_even_to_dry_run() -> None:
@@ -302,12 +303,10 @@ def test_invalid_writer_or_critic_schema_is_not_quality_silence() -> None:
     assert replay.run_v2_ambient(InvalidWriter(), "persona", scene)["error"] == "writer_invalid_schema"
 
     valid_writer = (
-        '{"should_attempt":true,"setup":"x","target":"x","scene_type":"x","relation":"x",'
-        '"forbidden_moves":[],"candidates":['
+        '{"should_attempt":true,"setup":"x","scene_type":"x","relation":"x","candidates":['
         '{"text":"вариант один точный","mechanism":"logic","callback_key":""},'
         '{"text":"вариант два точный","mechanism":"status","callback_key":""},'
-        '{"text":"вариант три точный","mechanism":"image","callback_key":""},'
-        '{"text":"вариант четыре точный","mechanism":"understatement","callback_key":""}]}'
+        '{"text":"вариант три точный","mechanism":"image","callback_key":""}]}'
     )
 
     class InvalidCritic:
@@ -324,12 +323,11 @@ def test_invalid_writer_or_critic_schema_is_not_quality_silence() -> None:
 
 def test_v2_audit_keeps_writer_filter_and_critic_trace() -> None:
     writer = (
-        '{"should_attempt":true,"setup":"разрыв","target":"срок","scene_type":"contradiction",'
-        '"relation":"pile_on","forbidden_moves":[],"candidates":['
+        '{"should_attempt":true,"setup":"разрыв","scene_type":"contradiction",'
+        '"relation":"pile_on","candidates":['
         '{"text":"успели опоздать заранее","mechanism":"logic","callback_key":""},'
         '{"text":"срок чисто декоративный","mechanism":"status","callback_key":""},'
-        '{"text":"календарь вышел из чата","mechanism":"image","callback_key":""},'
-        '{"text":"ну почти вовремя","mechanism":"understatement","callback_key":""}]}'
+        '{"text":"календарь вышел из чата","mechanism":"image","callback_key":""}]}'
     )
     critic = '{"winner_index":1,"score":92,"reason_codes":["local","short"]}'
 
@@ -353,7 +351,7 @@ def test_v2_audit_keeps_writer_filter_and_critic_trace() -> None:
     }
     output = replay.run_v2_ambient(FakeLLM(), "persona", scene)
 
-    assert len(output["trace"]["writer_candidates"]) == 4
+    assert len(output["trace"]["writer_candidates"]) == 3
     assert output["trace"]["filtered_candidates"]
     assert output["trace"]["critic"] == {
         "winner_index": 1,
@@ -486,6 +484,16 @@ def test_interruption_returns_partial_audit_record() -> None:
             "scene": "one",
             "route": "ambient",
             "legacy": {"action": "SILENCE", "text": ""},
+            "quality": {
+                "legacy": {
+                    "action_match": False,
+                    "gate": True,
+                    "anchored": None,
+                    "template_hit": False,
+                    "repeats_scene": False,
+                    "length_chars": 0,
+                }
+            },
             "error": "interrupted",
         }
     ]

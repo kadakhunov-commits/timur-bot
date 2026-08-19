@@ -260,7 +260,7 @@ def test_runtime_ambient_path_uses_writer_then_independent_critic() -> None:
 
     assert sent is True
     assert metered.await_count == 2
-    assert metered.await_args_list[0].kwargs["max_tokens"] == 180
+    assert metered.await_args_list[0].kwargs["max_tokens"] == 350
     assert metered.await_args_list[1].kwargs["max_tokens"] == 40
     assert sender.await_args.args[3] == "планируете не приехать, всё сходится"
     assert sender.await_args.kwargs["is_snipe"] is True

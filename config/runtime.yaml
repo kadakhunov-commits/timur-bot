@@ -35,20 +35,18 @@ probabilities:
   voice_reply_chance: 0.015
 
 adaptive_humor:
-  schema_version: 7
+  schema_version: 8
   enabled: true
   auto_learn: true
   live_snipe_enabled: true
   participation_rate: 0.225
-  min_human_messages_between_replies: 3
-  min_human_messages_between_checks: 3
-  interjection_timeout_seconds: 3
+  min_human_messages: 3
+  interjection_timeout_seconds: 15
   reply_timeout_seconds: 10
   dialogue_window_minutes: 10
   snipe_cooldown_minutes: 10
-  min_human_messages: 3
   candidate_threshold: 85
-  director_max_tokens: 180
+  director_max_tokens: 350
   critic_max_tokens: 40
   background_daily_token_budget: 12000
   ambient_reply_max_chars: 45
@@ -68,6 +66,15 @@ rolling_memory:
   context_messages: 3
   summary_max_chars: 180
   summary_max_tokens: 120
+
+fact_check:
+  schema_version: 1
+  enabled: true
+  web_search: true
+  web_max_results: 4
+  max_per_chat_per_hour: 6
+  max_chars: 160
+  timeout_seconds: 25
 
 funny_scan:
   enabled: false

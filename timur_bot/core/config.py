@@ -73,6 +73,7 @@ class AppConfig:
     bot_rivals: Dict[str, Dict[str, Any]]
     adaptive_humor_defaults: Dict[str, Any]
     rolling_memory_defaults: Dict[str, Any]
+    fact_check_defaults: Dict[str, Any]
     funny_scan_defaults: Dict[str, Any]
     funny_scan_lexicon: Dict[str, Any]
     mood_events_catalog: Dict[str, Any]
@@ -179,20 +180,18 @@ def _normalize_funny_scan_defaults(raw: Any) -> Dict[str, Any]:
 def _normalize_adaptive_humor_defaults(raw: Any) -> Dict[str, Any]:
     data = raw if isinstance(raw, dict) else {}
     return {
-        "schema_version": 7,
+        "schema_version": 8,
         "enabled": bool(data.get("enabled", True)),
         "auto_learn": bool(data.get("auto_learn", True)),
         "live_snipe_enabled": bool(data.get("live_snipe_enabled", True)),
         "participation_rate": max(0.0, min(1.0, float(data.get("participation_rate", 0.45)))),
-        "min_human_messages_between_replies": max(1, int(data.get("min_human_messages_between_replies", 3))),
-        "min_human_messages_between_checks": max(1, int(data.get("min_human_messages_between_checks", 3))),
-        "interjection_timeout_seconds": max(1, min(10, int(data.get("interjection_timeout_seconds", 3)))),
+        "interjection_timeout_seconds": max(1, min(30, int(data.get("interjection_timeout_seconds", 15)))),
         "reply_timeout_seconds": max(10, min(15, int(data.get("reply_timeout_seconds", 10)))),
         "dialogue_window_minutes": max(1, int(data.get("dialogue_window_minutes", 10))),
         "snipe_cooldown_minutes": max(1, int(data.get("snipe_cooldown_minutes", 10))),
         "min_human_messages": max(1, int(data.get("min_human_messages", 3))),
         "candidate_threshold": max(0, min(100, int(data.get("candidate_threshold", 85)))),
-        "director_max_tokens": max(80, min(300, int(data.get("director_max_tokens", 180)))),
+        "director_max_tokens": max(80, min(500, int(data.get("director_max_tokens", 350)))),
         "critic_max_tokens": max(20, min(100, int(data.get("critic_max_tokens", 40)))),
         "background_daily_token_budget": max(1000, min(100000, int(data.get("background_daily_token_budget", 12000)))),
         "ambient_reply_max_chars": max(20, min(120, int(data.get("ambient_reply_max_chars", 60)))),
@@ -220,6 +219,19 @@ def _normalize_rolling_memory_defaults(raw: Any) -> Dict[str, Any]:
         "context_messages": max(1, min(8, int(data.get("context_messages", 3)))),
         "summary_max_chars": max(40, min(500, int(data.get("summary_max_chars", 180)))),
         "summary_max_tokens": max(40, min(500, int(data.get("summary_max_tokens", 120)))),
+    }
+
+
+def _normalize_fact_check_defaults(raw: Any) -> Dict[str, Any]:
+    data = raw if isinstance(raw, dict) else {}
+    return {
+        "schema_version": 1,
+        "enabled": bool(data.get("enabled", True)),
+        "web_search": bool(data.get("web_search", True)),
+        "web_max_results": max(1, min(10, int(data.get("web_max_results", 4)))),
+        "max_per_chat_per_hour": max(0, min(60, int(data.get("max_per_chat_per_hour", 6)))),
+        "max_chars": max(60, min(500, int(data.get("max_chars", 160)))),
+        "timeout_seconds": max(5, min(60, int(data.get("timeout_seconds", 25)))),
     }
 
 
@@ -354,6 +366,7 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
     funny_scan_defaults = _normalize_funny_scan_defaults(runtime.get("funny_scan"))
     adaptive_humor_defaults = _normalize_adaptive_humor_defaults(runtime.get("adaptive_humor"))
     rolling_memory_defaults = _normalize_rolling_memory_defaults(runtime.get("rolling_memory"))
+    fact_check_defaults = _normalize_fact_check_defaults(runtime.get("fact_check"))
     bot_rivals = _normalize_bot_rivals(persona.get("bot_rivals"))
     funny_scan_lexicon = _normalize_funny_scan_lexicon(lexicon.get("funny_scan_lexicon"))
     mood_events_catalog = _normalize_mood_events_catalog(mood_events_raw)
@@ -441,6 +454,7 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
         bot_rivals=bot_rivals,
         adaptive_humor_defaults=adaptive_humor_defaults,
         rolling_memory_defaults=rolling_memory_defaults,
+        fact_check_defaults=fact_check_defaults,
         funny_scan_defaults=funny_scan_defaults,
         funny_scan_lexicon=funny_scan_lexicon,
         mood_events_catalog=mood_events_catalog,

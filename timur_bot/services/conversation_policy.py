@@ -47,9 +47,6 @@ def ensure_policy_state(chat_mem: Dict[str, Any]) -> Dict[str, Any]:
     state.setdefault("pending_followups", {})
     state.setdefault("last_snipe_ts", None)
     state.setdefault("human_messages_since_snipe", 0)
-    state.setdefault("human_messages_since_snipe_attempt", 0)
-    state.setdefault("human_messages_since_reply", 0)
-    state.setdefault("human_messages_since_interjection_check", 0)
     return state
 
 
@@ -57,27 +54,6 @@ def note_human_message(chat_mem: Dict[str, Any]) -> None:
     state = ensure_policy_state(chat_mem)
     state["human_messages_total"] = int(state.get("human_messages_total", 0)) + 1
     state["human_messages_since_snipe"] = int(state.get("human_messages_since_snipe", 0)) + 1
-    state["human_messages_since_snipe_attempt"] = int(state.get("human_messages_since_snipe_attempt", 0)) + 1
-    state["human_messages_since_reply"] = int(state.get("human_messages_since_reply", 0)) + 1
-    state["human_messages_since_interjection_check"] = int(state.get("human_messages_since_interjection_check", 0)) + 1
-
-
-def ordinary_reply_allowed(chat_mem: Dict[str, Any], *, min_human_messages: int) -> bool:
-    state = ensure_policy_state(chat_mem)
-    return int(state.get("human_messages_since_reply", 0)) >= max(1, int(min_human_messages))
-
-
-def mark_reply_sent(chat_mem: Dict[str, Any]) -> None:
-    ensure_policy_state(chat_mem)["human_messages_since_reply"] = 0
-
-
-def interjection_check_allowed(chat_mem: Dict[str, Any], *, min_human_messages: int) -> bool:
-    state = ensure_policy_state(chat_mem)
-    return int(state.get("human_messages_since_interjection_check", 0)) >= max(1, int(min_human_messages))
-
-
-def mark_interjection_checked(chat_mem: Dict[str, Any]) -> None:
-    ensure_policy_state(chat_mem)["human_messages_since_interjection_check"] = 0
 
 
 def activate_dialogue(
@@ -202,24 +178,34 @@ def snipe_allowed(
 ) -> bool:
     state = ensure_policy_state(chat_mem)
     last = _parse_ts(state.get("last_snipe_ts"))
-    attempts = int(state.get("human_messages_since_snipe_attempt", 0))
     if not last:
-        return attempts >= max(1, int(min_human_messages))
+        return True
     current = now or _now()
     elapsed = current - last
     return (
         elapsed >= timedelta(minutes=max(1, int(cooldown_minutes)))
         and int(state.get("human_messages_since_snipe", 0)) >= max(1, int(min_human_messages))
-        and attempts >= max(1, int(min_human_messages))
     )
 
 
-def mark_snipe_attempt(chat_mem: Dict[str, Any]) -> None:
-    ensure_policy_state(chat_mem)["human_messages_since_snipe_attempt"] = 0
+def snipe_gate(
+    chat_mem: Dict[str, Any],
+    *,
+    cooldown_minutes: int,
+    min_human_messages: int,
+    now: datetime | None = None,
+) -> bool:
+    """Single snipe decision gate: cooldown + message gap.
+
+    This replaces the previous cascade of check/reply/attempt counters; one
+    pass here is the only rate-limit an ambient attempt crosses before the
+    LLM budget check. It does not consume state, so a downstream abstention
+    (budget, load guard) does not force an extra quiet window.
+    """
+    return snipe_allowed(chat_mem, cooldown_minutes=cooldown_minutes, min_human_messages=min_human_messages, now=now)
 
 
 def mark_snipe_sent(chat_mem: Dict[str, Any], *, now: datetime | None = None) -> None:
     state = ensure_policy_state(chat_mem)
     state["last_snipe_ts"] = (now or _now()).isoformat()
     state["human_messages_since_snipe"] = 0
-    state["human_messages_since_snipe_attempt"] = 0

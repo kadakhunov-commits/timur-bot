@@ -49,7 +49,7 @@ def test_persona_knows_chat_gooning_slang() -> None:
     assert "длительную дрочку" in prompt
 
 
-def test_saved_v1_adaptive_defaults_migrate_to_v7_runtime_values() -> None:
+def test_saved_v1_adaptive_defaults_migrate_to_v8_runtime_values() -> None:
     memory = runtime.default_memory()
     memory["config"]["adaptive_humor"] = {
         "participation_rate": 0.30,
@@ -65,13 +65,18 @@ def test_saved_v1_adaptive_defaults_migrate_to_v7_runtime_values() -> None:
 
     settings = runtime._adaptive_humor_settings(memory)
 
-    assert settings["schema_version"] == 7
+    assert settings["schema_version"] == 8
     assert settings["participation_rate"] == 0.225
     assert settings["reply_timeout_seconds"] == 10
     assert settings["snipe_cooldown_minutes"] == 10
     assert settings["min_human_messages"] == 3
     assert settings["candidate_threshold"] == 91
-    assert settings["legacy_v1_settings"] == {"opportunity_threshold": 85, "candidate_count": 3}
+    assert settings["legacy_v1_settings"] == {
+        "opportunity_threshold": 85,
+        "candidate_count": 3,
+        "min_human_messages_between_replies": 2,
+        "min_human_messages_between_checks": 5,
+    }
 
 
 def test_saved_v2_default_reply_timeout_migrates_to_ten_seconds() -> None:
@@ -83,7 +88,7 @@ def test_saved_v2_default_reply_timeout_migrates_to_ten_seconds() -> None:
 
     settings = runtime._adaptive_humor_settings(memory)
 
-    assert settings["schema_version"] == 7
+    assert settings["schema_version"] == 8
     assert settings["reply_timeout_seconds"] == 10
 
 
@@ -96,7 +101,7 @@ def test_saved_v3_default_participation_rate_is_halved_once() -> None:
 
     settings = runtime._adaptive_humor_settings(memory)
 
-    assert settings["schema_version"] == 7
+    assert settings["schema_version"] == 8
     assert settings["participation_rate"] == 0.225
     assert runtime._random_photo_reply_chance(memory) == runtime.PHOTO_RANDOM_REPLY_CHANCE / 2
 
@@ -111,7 +116,7 @@ def test_saved_v4_default_reply_lengths_migrate_to_short_limits() -> None:
 
     settings = runtime._adaptive_humor_settings(memory)
 
-    assert settings["schema_version"] == 7
+    assert settings["schema_version"] == 8
     assert settings["ambient_reply_max_chars"] == 45
     assert settings["direct_reply_max_chars"] == 55
 
@@ -125,7 +130,7 @@ def test_saved_v5_timeout_migrates_above_transport_deadline() -> None:
 
     settings = runtime._adaptive_humor_settings(memory)
 
-    assert settings["schema_version"] == 7
+    assert settings["schema_version"] == 8
     assert settings["reply_timeout_seconds"] == 10
     assert settings["reply_timeout_seconds"] > runtime.TEXT_TRANSPORT_TIMEOUT_SECONDS
 
@@ -139,8 +144,44 @@ def test_saved_v6_default_direct_length_migrates_to_shorter_limit() -> None:
 
     settings = runtime._adaptive_humor_settings(memory)
 
-    assert settings["schema_version"] == 7
+    assert settings["schema_version"] == 8
     assert settings["direct_reply_max_chars"] == 55
+
+
+def test_saved_v7_settings_migrate_to_single_gate_and_bigger_writer_budget() -> None:
+    memory = runtime.default_memory()
+    memory["config"]["adaptive_humor"] = {
+        "schema_version": 7,
+        "min_human_messages_between_replies": 3,
+        "min_human_messages_between_checks": 3,
+        "director_max_tokens": 180,
+        "interjection_timeout_seconds": 3,
+    }
+
+    settings = runtime._adaptive_humor_settings(memory)
+
+    assert settings["schema_version"] == 8
+    assert "min_human_messages_between_replies" not in settings
+    assert "min_human_messages_between_checks" not in settings
+    assert settings["legacy_v1_settings"]["min_human_messages_between_replies"] == 3
+    assert settings["legacy_v1_settings"]["min_human_messages_between_checks"] == 3
+    assert settings["director_max_tokens"] == 350
+    assert settings["interjection_timeout_seconds"] == 15
+
+
+def test_saved_v7_custom_limits_survive_v8_migration() -> None:
+    memory = runtime.default_memory()
+    memory["config"]["adaptive_humor"] = {
+        "schema_version": 7,
+        "director_max_tokens": 240,
+        "interjection_timeout_seconds": 8,
+    }
+
+    settings = runtime._adaptive_humor_settings(memory)
+
+    assert settings["schema_version"] == 8
+    assert settings["director_max_tokens"] == 240
+    assert settings["interjection_timeout_seconds"] == 8
 
 
 def test_direct_prompt_has_one_length_owner_and_requires_best_short_variant() -> None:
