@@ -8,4 +8,5 @@ memory.prod.json
 memory.from-prod.json
 test_data/
 data/
+vigvamcev_artifacts/
 *.jsonl

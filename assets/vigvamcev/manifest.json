@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "id": "local_story_texts",
+      "tier": "canonical_user",
+      "path": "canon",
+      "description": "Пользовательские тексты историй, включая восстановленный пост 10"
+    },
+    {
+      "id": "local_lore",
+      "tier": "canonical_user",
+      "path": "canon/lore.txt",
+      "description": "Пользовательский лор и пролог"
+    },
+    {
+      "id": "fandom_reference",
+      "tier": "external_reference",
+      "url": "https://the-perfect-world.fandom.com/ru/wiki/Вигвамцев"
+    },
+    {
+      "id": "ficpad_inspiration",
+      "tier": "style_only",
+      "url": "https://ficpad.ru/fandom/vigvamcev"
+    },
+    {
+      "id": "telegram_discussions",
+      "tier": "noncanonical_idea",
+      "description": "Отобранные идеи из tg; полный экспорт намеренно не включён"
+    }
+  ],
+  "posts": [
+    {"post_no": 2, "experiments": [23, 24], "text": "canon/post-02.txt", "image": "references/post-02.jpg"},
+    {"post_no": 3, "experiments": [25], "text": "canon/post-03.txt", "image": "references/post-03.jpg"},
+    {"post_no": 4, "experiments": [26], "text": "canon/post-04.txt", "image": "references/post-04.jpg"},
+    {"post_no": 5, "experiments": [27], "text": "canon/post-05.txt", "image": "references/post-05.jpg"},
+    {"post_no": 6, "experiments": [28], "text": "canon/post-06.txt", "image": "references/post-06.jpg"},
+    {"post_no": 7, "experiments": [29], "text": "canon/post-07.txt", "image": "references/post-07.jpg"},
+    {"post_no": 8, "experiments": [30], "text": "canon/post-08.txt", "image": "references/post-08.jpg"},
+    {"post_no": 9, "experiments": [31], "text": "canon/post-09.txt", "image": "references/post-09.jpg"},
+    {"post_no": 10, "experiments": [32], "text": "canon/post-10.txt", "image": "references/post-10.jpg"},
+    {"post_no": 11, "experiments": [33], "text": "canon/post-11.txt", "image": "references/post-11.jpg"},
+    {"post_no": 12, "experiments": [34], "text": "canon/post-12.txt", "image": "references/post-12.jpg"},
+    {"post_no": 13, "experiments": [35], "text": "canon/post-13.txt", "image": "references/post-13.jpg"},
+    {"post_no": 14, "experiments": [], "season": 2, "text": "canon/post-14.txt", "image": "references/post-14.jpg"},
+    {"post_no": 15, "experiments": [37], "season": 2, "text": "canon/post-15.txt", "image": "references/post-15.jpg"},
+    {"post_no": 16, "experiments": [38], "season": 2, "text": "canon/post-16.txt", "image": "references/post-16.jpg"},
+    {"post_no": 17, "experiments": [39], "season": 2, "text": "canon/post-17.txt", "image": "references/post-17.jpg"},
+    {"post_no": 18, "experiments": [40], "season": 2, "text": "canon/post-18.txt", "image": "references/post-18.jpg"},
+    {"post_no": 19, "experiments": [41, 42, 43, 44], "season": 2, "text": "canon/post-19-22.txt", "image": "references/post-19-22.jpg"}
+  ],
+  "visual_references": [
+    "references/post-02.jpg",
+    "references/post-08.jpg",
+    "references/post-11.jpg",
+    "references/post-14.jpg",
+    "references/post-19-22.jpg",
+    "references/clones.jpg"
+  ],
+  "seed_state": {
+    "post_no": 22,
+    "experiment_no": 44,
+    "season": 2
+  }
+}

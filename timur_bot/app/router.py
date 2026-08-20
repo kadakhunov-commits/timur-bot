@@ -21,6 +21,7 @@ from timur_bot.handlers.billing import (
 from timur_bot.handlers.chat import command_memory_tap, photo_handler, reaction_handler, start_cmd, story_cmd, summary_cmd, text_handler
 from timur_bot.handlers.noire import noire_cmd
 from timur_bot.handlers.secure import secure_auto_photo_handler, secure_cmd
+from timur_bot.handlers.vigvamcev import vigvamcev_cmd
 from timur_bot.handlers.owner import (
     appendprompt_cmd,
     bit_cmd,
@@ -54,6 +55,7 @@ from timur_bot.services.secure_face import SECURE_COMMAND_PATTERN
 def register_handlers(application) -> None:
     application.add_handler(CommandHandler("start", start_cmd))
     application.add_handler(CommandHandler("story", story_cmd))
+    application.add_handler(CommandHandler("vigvamcev", vigvamcev_cmd))
     application.add_handler(CommandHandler("summary", summary_cmd))
     application.add_handler(CommandHandler("noire", noire_cmd))
     application.add_handler(CommandHandler("secure", secure_cmd))

@@ -32,6 +32,9 @@ SECURE_FACE_RESCUE_SECOND_BEST_MARGIN=2.5
 SECURE_FACE_CONTEXT_EXPAND_SIDE=0.22
 SECURE_FACE_CONTEXT_EXPAND_TOP=0.35
 SECURE_FACE_CONTEXT_EXPAND_BOTTOM=0.12
+POLZA_AI_API_KEY=...
+VIGVAMCEV_CHANNEL_ID=-100...
+VIGVAMCEV_ASSET_DIR=assets/vigvamcev
 ```
 
 `OPENAI_BASE_URL` опционален. Если пустой, используется стандартный endpoint SDK.
@@ -46,6 +49,16 @@ SECURE_FACE_CONTEXT_EXPAND_BOTTOM=0.12
 `SECURE_FACE_RESCUE_BEST_DISTANCE` и `SECURE_FACE_RESCUE_SECOND_BEST_MARGIN` — смягчающее правило для “почти уверенных” кейсов: если лучший кандидат очень близок к рефу, допускается меньший отрыв от второго.
 `SECURE_FACE_CONTEXT_EXPAND_SIDE/TOP/BOTTOM` — насколько расширять кроп лица для сравнения (включая волосы/контур головы), при этом кроп не заходит на соседние face-boxes.
 `/secure auto on` включает автоматический secure для чата; `/secure auto off` выключает.
+`POLZA_AI_API_KEY` нужен для генерации изображений серии «Вигвамцев: Истории» через Polza.
+Если он не задан отдельно, а `OPENAI_BASE_URL` указывает на `polza.ai`, используется уже существующий `OPENAI_API_KEY` без дублирования секрета.
+`VIGVAMCEV_CHANNEL_ID` — ID фиксированного канала, где бот должен иметь право публикации.
+По умолчанию в `config/vigvamcev.yaml` уже указан канал «Дискордники» (`-1002011983899`); переменная окружения может его переопределить.
+`VIGVAMCEV_ASSET_DIR` опционален и переопределяет путь к локальному канону и visual references.
+
+Контур серии включается настройкой `config/vigvamcev.yaml` и после запуска работает ежедневно в
+заданное московское время. Owner-команды доступны только в личке: `/vigvamcev status`,
+`/vigvamcev preview`, `/vigvamcev retry`, `/vigvamcev publish`. `preview` не публикует и не
+фиксирует новый канон; `publish` пропускает только расписание, но не проверки кандидата.
 
 3. Запусти бота:
 
@@ -115,6 +128,7 @@ Runtime публикует версию сразу в трех местах:
 - `config/lexicon.yaml` — стоп-слова, маркеры, тематические лексиконы, мемы/ссылки.
 - `config/runtime.yaml` — модели, лимиты, вероятности, owner id.
 - `config/mood_events.yaml` — каталог жизненных событий Тимура (приватность, серьезность, абсурдность, влияние на настроение, склонность делиться).
+- `config/vigvamcev.yaml` — расписание, лимиты и prompt-настройки отдельной серии «Вигвамцев: Истории».
 
 Секреты хранятся только в `.env`.
 

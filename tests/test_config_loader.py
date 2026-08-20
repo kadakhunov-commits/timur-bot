@@ -35,6 +35,10 @@ defaults:
     assert cfg.bot_rivals == {}
     assert cfg.text_model == "gpt-4o-mini"
     assert cfg.openai_base_url == ""
+    assert cfg.polza_api_key == ""
+    assert cfg.vigvamcev_channel_id == 0
+    assert cfg.vigvamcev_asset_dir == tmp_path / "assets" / "vigvamcev"
+    assert cfg.vigvamcev_defaults == {}
     assert cfg.owner_ids
     assert cfg.owner_id in cfg.owner_ids
     assert cfg.premium_chat_ids == []
@@ -134,3 +138,24 @@ bot_rivals:
         "sglypa_tg_bot": {"reply_chance": 1.0, "prompt": "rival prompt"},
         "quiet_bot": {"reply_chance": 0.0, "prompt": "quiet prompt"},
     }
+
+
+def test_load_config_reuses_existing_polza_key_when_base_url_is_polza(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "config").mkdir(parents=True, exist_ok=True)
+    _write(
+        tmp_path / "config" / "persona.yaml",
+        'default_system_prompt: "x"\nmodes:\n  default: "default mode"\ndefaults:\n  active_mode: "default"\n',
+    )
+    _write(tmp_path / "config" / "lexicon.yaml", "archetype_lexicon: {}\n")
+    _write(tmp_path / "config" / "runtime.yaml", "models: {}\nlimits: {}\nprobabilities: {}\n")
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+    monkeypatch.setenv("OPENAI_API_KEY", "existing-polza-key")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://polza.ai/api/v1")
+    monkeypatch.delenv("POLZA_AI_API_KEY", raising=False)
+
+    cfg = load_app_config(tmp_path)
+
+    assert cfg.polza_api_key == "existing-polza-key"

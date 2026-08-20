@@ -199,6 +199,13 @@ from timur_bot.services.summary import (
     select_summary_window,
     usage_hint as summary_usage_hint,
 )
+from timur_bot.services.polza_image import PolzaImageClient
+from timur_bot.services.vigvamcev import (
+    CanonCorpus,
+    VigvamcevError,
+    VigvamcevService,
+    VigvamcevSettings,
+)
 from timur_bot.tools.import_telegram_html import import_messages as import_telegram_messages
 from timur_bot.tools.import_telegram_html import parse_export_dir as parse_telegram_export_dir
 
@@ -218,6 +225,7 @@ BILLING_PATH = APP_CONFIG.billing_path
 TELEGRAM_BOT_TOKEN = APP_CONFIG.telegram_bot_token
 OPENAI_API_KEY = APP_CONFIG.openai_api_key
 OPENAI_BASE_URL = APP_CONFIG.openai_base_url
+POLZA_API_KEY = APP_CONFIG.polza_api_key
 GEMINI_API_KEY = APP_CONFIG.gemini_api_key
 MINIAPP_URL = APP_CONFIG.miniapp_url
 
@@ -328,6 +336,8 @@ _INFLIGHT_EVENT_KEYS: set[str] = set()
 _CHAT_GENERATION_LOCKS: Dict[int, asyncio.Lock] = {}
 _REPLY_SEND_LOCKS: Dict[int, asyncio.Lock] = {}
 _LIFE_TASK: asyncio.Task[Any] | None = None
+_VIGVAMCEV_SERVICE: VigvamcevService | None = None
+_VIGVAMCEV_SERVICE_ERROR = ""
 _FUNNY_SCAN_TASK: asyncio.Task[Any] | None = None
 _ROLLING_MEMORY_TASK: asyncio.Task[Any] | None = None
 _FUNNY_SCAN_LOCK = asyncio.Lock()
@@ -348,6 +358,66 @@ logger = logging.getLogger("timur-bot")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 billing = BillingEngine(BILLING_PATH, logger=logger)
+
+
+async def _vigvamcev_text_request(prompt: str, max_tokens: int) -> str:
+    """Use the current configured text API without changing conversational limits."""
+    with foreground_llm_activity("vigvamcev_story"):
+        response = await async_client.chat.completions.create(
+            model=TEXT_MODEL,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "Ты пишешь структурированные материалы для внутреннего генератора лора. Следуй формату запроса буквально.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            max_tokens=max(300, int(max_tokens)),
+            temperature=0.82,
+            extra_body=_text_completion_extra_body(),
+        )
+    return str(response.choices[0].message.content or "").strip()
+
+
+def _get_vigvamcev_service() -> VigvamcevService:
+    global _VIGVAMCEV_SERVICE, _VIGVAMCEV_SERVICE_ERROR
+    if _VIGVAMCEV_SERVICE is not None:
+        return _VIGVAMCEV_SERVICE
+    if _VIGVAMCEV_SERVICE_ERROR:
+        raise VigvamcevError(_VIGVAMCEV_SERVICE_ERROR)
+    try:
+        settings = VigvamcevSettings.from_mapping(
+            APP_CONFIG.vigvamcev_defaults,
+            root=ROOT_DIR,
+            channel_id=APP_CONFIG.vigvamcev_channel_id,
+            asset_dir=APP_CONFIG.vigvamcev_asset_dir,
+        )
+        corpus = CanonCorpus.load(settings.asset_dir)
+        image_client = PolzaImageClient(
+            api_key=POLZA_API_KEY,
+            base_url=settings.image_api_base_url,
+            model=settings.image_model,
+            aspect_ratio=settings.image_aspect_ratio,
+            image_resolution=settings.image_resolution,
+            poll_interval_seconds=settings.image_poll_interval_seconds,
+            timeout_seconds=settings.image_timeout_seconds,
+        )
+        _VIGVAMCEV_SERVICE = VigvamcevService(
+            settings=settings,
+            corpus=corpus,
+            image_client=image_client,
+            text_request=_vigvamcev_text_request,
+            reviewer=_vigvamcev_text_request,
+            load_memory=load_memory,
+            save_memory=save_memory,
+            memory_path=MEMORY_PATH,
+            owner_ids=OWNER_IDS,
+            logger=logger,
+        )
+        return _VIGVAMCEV_SERVICE
+    except Exception as exc:
+        _VIGVAMCEV_SERVICE_ERROR = f"не удалось загрузить VIGVAMCEV: {exc}"
+        raise VigvamcevError(_VIGVAMCEV_SERVICE_ERROR) from exc
 
 
 @dataclass
@@ -5205,6 +5275,19 @@ async def stop_life_loop() -> None:
         _LIFE_TASK = None
 
 
+async def start_vigvamcev_loop(application: Any) -> None:
+    try:
+        await _get_vigvamcev_service().start(application)
+    except Exception as exc:
+        logger.error("VIGVAMCEV loop не запущен: %s", exc)
+
+
+async def stop_vigvamcev_loop() -> None:
+    if _VIGVAMCEV_SERVICE is None:
+        return
+    await _VIGVAMCEV_SERVICE.stop()
+
+
 # =========================
 # FUNNY SCAN LOOP
 # =========================
@@ -8860,6 +8943,17 @@ def owner_only(func):
         return await func(update, context)
 
     return wrapper
+
+
+@owner_only
+async def vigvamcev_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    try:
+        service = _get_vigvamcev_service()
+    except Exception as exc:
+        if update.effective_message:
+            await update.effective_message.reply_text(f"VIGVAMЦЕВ не настроен: {str(exc)[:700]}")
+        return
+    await service.handle_owner_command(update, context)
 
 
 def _fmt_rub(v: int) -> str:

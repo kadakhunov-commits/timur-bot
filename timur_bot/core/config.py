@@ -31,6 +31,10 @@ class AppConfig:
     telegram_bot_token: str
     openai_api_key: str
     openai_base_url: str
+    polza_api_key: str
+    vigvamcev_channel_id: int
+    vigvamcev_asset_dir: Path
+    vigvamcev_defaults: Dict[str, Any]
     gemini_api_key: str
     miniapp_url: str
     owner_id: int
@@ -334,16 +338,35 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
     lexicon = _read_yaml(root / "config" / "lexicon.yaml")
     runtime = _read_yaml(root / "config" / "runtime.yaml")
     mood_events_raw = _read_yaml_optional(root / "config" / "mood_events.yaml")
+    vigvamcev_defaults = _read_yaml_optional(root / "config" / "vigvamcev.yaml")
 
     telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
     openai_base_url = os.getenv("OPENAI_BASE_URL", "").strip()
+    polza_api_key = os.getenv("POLZA_AI_API_KEY", "").strip()
+    if not polza_api_key and "polza.ai" in openai_base_url.lower():
+        # Existing deployments keep the Polza credential in OPENAI_API_KEY.
+        # Reuse it for the separate image client without duplicating the secret.
+        polza_api_key = openai_api_key
     gemini_api_key = os.getenv("GEMINI_API_KEY", "").strip()
     miniapp_url = _resolve_miniapp_url()
     openai_text_model = os.getenv("OPENAI_TEXT_MODEL", "").strip()
     openai_vision_model = os.getenv("OPENAI_VISION_MODEL", "").strip()
     memory_path_env = os.getenv("MEMORY_PATH", "").strip()
     billing_path_env = os.getenv("BILLING_PATH", "").strip()
+    vigvamcev_channel_raw = os.getenv("VIGVAMCEV_CHANNEL_ID", "").strip()
+    if not vigvamcev_channel_raw:
+        vigvamcev_channel_raw = str(vigvamcev_defaults.get("channel_id", "0") or "0")
+    try:
+        vigvamcev_channel_id = int(vigvamcev_channel_raw)
+    except ValueError as exc:
+        raise ConfigError("VIGVAMCEV_CHANNEL_ID must be an integer") from exc
+    vigvamcev_asset_raw = os.getenv("VIGVAMCEV_ASSET_DIR", "").strip()
+    if not vigvamcev_asset_raw:
+        vigvamcev_asset_raw = str(vigvamcev_defaults.get("asset_dir", "assets/vigvamcev"))
+    vigvamcev_asset_dir = Path(vigvamcev_asset_raw)
+    if not vigvamcev_asset_dir.is_absolute():
+        vigvamcev_asset_dir = root / vigvamcev_asset_dir
     if not telegram_bot_token:
         raise ConfigError("TELEGRAM_BOT_TOKEN not set in .env")
     if not openai_api_key:
@@ -408,6 +431,10 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
         telegram_bot_token=telegram_bot_token,
         openai_api_key=openai_api_key,
         openai_base_url=openai_base_url,
+        polza_api_key=polza_api_key,
+        vigvamcev_channel_id=vigvamcev_channel_id,
+        vigvamcev_asset_dir=vigvamcev_asset_dir,
+        vigvamcev_defaults=vigvamcev_defaults,
         gemini_api_key=gemini_api_key,
         miniapp_url=miniapp_url,
         owner_id=owner_id,

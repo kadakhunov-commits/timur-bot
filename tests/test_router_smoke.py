@@ -25,7 +25,7 @@ def test_register_handlers_smoke() -> None:
     app = DummyApp()
     register_handlers(app)
 
-    assert len(app.handlers) == 51
+    assert len(app.handlers) == 52
     assert any(isinstance(h, MessageReactionHandler) for h in app.handlers)
 
     commands = []
@@ -37,6 +37,7 @@ def test_register_handlers_smoke() -> None:
         [
             "start",
             "story",
+            "vigvamcev",
             "summary",
             "noire",
             "secure",
@@ -87,11 +88,13 @@ def test_post_init_does_not_eagerly_warm_secure_model() -> None:
         patch.object(runner, "start_life_loop", new=AsyncMock()) as start_life,
         patch.object(runner, "start_funny_scan_loop", new=AsyncMock()) as start_funny,
         patch.object(runner, "start_rolling_memory_loop", new=AsyncMock()) as start_memory,
+        patch.object(runner, "start_vigvamcev_loop", new=AsyncMock()) as start_vigvam,
         patch("asyncio.create_task") as create_task,
     ):
         asyncio.run(runner._post_init(application))
 
     start_life.assert_awaited_once_with(application)
+    start_vigvam.assert_awaited_once_with(application)
     start_funny.assert_awaited_once_with(application)
     start_memory.assert_awaited_once_with(application)
     create_task.assert_not_called()
