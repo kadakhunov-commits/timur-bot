@@ -11,6 +11,16 @@ image_aspect_ratio: "4:3"
 image_resolution: 2K
 image_poll_interval_seconds: 5
 image_timeout_seconds: 300
+poster_font: fonts/DejaVuSansCondensed-Bold.ttf
+poster_mode: full
+variation_pool:
+  - "put one giant surreal object in the foreground and the characters small in the background"
+  - "zoom far out so the whole scene floats tiny in the middle of a huge yellow-orange void"
+  - "stack several cutout figures on top of each other like a totem"
+  - "place a huge close-up portrait of the clone on the left side, cutout-style"
+  - "overlap many cutout body parts and strange props into a dense collage"
+  - "show empty lab corridors receding into the distance with a single figure at the far end"
+  - "make everything weightless: the clone and props float unanchored in the space"
 caption_min_chars: 600
 caption_max_chars: 900
 max_stage_attempts: 3
@@ -25,6 +35,10 @@ style_prompt: >-
   Handmade Russian internet Photoshop collage, rough cutout edges, absurd scale,
   yellow-orange gradient background, black circular dots, high contrast, strange
   props, deliberately cheap surreal meme composition, no readable text, no logos.
+full_style_prompt: >-
+  Handmade Russian internet Photoshop collage, rough cutout edges, absurd scale,
+  yellow-orange gradient background, black circular dots, high contrast, strange
+  props, deliberately cheap surreal meme composition.
 image_prompt_suffix: >-
   Do not render any letters, captions, logos, numbers, watermarks, or readable text.
   Leave enough negative space for a local graphic header and a black name plate.
@@ -34,6 +48,10 @@ story_prompt: >-
   бы один подтверждённый факт из переданного канона, добавь одну новую способность
   или дефект, один причинный конфликт и короткий крючок в будущее. Не пересказывай
   старую историю и не выдумывай внешние факты как уже подтверждённый канон.
+
+  Тело истории всегда состоит ровно из двух содержательных блоков, каждый начинается со строки:
+  - «Клон: …» — про нового клона: имя, способность или дефект, его проявление и поворот;
+  - «SIC: …» — продолжение общего сюжета Фонда SIC: последствие для комплекса и крючок к следующему выпуску.
 review_prompt: >-
   Проверь кандидат для канонической ежедневной истории #Вигвамцев. Отклони его,
   если имя, способность, конфликт или визуальный мотив повторяют последние истории

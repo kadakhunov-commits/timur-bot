@@ -24,6 +24,8 @@ def _font_candidates(configured: str = "") -> list[Path]:
             Path("/System/Library/Fonts/Supplemental/Arial Narrow Bold.ttf"),
             Path("/System/Library/Fonts/Avenir Next Condensed.ttc"),
             Path("/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed-Bold.ttf"),
+            Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+            Path("/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed-Bold.ttf"),
             Path("/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf"),
         ]
     )

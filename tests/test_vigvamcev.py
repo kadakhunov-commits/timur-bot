@@ -4,6 +4,7 @@ import asyncio
 import copy
 import io
 import json
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,9 +16,11 @@ from PIL import Image
 from timur_bot.services.polza_image import GeneratedImage, PolzaImageClient
 from timur_bot.services.vigvamcev import (
     CanonCorpus,
+    DraftError,
     VigvamcevService,
     VigvamcevCandidate,
     VigvamcevSettings,
+    build_full_poster_prompt,
     clone_name_from_word,
     default_vigvamcev_state,
     format_caption,
@@ -52,15 +55,16 @@ def _scene_bytes() -> bytes:
 
 def _candidate() -> VigvamcevCandidate:
     story = (
-        "Когда эксперимент начался, в лаборатории погас свет, поэтому новый клон "
-        "услышал разговор стен. Он оказался Фотонцевым: способность двигать фотоны "
-        "собирала вокруг него маленькие солнечные окна. Из-за этого охрана увидела "
-        "сразу двадцать выходов и бросилась к каждому. Однако клон понял, что свет "
-        "повторяет только то, чего боится его собеседник, и превратил тревогу "
-        "Доктора Ю в карту подземного этажа. После побега он оставил один луч в "
-        "камере Миши, так что следующий эксперимент уже знает дорогу наружу. "
-    ) * 2
-    story = story[:760]
+        "Клон: Фотонцев — двадцать третий эксперимент Доктора Ю, клон, научившийся двигать фотоны. "
+        "Свет вокруг него собирается в маленькие солнечные окна, поэтому охрана увидела сразу двадцать "
+        "выходов и бросилась к каждому, и из-за этого лаборатория на минуту опустела. Клон понял, что свет "
+        "повторяет только страх его собеседника, и превратил тревогу Доктора Ю в карту подземного этажа, "
+        "которую нельзя прочитать при обычном свете."
+        + chr(10) * 2
+        + "SIC: Утечка из комплекса Фонда SIC показала, что световая карта Фотонцева ведёт прямо к "
+        "запечатанному отсеку с «идеальным организмом». Профессор Галактикус приказал опечатать этаж, "
+        "но отсек уже не пуст: следующий эксперимент получит не ключ, а нового сторожа."
+    )
     return VigvamcevCandidate(
         post_no=23,
         experiment_no=45,
@@ -115,6 +119,35 @@ def test_candidate_rejects_used_name_and_motif() -> None:
 
     assert "имя клона уже использовалось" in errors
     assert "основной novelty-мотив уже использовался" in errors
+
+
+def test_full_poster_prompt_contains_exact_text_and_variation() -> None:
+    settings = _settings(poster_mode="full", variation_pool=["giant surreal object in front"], style_prompt="no readable text, no logos")
+    candidate = _candidate()
+
+    prompt = build_full_poster_prompt(candidate, settings, variation="giant surreal object in front")
+
+    assert "#ВИГВАМЦЕВ: ИСТОРИИ2" in prompt
+    assert "ФОТОНЦЕВ" in prompt
+    assert "№23 · ЭКСПЕРИМЕНТ 45" in prompt
+    assert "no readable text" not in prompt
+    assert "giant surreal object in front" in prompt
+
+
+def test_story_requires_clone_and_sic_blocks() -> None:
+    corpus = CanonCorpus.load(CORPUS_ROOT)
+    settings = _settings()
+    state = default_vigvamcev_state(corpus, settings)
+    candidate = _candidate()
+
+    no_sic = replace(candidate, story=candidate.story.split("SIC:")[0].strip())
+    no_clone = replace(candidate, story="SIC: " + candidate.story.split("SIC:")[1].strip())
+
+    clone_missing = validate_candidate(no_clone, state=state, corpus=corpus, settings=settings)
+    sic_missing = validate_candidate(no_sic, state=state, corpus=corpus, settings=settings)
+
+    assert "в истории нет блока «Клон: …»" in clone_missing
+    assert "в истории нет блока «SIC: …»" in sic_missing
 
 
 def test_text_stage_retries_transient_provider_timeout() -> None:
@@ -285,9 +318,17 @@ class _FakeBot:
         return self.result
 
 
-def _service(tmp_path: Path, *, image_client=None, memory=None, channel_id=-100123) -> tuple[VigvamcevService, dict, _FakeBot]:
+def _service(
+    tmp_path: Path,
+    *,
+    image_client=None,
+    memory=None,
+    channel_id=-100123,
+    settings_overrides=None,
+    compose=None,
+) -> tuple[VigvamcevService, dict, _FakeBot]:
     corpus = CanonCorpus.load(CORPUS_ROOT)
-    settings = _settings(channel_id=channel_id, retry_backoff_seconds=0)
+    settings = _settings(channel_id=channel_id, retry_backoff_seconds=0, **(settings_overrides or {}))
     state = memory or {"config": {}}
     bot = _FakeBot()
 
@@ -315,6 +356,7 @@ def _service(tmp_path: Path, *, image_client=None, memory=None, channel_id=-1001
         save_memory=save_memory,
         memory_path=tmp_path / "memory.json",
         owner_ids=[1],
+        **({"compose": compose} if compose is not None else {}),
     )
     return service, state, bot
 
@@ -379,3 +421,65 @@ def test_schedule_is_due_only_after_configured_time(tmp_path: Path) -> None:
     assert service.is_due(datetime(2026, 8, 20, 13, 0), current_state) is True
     current_state["last_published"] = {"published_date": "2026-08-20"}
     assert service.is_due(datetime(2026, 8, 20, 13, 1), current_state) is False
+
+
+def test_prepare_full_mode_uses_model_poster_without_compose(tmp_path: Path) -> None:
+    compose_calls: list = []
+
+    def spy(*args, **kwargs):
+        compose_calls.append((args, kwargs))
+        return _scene_bytes()
+
+    image_client = _FakeImageClient(content=_scene_bytes())
+    service, state, _ = _service(
+        tmp_path,
+        image_client=image_client,
+        settings_overrides={"poster_mode": "full"},
+        compose=spy,
+    )
+
+    prepared = asyncio.run(service.prepare_draft())
+
+    assert compose_calls == []
+    assert prepared.image_path.exists()
+    assert prepared.image_path.read_bytes() == _scene_bytes()
+    saved = state["config"]["vigvamcev"]
+    assert saved["draft"]["status"] == "ready"
+    assert saved["draft"]["poster_mode"] == "full"
+
+
+class _FullFailImageClient(_FakeImageClient):
+    async def generate_scene(self, *, prompt: str, reference_paths):
+        del reference_paths
+        self.prompts.append(prompt)
+        self.calls += 1
+        if "FINAL cover poster" in prompt:
+            raise DraftError("full failed")
+        return GeneratedImage(self.content, generation_id=f"gen-{self.calls}")
+
+    def __init__(self, content: bytes | None = None) -> None:
+        super().__init__(content=content or _scene_bytes())
+        self.prompts: list[str] = []
+
+
+def test_full_mode_falls_back_to_local_compose(tmp_path: Path) -> None:
+    compose_calls: list = []
+
+    def spy(*args, **kwargs):
+        compose_calls.append((args, kwargs))
+        return _scene_bytes()
+
+    service, state, _ = _service(
+        tmp_path,
+        image_client=_FullFailImageClient(),
+        settings_overrides={"poster_mode": "full"},
+        compose=spy,
+    )
+
+    prepared = asyncio.run(service.prepare_draft())
+
+    assert len(compose_calls) == 1
+    assert prepared.image_path.exists()
+    saved = state["config"]["vigvamcev"]
+    assert saved["draft"]["status"] == "ready"
+    assert saved["draft"]["poster_mode"] == "composed"

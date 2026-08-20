@@ -24,6 +24,8 @@ _WORD_RE = re.compile(r"[а-яё]{3,}", re.IGNORECASE)
 _CLONE_NAME_RE = re.compile(r"\b[А-ЯЁ][а-яё]{2,32}цев\b")
 _JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
 _CAUSAL_MARKERS = ("потому", "поэтому", "из-за", "после", "когда", "однако", "но ", "так что")
+_CLONE_BLOCK_RE = re.compile(r"^\s*[Кк][Лл][Оо][Нн]\s*[:\-—]\s*(.+)$", re.MULTILINE | re.IGNORECASE)
+_SIC_BLOCK_RE = re.compile(r"^\s*SIC\s*[:\-—]\s*(.+)$", re.MULTILINE | re.IGNORECASE)
 _DEFAULT_HASHTAGS = "#лор@vigvamcev #истории2@vigvamcev"
 
 
@@ -52,6 +54,15 @@ TextRequest = Callable[[str, int], Awaitable[str]]
 
 def _as_text(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def _normalise_story(value: Any) -> str:
+    """Collapse whitespace but keep the two required blocks on separate lines."""
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if not text:
+        return text
+    text = re.sub(r"(?i)\s+(?=SIC\s*[:—])", chr(10) * 2, text)
+    return text
 
 
 def _normalise_key(value: Any) -> str:
@@ -255,6 +266,10 @@ class VigvamcevSettings:
     asset_dir: Path
     identity_reference: Path | None
     identity_layer: Path | None
+    poster_font: Path | None
+    poster_mode: str
+    variation_pool: list[str]
+    full_style_prompt: str
     image_model: str
     image_api_base_url: str
     image_aspect_ratio: str
@@ -306,6 +321,24 @@ class VigvamcevSettings:
         layer_path = Path(layer_raw) if layer_raw else None
         if layer_path is not None and not layer_path.is_absolute():
             layer_path = asset_path / layer_path
+        poster_font_raw = str(raw.get("poster_font", "") or "").strip()
+        poster_font_path = Path(poster_font_raw) if poster_font_raw else None
+        if poster_font_path is not None and not poster_font_path.is_absolute():
+            poster_font_path = asset_path / poster_font_path
+        poster_mode = str(raw.get("poster_mode", "full")).strip().lower()
+        if poster_mode not in {"full", "compose"}:
+            poster_mode = "full"
+        raw_variations = raw.get("variation_pool", [])
+        if not isinstance(raw_variations, list):
+            raw_variations = []
+        variation_pool = [str(item).strip() for item in raw_variations if str(item).strip()]
+        full_style = str(raw.get("full_style_prompt", "") or "").strip()
+        if not full_style:
+            full_style = re.sub(
+                r",?\s*no readable text,?\s*no logos\.?",
+                "",
+                str(raw.get("style_prompt", "") or ""),
+            ).strip()
         return cls(
             enabled=bool(raw.get("enabled", True)),
             timezone=str(raw.get("timezone", "Europe/Moscow")),
@@ -314,6 +347,10 @@ class VigvamcevSettings:
             asset_dir=asset_path,
             identity_reference=identity_path,
             identity_layer=layer_path,
+            poster_font=poster_font_path,
+            poster_mode=poster_mode,
+            variation_pool=list(variation_pool),
+            full_style_prompt=full_style,
             image_model=str(raw.get("image_model", "openai/gpt-5.4-image-2")),
             image_api_base_url=str(raw.get("image_api_base_url", "https://polza.ai/api/v1")).rstrip("/"),
             image_aspect_ratio=str(raw.get("image_aspect_ratio", "4:3")),
@@ -355,7 +392,7 @@ class VigvamcevCandidate:
 
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> "VigvamcevCandidate":
-        story = _as_text(payload.get("story") or payload.get("caption") or payload.get("public_story"))
+        story = _normalise_story(payload.get("story") or payload.get("caption") or payload.get("public_story"))
         return cls(
             post_no=int(payload.get("post_no", 0) or 0),
             experiment_no=int(payload.get("experiment_no", 0) or 0),
@@ -470,6 +507,21 @@ def _safe_recent_history(state: Mapping[str, Any], limit: int = 8) -> list[dict[
     return [item for item in history[-limit:] if isinstance(item, dict)]
 
 
+def _story_block_errors(story: str) -> list[str]:
+    errors: list[str] = []
+    clone_match = _CLONE_BLOCK_RE.search(story)
+    sic_match = _SIC_BLOCK_RE.search(story)
+    if not clone_match:
+        errors.append("в истории нет блока «Клон: …»")
+    elif len(clone_match.group(1).strip()) < 80:
+        errors.append("блок «Клон: …» слишком короткий")
+    if not sic_match:
+        errors.append("в истории нет блока «SIC: …»")
+    elif len(sic_match.group(1).strip()) < 80:
+        errors.append("блок «SIC: …» слишком короткий")
+    return errors
+
+
 def build_story_prompt(
     corpus: CanonCorpus,
     state: Mapping[str, Any],
@@ -501,6 +553,8 @@ def build_story_prompt(
 Сжатый корпус канона:
 {corpus.context()}
 
+История обязана состоять ровно из двух содержательных блоков: строка «Клон: …» — про нового клона, строка «SIC: …» — про продолжение общего сюжета Фонда SIC.
+
 Верни только JSON следующей формы:
 {{
   "post_no": {post_no},
@@ -515,7 +569,7 @@ def build_story_prompt(
   "next_hook": "крючок следующего выпуска",
   "visual_brief": "описание сцены без текста на изображении",
   "novelty_tags": ["уникальный мотив", "уникальный визуальный приём"],
-  "story": "готовая русская история для подписи, 560–800 знаков"
+  "story": "два блока «Клон: …» и «SIC: …», суммарно 560–800 знаков"
 }}
 """.strip()
 
@@ -593,6 +647,7 @@ def validate_candidate(
         errors.append(f"caption имеет длину {len(caption)}, ожидалось {settings.caption_min_chars}–{settings.caption_max_chars}")
     if not any(marker in candidate.story.casefold() for marker in _CAUSAL_MARKERS):
         errors.append("в тексте не найден причинный связующий маркер")
+    errors.extend(_story_block_errors(candidate.story))
     if "```" in candidate.story or "не могу" in candidate.story.casefold():
         errors.append("текст содержит служебный или отказной ответ модели")
     motif_keys = {_normalise_key(value) for value in state.get("used_motifs", []) if _as_text(value)}
@@ -655,10 +710,39 @@ async def generate_candidate(
 
 
 def build_visual_prompt(candidate: VigvamcevCandidate, settings: VigvamcevSettings) -> str:
+    """Legacy scene prompt without variation; kept for compatibility."""
+    return build_scene_prompt(candidate, settings, variation="")
+
+
+def _pick_variation(settings: VigvamcevSettings, post_no: int) -> str:
+    pool = list(settings.variation_pool)
+    if not pool:
+        return ""
+    return pool[post_no % len(pool)]
+
+
+def _variation_line(variation: str) -> str:
+    if not variation:
+        return ""
+    return (
+        "Composition variety for this post: "
+        + variation
+        + "\nKeep the series style, but make the layout clearly different from the previous posts."
+    )
+
+
+def build_scene_prompt(
+    candidate: VigvamcevCandidate,
+    settings: VigvamcevSettings,
+    variation: str = "",
+) -> str:
+    variation_text = _variation_line(variation)
     return f"""{settings.style_prompt}
 
 Сюжетная сцена для клона {candidate.clone_name} (эксперимент {candidate.experiment_no}):
 {candidate.visual_brief}
+
+{variation_text}
 
 Способность: {candidate.ability}
 Конфликт: {candidate.conflict}
@@ -668,6 +752,49 @@ def build_visual_prompt(candidate: VigvamcevCandidate, settings: VigvamcevSettin
 фотошопную композицию с вырезанными фигурами, нелепыми объектами и ощущением
 ручной склейки. Это фон/сцена для локального постера, а не готовая обложка.
 {settings.image_prompt_suffix}""".strip()
+
+
+def build_full_poster_prompt(
+    candidate: VigvamcevCandidate,
+    settings: VigvamcevSettings,
+    variation: str = "",
+) -> str:
+    variation_text = _variation_line(variation)
+    name = str(candidate.clone_name).upper()
+    number_line = f"№{candidate.post_no} · ЭКСПЕРИМЕНТ {candidate.experiment_no}"
+    return f"""{settings.full_style_prompt}
+
+Create the FINAL cover poster of the series, not just a scene. 4:3 poster with:
+- Large bold white header centered near the top: #ВИГВАМЦЕВ: ИСТОРИИ2
+- A big diagonal black plate in the lower-right corner with the clone name in large white letters: {name}
+- On the same black plate, a smaller single line: {number_line}
+
+{variation_text}
+
+Scene for the clone {candidate.clone_name} (experiment {candidate.experiment_no}):
+{candidate.visual_brief}
+
+Ability: {candidate.ability}
+Conflict: {candidate.conflict}
+Twist: {candidate.twist}
+
+Keep the clone's face recognizable from the reference. Cutout collage with rough
+edges, absurd proportions, yellow-orange background and black dots.
+
+CRITICAL: reproduce every Cyrillic letter of the three texts exactly as written above.
+Do not add any other readable text, letters, logos, or watermarks.""".strip()
+
+
+def _decode_image_or_raise(content: bytes) -> None:
+    import io
+
+    from PIL import Image
+
+    try:
+        with Image.open(io.BytesIO(content)) as image:
+            image.load()
+    except Exception as exc:  # pragma: no cover - Pillow error text varies
+        raise DraftError("модель вернула повреждённое изображение") from exc
 
 
 def _image_sha256(content: bytes) -> str:
@@ -813,17 +940,92 @@ class VigvamcevService:
         candidate = await self._candidate(memory, state, force_new=force_new)
         if not getattr(self.image_client, "configured", True):
             raise DraftError("Polza image API не настроен: задайте POLZA_AI_API_KEY")
+        variation = _pick_variation(self.settings, candidate.post_no)
+        if self.settings.poster_mode == "full":
+            try:
+                return await self._prepare_full_poster(candidate, state, memory, variation=variation)
+            except Exception as full_exc:
+                self.logger.warning(
+                    "полная генерация постера не удалась (%s); переключаюсь на локальную сборку",
+                    full_exc,
+                )
+                memory = self.load_memory()
+                state = self._state(memory)
+                state["last_error"] = "full_poster_fallback: " + str(full_exc)[:300]
+                draft = state.setdefault("draft", {})
+                draft["status"] = "image_retrying"
+                draft["poster_mode"] = "composed"
+                draft["error"] = str(full_exc)[:500]
+                self._save(memory)
+        return await self._prepare_compose_poster(candidate, state, memory, variation=variation)
+
+    async def _prepare_full_poster(
+        self,
+        candidate: VigvamcevCandidate,
+        state: dict[str, Any],
+        memory: dict[str, Any],
+        *,
+        variation: str,
+    ) -> PreparedDraft:
         failures: list[str] = []
         for attempt in range(self.settings.max_stage_attempts):
             try:
                 generated = await self.image_client.generate_scene(
-                    prompt=build_visual_prompt(candidate, self.settings),
+                    prompt=build_full_poster_prompt(candidate, self.settings, variation),
+                    reference_paths=self._reference_paths(),
+                )
+                poster = generated.content
+                _decode_image_or_raise(poster)
+                artifact = self._artifact_dir() / f"post-{candidate.post_no:04d}-experiment-{candidate.experiment_no:04d}-full.png"
+                artifact.write_bytes(poster)
+                draft = state.setdefault("draft", {})
+                draft.update(
+                    {
+                        "status": "ready",
+                        "candidate": candidate.to_dict(hashtags=self.settings.story_hashtags),
+                        "image_path": str(artifact),
+                        "image_sha256": _image_sha256(poster),
+                        "generation_id": str(getattr(generated, "generation_id", "") or ""),
+                        "poster_mode": "full",
+                        "updated_at": datetime.utcnow().isoformat(),
+                    }
+                )
+                state["last_error"] = ""
+                self._save(memory)
+                return PreparedDraft(candidate, artifact, _image_sha256(poster), str(getattr(generated, "generation_id", "") or ""))
+            except Exception as exc:
+                failures.append(str(exc))
+                state["last_error"] = ("full_poster: " + str(exc))[:500]
+                draft = state.setdefault("draft", {})
+                draft["status"] = "image_retrying" if attempt + 1 < self.settings.max_stage_attempts else "failed"
+                draft["error"] = str(exc)[:500]
+                draft["poster_mode"] = "full"
+                self._save(memory)
+                if attempt + 1 < self.settings.max_stage_attempts and self.settings.retry_backoff_seconds:
+                    await asyncio.sleep(self.settings.retry_backoff_seconds * (attempt + 1))
+        raise DraftError("полная генерация постера не удалась: " + "; ".join(failures[-3:]))
+
+    async def _prepare_compose_poster(
+        self,
+        candidate: VigvamcevCandidate,
+        state: dict[str, Any],
+        memory: dict[str, Any],
+        *,
+        variation: str,
+    ) -> PreparedDraft:
+        failures: list[str] = []
+        for attempt in range(self.settings.max_stage_attempts):
+            try:
+                generated = await self.image_client.generate_scene(
+                    prompt=build_scene_prompt(candidate, self.settings, variation),
                     reference_paths=self._reference_paths(),
                 )
                 identity_layer_bytes = None
                 if self.settings.identity_layer and self.settings.identity_layer.is_file():
                     identity_layer_bytes = self.settings.identity_layer.read_bytes()
                 compose_kwargs = {}
+                if self.settings.poster_font and self.settings.poster_font.is_file():
+                    compose_kwargs["configured_font"] = str(self.settings.poster_font)
                 if identity_layer_bytes:
                     compose_kwargs["identity_layer_bytes"] = identity_layer_bytes
                 poster = self.compose(
@@ -835,7 +1037,7 @@ class VigvamcevService:
                 )
                 if not poster:
                     raise DraftError("композитор вернул пустой постер")
-                artifact = self._artifact_dir() / f"post-{candidate.post_no:04d}-experiment-{candidate.experiment_no:04d}.png"
+                artifact = self._artifact_dir() / f"post-{candidate.post_no:04d}-experiment-{candidate.experiment_no:04d}-composed.png"
                 artifact.write_bytes(poster)
                 draft = state.setdefault("draft", {})
                 draft.update(
@@ -845,6 +1047,7 @@ class VigvamcevService:
                         "image_path": str(artifact),
                         "image_sha256": _image_sha256(poster),
                         "generation_id": str(getattr(generated, "generation_id", "") or ""),
+                        "poster_mode": "composed",
                         "updated_at": datetime.utcnow().isoformat(),
                     }
                 )
@@ -860,7 +1063,7 @@ class VigvamcevService:
                 self._save(memory)
                 if attempt + 1 < self.settings.max_stage_attempts and self.settings.retry_backoff_seconds:
                     await asyncio.sleep(self.settings.retry_backoff_seconds * (attempt + 1))
-        raise DraftError("генерация постера не удалась: " + "; ".join(failures[-3:]))
+        raise DraftError("локальная сборка постера не удалась: " + "; ".join(failures[-3:]))
 
     async def prepare_draft(self, *, force_new: bool = False) -> PreparedDraft:
         async with self._lock:
