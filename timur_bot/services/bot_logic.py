@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Tuple
 from zoneinfo import ZoneInfo
 
 from billing_system import BillingEngine, BillingError
-from openai import AsyncOpenAI, OpenAI
+from openai import APIConnectionError, APITimeoutError, RateLimitError, AsyncOpenAI, OpenAI
 from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -202,6 +202,7 @@ from timur_bot.services.summary import (
 from timur_bot.services.polza_image import PolzaImageClient
 from timur_bot.services.vigvamcev import (
     CanonCorpus,
+    TransientTextRequestError,
     VigvamcevError,
     VigvamcevService,
     VigvamcevSettings,
@@ -360,22 +361,31 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 billing = BillingEngine(BILLING_PATH, logger=logger)
 
 
-async def _vigvamcev_text_request(prompt: str, max_tokens: int) -> str:
+async def _vigvamcev_text_request(
+    prompt: str,
+    max_tokens: int,
+    *,
+    timeout_seconds: float = 60.0,
+) -> str:
     """Use the current configured text API without changing conversational limits."""
-    with foreground_llm_activity("vigvamcev_story"):
-        response = await async_client.chat.completions.create(
-            model=TEXT_MODEL,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "Ты пишешь структурированные материалы для внутреннего генератора лора. Следуй формату запроса буквально.",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            max_tokens=max(300, int(max_tokens)),
-            temperature=0.82,
-            extra_body=_text_completion_extra_body(),
-        )
+    try:
+        request_client = async_client.with_options(timeout=max(10.0, float(timeout_seconds)))
+        with foreground_llm_activity("vigvamcev_story"):
+            response = await request_client.chat.completions.create(
+                model=TEXT_MODEL,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "Ты пишешь структурированные материалы для внутреннего генератора лора. Следуй формату запроса буквально.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                max_tokens=max(300, int(max_tokens)),
+                temperature=0.82,
+                extra_body=_text_completion_extra_body(),
+            )
+    except (APITimeoutError, APIConnectionError, RateLimitError) as exc:
+        raise TransientTextRequestError(str(exc) or exc.__class__.__name__) from exc
     return str(response.choices[0].message.content or "").strip()
 
 
@@ -406,8 +416,16 @@ def _get_vigvamcev_service() -> VigvamcevService:
             settings=settings,
             corpus=corpus,
             image_client=image_client,
-            text_request=_vigvamcev_text_request,
-            reviewer=_vigvamcev_text_request,
+            text_request=lambda prompt, max_tokens: _vigvamcev_text_request(
+                prompt,
+                max_tokens,
+                timeout_seconds=settings.text_timeout_seconds,
+            ),
+            reviewer=lambda prompt, max_tokens: _vigvamcev_text_request(
+                prompt,
+                max_tokens,
+                timeout_seconds=settings.text_timeout_seconds,
+            ),
             load_memory=load_memory,
             save_memory=save_memory,
             memory_path=MEMORY_PATH,

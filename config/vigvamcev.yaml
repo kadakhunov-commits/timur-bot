@@ -18,6 +18,8 @@ retry_backoff_seconds: 30
 loop_interval_seconds: 30
 story_max_tokens: 1400
 review_max_tokens: 220
+text_timeout_seconds: 60
+text_retry_backoff_seconds: 5
 story_hashtags: "#лор@vigvamcev #истории2@vigvamcev"
 style_prompt: >-
   Handmade Russian internet Photoshop collage, rough cutout edges, absurd scale,

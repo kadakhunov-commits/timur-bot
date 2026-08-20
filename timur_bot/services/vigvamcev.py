@@ -39,6 +39,10 @@ class CandidateGenerationError(VigvamcevError):
     pass
 
 
+class TransientTextRequestError(VigvamcevError):
+    """A text-provider failure that is safe to retry for the same candidate."""
+
+
 class DraftError(VigvamcevError):
     pass
 
@@ -264,6 +268,8 @@ class VigvamcevSettings:
     loop_interval_seconds: float
     story_max_tokens: int
     review_max_tokens: int
+    text_timeout_seconds: float
+    text_retry_backoff_seconds: float
     story_hashtags: str
     style_prompt: str
     image_prompt_suffix: str
@@ -321,6 +327,8 @@ class VigvamcevSettings:
             loop_interval_seconds=max(5.0, number("loop_interval_seconds", 30.0)),
             story_max_tokens=max(300, integer("story_max_tokens", 1400)),
             review_max_tokens=max(80, integer("review_max_tokens", 220)),
+            text_timeout_seconds=max(10.0, number("text_timeout_seconds", 60.0)),
+            text_retry_backoff_seconds=max(0.0, number("text_retry_backoff_seconds", 5.0)),
             story_hashtags=str(raw.get("story_hashtags", _DEFAULT_HASHTAGS)).strip(),
             style_prompt=str(raw.get("style_prompt", "")).strip(),
             image_prompt_suffix=str(raw.get("image_prompt_suffix", "")).strip(),
@@ -531,6 +539,11 @@ def build_review_prompt(candidate: VigvamcevCandidate, state: Mapping[str, Any],
 """.strip()
 
 
+async def _wait_text_retry(settings: VigvamcevSettings, attempt: int) -> None:
+    if attempt + 1 < settings.max_stage_attempts and settings.text_retry_backoff_seconds:
+        await asyncio.sleep(settings.text_retry_backoff_seconds * (2**attempt))
+
+
 def validate_candidate(
     candidate: VigvamcevCandidate,
     *,
@@ -607,7 +620,12 @@ async def generate_candidate(
     prompt = build_story_prompt(corpus, state, settings, post_no=post_no, experiment_no=experiment_no)
     failures: list[str] = []
     for attempt in range(settings.max_stage_attempts):
-        raw = await text_request(prompt, settings.story_max_tokens)
+        try:
+            raw = await text_request(prompt, settings.story_max_tokens)
+        except TransientTextRequestError as exc:
+            failures.append(f"попытка {attempt + 1}: текстовый API временно недоступен: {exc}")
+            await _wait_text_retry(settings, attempt)
+            continue
         payload = _extract_json_object(raw)
         if not payload:
             failures.append(f"попытка {attempt + 1}: модель не вернула JSON")
@@ -622,7 +640,12 @@ async def generate_candidate(
             failures.append(f"попытка {attempt + 1}: " + "; ".join(errors[:4]))
             continue
         if reviewer is not None:
-            review_raw = await reviewer(build_review_prompt(candidate, state, settings), settings.review_max_tokens)
+            try:
+                review_raw = await reviewer(build_review_prompt(candidate, state, settings), settings.review_max_tokens)
+            except TransientTextRequestError as exc:
+                failures.append(f"попытка {attempt + 1}: reviewer временно недоступен: {exc}")
+                await _wait_text_retry(settings, attempt)
+                continue
             review = _extract_json_object(review_raw)
             if not review or review.get("ok") is not True:
                 failures.append(f"попытка {attempt + 1}: reviewer отклонил: {_as_text(review.get('reason')) or 'некорректный ответ'}")
