@@ -5,6 +5,8 @@ channel_id: -1002011983899
 asset_dir: assets/vigvamcev
 identity_reference: references/clones.jpg
 identity_layer: ""
+style_references: []
+style_reference_count: 3
 image_model: openai/gpt-5.4-image-2
 image_api_base_url: https://polza.ai/api/v1
 image_aspect_ratio: "4:3"

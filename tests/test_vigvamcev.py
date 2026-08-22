@@ -16,6 +16,7 @@ from PIL import Image
 from timur_bot.services.polza_image import GeneratedImage, PolzaImageClient
 from timur_bot.services.vigvamcev import (
     CanonCorpus,
+    CandidateGenerationError,
     DraftError,
     VigvamcevService,
     VigvamcevCandidate,
@@ -39,6 +40,8 @@ def _settings(**overrides) -> VigvamcevSettings:
     raw = {
         "caption_min_chars": 600,
         "caption_max_chars": 900,
+        "style_reference_count": 3,
+        "identity_reference": "references/clones.jpg",
         "max_stage_attempts": 2,
         "retry_backoff_seconds": 0,
         **overrides,
@@ -130,6 +133,9 @@ def test_full_poster_prompt_contains_exact_text_and_variation() -> None:
     assert "#ВИГВАМЦЕВ: ИСТОРИИ2" in prompt
     assert "ФОТОНЦЕВ" in prompt
     assert "№23 · ЭКСПЕРИМЕНТ 45" in prompt
+    # identity reference: новый клон с похожим лицом, но без копирования референс-ассетов
+    assert "IDENTITY reference" in prompt
+    assert "Do NOT copy any other people, faces, bodies, poses, props, backgrounds or compositions" in prompt
     assert "no readable text" not in prompt
     assert "giant surreal object in front" in prompt
 
@@ -326,6 +332,7 @@ def _service(
     channel_id=-100123,
     settings_overrides=None,
     compose=None,
+    text_request_fn=None,
 ) -> tuple[VigvamcevService, dict, _FakeBot]:
     corpus = CanonCorpus.load(CORPUS_ROOT)
     settings = _settings(channel_id=channel_id, retry_backoff_seconds=0, **(settings_overrides or {}))
@@ -350,7 +357,7 @@ def _service(
         settings=settings,
         corpus=corpus,
         image_client=image_client or _FakeImageClient(),
-        text_request=text_request,
+        text_request=text_request_fn or text_request,
         reviewer=reviewer,
         load_memory=load_memory,
         save_memory=save_memory,
@@ -374,6 +381,85 @@ def test_service_reuses_ready_draft_without_regenerating_image(tmp_path: Path) -
     assert state["config"]["vigvamcev"]["draft"]["canon_status"] == "draft"
     assert state["config"]["vigvamcev"]["history"] == []
     assert CORPUS_ROOT / "references" / "clones.jpg" in image_client.reference_paths
+
+
+class _OwnerPreviewMessage:
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.chat = SimpleNamespace(type="private")
+        self.photo_calls = []
+        self.replies = []
+
+    async def reply_photo(self, **kwargs):
+        self.photo_calls.append(kwargs)
+
+    async def reply_text(self, text, **_kwargs):
+        self.replies.append(text)
+
+
+def test_regenerate_command_replaces_preview_and_publish_uses_latest_draft(tmp_path: Path) -> None:
+    first = _candidate()
+    second = replace(
+        first,
+        clone_name="Параллелограммцев",
+        source_word="параллелограмм",
+        ability="изменение ритма предметов",
+        conflict="ритм предметов ломает протокол охраны",
+        twist="лаборатория начинает отвечать свистом",
+        consequence="сотрудники теряют синхронность действий",
+        next_hook="SIC получает ритмический сигнал из закрытого отсека",
+        visual_brief="новый клон в лаборатории, вокруг него свистящие приборы и сбитые стрелки",
+        novelty_tags=["сухой свист", "ритмические приборы"],
+        story=first.story.replace("Фотонцев", "Параллелограммцев").replace("фотоны", "ритмы"),
+    )
+    responses = [first, second]
+
+    async def text_request(_prompt: str, _max_tokens: int) -> str:
+        return json.dumps(responses.pop(0).to_dict(hashtags="#лор@vigvamcev #истории2@vigvamcev"), ensure_ascii=False)
+
+    image_client = _FakeImageClient()
+    service, state, bot = _service(tmp_path, image_client=image_client, text_request_fn=text_request)
+    asyncio.run(service.prepare_draft())
+
+    message = _OwnerPreviewMessage("/vigvamcev regenerate")
+    asyncio.run(service.handle_owner_command(SimpleNamespace(effective_message=message), SimpleNamespace(application=None)))
+
+    draft = state["config"]["vigvamcev"]["draft"]
+    assert len(message.photo_calls) == 1
+    assert draft["status"] == "ready"
+    assert draft["candidate"]["clone_name"] == "Параллелограммцев"
+    assert state["config"]["vigvamcev"]["post_no"] == 22
+    assert state["config"]["vigvamcev"]["experiment_no"] == 44
+    assert state["config"]["vigvamcev"]["history"] == []
+    assert image_client.calls == 2
+
+    published = asyncio.run(service.publish(SimpleNamespace(bot=bot), force=True, now=datetime(2026, 8, 22, 13, 0)))
+    assert published is not None
+    assert published.candidate.clone_name == "Параллелограммцев"
+    assert state["config"]["vigvamcev"]["post_no"] == 23
+    assert "Параллелограммцев" in bot.photo_calls[0]["caption"]
+
+
+def test_regenerate_rejects_repeated_current_clone(tmp_path: Path) -> None:
+    candidate = _candidate()
+    responses = [candidate, candidate, candidate]
+
+    async def text_request(_prompt: str, _max_tokens: int) -> str:
+        return json.dumps(responses.pop(0).to_dict(hashtags="#лор@vigvamcev #истории2@vigvamcev"), ensure_ascii=False)
+
+    service, _, _ = _service(tmp_path, text_request_fn=text_request)
+    asyncio.run(service.prepare_draft())
+
+    with pytest.raises(CandidateGenerationError, match="имя клона уже использовалось"):
+        asyncio.run(service.prepare_draft(force_new=True))
+
+
+def test_regenerate_is_blocked_after_unknown_publish(tmp_path: Path) -> None:
+    memory = {"config": {"vigvamcev": {"publish_status": "publish_unknown"}}}
+    service, _, _ = _service(tmp_path, memory=memory)
+
+    with pytest.raises(DraftError, match="publish_unknown"):
+        asyncio.run(service.prepare_draft(force_new=True))
 
 
 def test_service_publishes_to_fixed_channel_and_advances_sequence(tmp_path: Path) -> None:

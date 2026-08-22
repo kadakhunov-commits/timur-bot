@@ -266,6 +266,9 @@ class VigvamcevSettings:
     asset_dir: Path
     identity_reference: Path | None
     identity_layer: Path | None
+    style_references: tuple[Path, ...]
+    style_reference_count: int
+    full_identity_prompt: str
     poster_font: Path | None
     poster_mode: str
     variation_pool: list[str]
@@ -321,6 +324,28 @@ class VigvamcevSettings:
         layer_path = Path(layer_raw) if layer_raw else None
         if layer_path is not None and not layer_path.is_absolute():
             layer_path = asset_path / layer_path
+        raw_style_refs = raw.get("style_references", [])
+        if not isinstance(raw_style_refs, list):
+            raw_style_refs = []
+        style_reference_paths: list[Path] = []
+        for item in raw_style_refs:
+            ref_raw = str(item or "").strip()
+            if not ref_raw:
+                continue
+            ref_path = Path(ref_raw)
+            if not ref_path.is_absolute():
+                ref_path = asset_path / ref_raw
+            style_reference_paths.append(ref_path)
+        style_reference_count = max(0, integer("style_reference_count", 3))
+        full_identity = str(raw.get("full_identity_prompt", "") or "").strip()
+        if not full_identity:
+            full_identity = (
+                "The attached identity image shows only the main clone's face. Use it as an IDENTITY reference: create a NEW fictional clone who closely resembles "
+                "this same young man (same recognizable facial features), but give him a different "
+                "hairstyle, clothing and expression each time. Do NOT copy any other people, faces, "
+                "bodies, poses, props, backgrounds or compositions from any reference material. "
+                "Do not reproduce existing posters. Every figure except the main clone must be a newly invented character."
+            )
         poster_font_raw = str(raw.get("poster_font", "") or "").strip()
         poster_font_path = Path(poster_font_raw) if poster_font_raw else None
         if poster_font_path is not None and not poster_font_path.is_absolute():
@@ -347,6 +372,9 @@ class VigvamcevSettings:
             asset_dir=asset_path,
             identity_reference=identity_path,
             identity_layer=layer_path,
+            style_references=tuple(style_reference_paths),
+            style_reference_count=style_reference_count,
+            full_identity_prompt=full_identity,
             poster_font=poster_font_path,
             poster_mode=poster_mode,
             variation_pool=list(variation_pool),
@@ -615,6 +643,8 @@ def validate_candidate(
     source_word = _normalise_word(candidate.source_word)
     if source_word not in corpus.name_words:
         errors.append("source_word отсутствует в разрешённом словаре")
+    elif len(source_word) < 5:
+        errors.append("source_word слишком короткий для звучного имени клона (минимум 5 букв)")
     expected_name = clone_name_from_word(source_word)
     if _normalise_key(candidate.clone_name) != _normalise_key(expected_name):
         errors.append("clone_name не соответствует source_word + 'цев'")
@@ -764,6 +794,8 @@ def build_full_poster_prompt(
     number_line = f"№{candidate.post_no} · ЭКСПЕРИМЕНТ {candidate.experiment_no}"
     return f"""{settings.full_style_prompt}
 
+{settings.full_identity_prompt}
+
 Create the FINAL cover poster of the series, not just a scene. 4:3 poster with:
 - Large bold white header centered near the top: #ВИГВАМЦЕВ: ИСТОРИИ2
 - A big diagonal black plate in the lower-right corner with the clone name in large white letters: {name}
@@ -847,8 +879,12 @@ class VigvamcevService:
         return directory
 
     def _reference_paths(self) -> list[Path]:
-        references = list(self.corpus.visual_references)
         identity = self.settings.identity_reference
+        if self.settings.style_references:
+            pool = [path for path in self.settings.style_references if path.exists()]
+        else:
+            pool = [path for path in self.corpus.visual_references]
+        references = list(pool[: self.settings.style_reference_count])
         if identity and identity.exists() and identity not in references:
             references.insert(0, identity)
         return references
@@ -905,9 +941,17 @@ class VigvamcevService:
                 return current
         post_no = int(state.get("post_no", 22) or 22) + 1
         experiment_no = int(state.get("experiment_no", 44) or 44) + 1
+        generation_state: Mapping[str, Any] = state
+        if force_new:
+            previous = self._candidate_from_state(state)
+            if previous:
+                generation_state = dict(state)
+                generation_state["used_names"] = list(state.get("used_names", []) or []) + [previous.clone_name]
+                generation_state["used_abilities"] = list(state.get("used_abilities", []) or []) + [previous.ability]
+                generation_state["used_motifs"] = list(state.get("used_motifs", []) or []) + list(previous.novelty_tags)
         candidate = await generate_candidate(
             self.corpus,
-            state,
+            generation_state,
             self.settings,
             text_request=self.text_request,
             reviewer=self.reviewer,
@@ -927,6 +971,11 @@ class VigvamcevService:
     async def _prepare_locked(self, *, force_new: bool = False) -> PreparedDraft:
         memory = self.load_memory()
         state = self._state(memory)
+        if force_new and state.get("publish_status") in {"publishing", "publish_unknown"}:
+            raise DraftError(
+                "нельзя генерировать новый draft, пока публикация заблокирована состоянием "
+                + str(state.get("publish_status")),
+            )
         if not force_new:
             prepared = self._prepared_from_state(state)
             if prepared:
@@ -1245,9 +1294,30 @@ class VigvamcevService:
                     photo=InputFile(prepared.image_path.read_bytes(), filename=prepared.image_path.name),
                     caption=format_caption(prepared.candidate, hashtags=self.settings.story_hashtags),
                 )
+            elif action in {"regenerate", "new"}:
+                prepared = await self.prepare_draft(force_new=True)
+                await message.reply_photo(
+                    photo=InputFile(prepared.image_path.read_bytes(), filename=prepared.image_path.name),
+                    caption=format_caption(prepared.candidate, hashtags=self.settings.story_hashtags),
+                )
             elif action == "retry":
                 prepared = await self.prepare_draft()
                 await message.reply_text(f"draft готов: пост №{prepared.candidate.post_no}, эксперимент {prepared.candidate.experiment_no}")
+            elif action == "unlock":
+                memory_unlock = self.load_memory()
+                state_unlock = self._state(memory_unlock)
+                if state_unlock.get("publish_status") != "publish_unknown":
+                    await message.reply_text("VIGVAMЦЕВ: разблокировка не требуется, состояние " + str(state_unlock.get("publish_status", "idle")))
+                else:
+                    state_unlock["publish_status"] = "idle"
+                    draft_unlock = state_unlock.setdefault("draft", {})
+                    if isinstance(draft_unlock, dict) and draft_unlock.get("status") == "publish_unknown":
+                        draft_unlock["status"] = "ready"
+                    state_unlock["last_error"] = "владелец подтвердил исход после publish_unknown"
+                    self._save(memory_unlock)
+                    await message.reply_text(
+                        "VIGVAMЦЕВ: публикация разблокирована. Проверь канал на дубль; /vigvamcev publish отправит текущий draft повторно."
+                    )
             elif action == "publish":
                 if application is None:
                     raise DraftError("нет Telegram application")
@@ -1256,7 +1326,7 @@ class VigvamcevService:
                     "опубликовано" if prepared else "публикация не выполнена",
                 )
             else:
-                await message.reply_text("используй: /vigvamcev status|preview|retry|publish")
+                await message.reply_text("используй: /vigvamcev status|preview|regenerate|retry|unlock|publish")
         except Exception as exc:
             self.logger.exception("VIGVAMCEV command failed: %s", action)
             await message.reply_text(f"VIGVAMЦЕВ: ошибка: {str(exc)[:700]}")
