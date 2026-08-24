@@ -421,11 +421,16 @@ class VigvamcevCandidate:
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> "VigvamcevCandidate":
         story = _normalise_story(payload.get("story") or payload.get("caption") or payload.get("public_story"))
+        source_word = _as_text(payload.get("source_word"))
+        provided_name = _as_text(payload.get("clone_name"))
+        clone_name = clone_name_from_word(source_word) or provided_name
+        if provided_name and clone_name and _normalise_key(provided_name) != _normalise_key(clone_name):
+            story = re.sub(re.escape(provided_name), clone_name, story, flags=re.IGNORECASE)
         return cls(
             post_no=int(payload.get("post_no", 0) or 0),
             experiment_no=int(payload.get("experiment_no", 0) or 0),
-            clone_name=_as_text(payload.get("clone_name")),
-            source_word=_as_text(payload.get("source_word")),
+            clone_name=clone_name,
+            source_word=source_word,
             ability=_as_text(payload.get("ability")),
             canon_anchors=_coerce_string_list(payload.get("canon_anchors")),
             conflict=_as_text(payload.get("conflict")),
@@ -582,6 +587,7 @@ def build_story_prompt(
 {corpus.context()}
 
 История обязана состоять ровно из двух содержательных блоков: строка «Клон: …» — про нового клона, строка «SIC: …» — про продолжение общего сюжета Фонда SIC.
+Имя образуй механически без склонения исходного слова: source_word «параллелограмм» → clone_name «Параллелограммцев».
 
 Верни только JSON следующей формы:
 {{
@@ -702,9 +708,17 @@ async def generate_candidate(
     post_no: int,
     experiment_no: int,
 ) -> VigvamcevCandidate:
-    prompt = build_story_prompt(corpus, state, settings, post_no=post_no, experiment_no=experiment_no)
+    base_prompt = build_story_prompt(corpus, state, settings, post_no=post_no, experiment_no=experiment_no)
     failures: list[str] = []
+    retry_feedback = ""
     for attempt in range(settings.max_stage_attempts):
+        prompt = base_prompt
+        if retry_feedback:
+            prompt += (
+                "\n\nПредыдущая попытка отклонена локальной проверкой. Исправь перечисленные нарушения: "
+                + retry_feedback
+                + "\nВерни полностью исправленный JSON, сохранив требуемые два блока и диапазон длины."
+            )
         try:
             raw = await text_request(prompt, settings.story_max_tokens)
         except TransientTextRequestError as exc:
@@ -714,15 +728,18 @@ async def generate_candidate(
         payload = _extract_json_object(raw)
         if not payload:
             failures.append(f"попытка {attempt + 1}: модель не вернула JSON")
+            retry_feedback = "ответ должен быть одним корректным JSON-объектом"
             continue
         try:
             candidate = VigvamcevCandidate.from_payload(payload)
         except (TypeError, ValueError) as exc:
             failures.append(f"попытка {attempt + 1}: некорректные поля JSON: {exc}")
+            retry_feedback = "некорректные поля JSON: " + str(exc)[:300]
             continue
         errors = validate_candidate(candidate, state=state, corpus=corpus, settings=settings)
         if errors:
             failures.append(f"попытка {attempt + 1}: " + "; ".join(errors[:4]))
+            retry_feedback = "; ".join(errors[:6])
             continue
         if reviewer is not None:
             try:
@@ -733,7 +750,10 @@ async def generate_candidate(
                 continue
             review = _extract_json_object(review_raw)
             if not review or review.get("ok") is not True:
-                failures.append(f"попытка {attempt + 1}: reviewer отклонил: {_as_text(review.get('reason')) or 'некорректный ответ'}")
+                review_reason = _as_text(review.get("reason")) if review else ""
+                review_reason = review_reason or "reviewer вернул некорректный ответ"
+                failures.append(f"попытка {attempt + 1}: reviewer отклонил: {review_reason}")
+                retry_feedback = "reviewer: " + review_reason[:500]
                 continue
         return candidate
     raise CandidateGenerationError("; ".join(failures[-3:]) or "не удалось создать канонический кандидат")

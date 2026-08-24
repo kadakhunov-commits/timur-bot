@@ -156,6 +156,18 @@ def test_story_requires_clone_and_sic_blocks() -> None:
     assert "в истории нет блока «SIC: …»" in sic_missing
 
 
+def test_candidate_payload_derives_clone_name_and_updates_story() -> None:
+    payload = _candidate().to_dict()
+    payload["clone_name"] = "Фотоновцев"
+    payload["story"] = str(payload["story"]).replace("Фотонцев", "Фотоновцев")
+
+    candidate = VigvamcevCandidate.from_payload(payload)
+
+    assert candidate.clone_name == "Фотонцев"
+    assert "Фотоновцев" not in candidate.story
+    assert "Фотонцева" in candidate.story
+
+
 def test_text_stage_retries_transient_provider_timeout() -> None:
     corpus = CanonCorpus.load(CORPUS_ROOT)
     settings = _settings(max_stage_attempts=2, text_retry_backoff_seconds=0)
@@ -186,6 +198,40 @@ def test_text_stage_retries_transient_provider_timeout() -> None:
 
     assert result.clone_name == "Фотонцев"
     assert calls == 2
+
+
+def test_text_stage_retries_with_local_validation_feedback() -> None:
+    corpus = CanonCorpus.load(CORPUS_ROOT)
+    settings = _settings(max_stage_attempts=2, text_retry_backoff_seconds=0)
+    state = default_vigvamcev_state(corpus, settings)
+    valid = _candidate()
+    invalid = replace(valid, story=valid.story.split("SIC:")[0].strip())
+    prompts: list[str] = []
+
+    async def text_request(prompt: str, _max_tokens: int) -> str:
+        prompts.append(prompt)
+        candidate = invalid if len(prompts) == 1 else valid
+        return json.dumps(candidate.to_dict(hashtags=settings.story_hashtags), ensure_ascii=False)
+
+    async def reviewer(_prompt: str, _max_tokens: int) -> str:
+        return '{"ok": true}'
+
+    result = asyncio.run(
+        generate_candidate(
+            corpus,
+            state,
+            settings,
+            text_request=text_request,
+            reviewer=reviewer,
+            post_no=23,
+            experiment_no=45,
+        )
+    )
+
+    assert result.clone_name == "Фотонцев"
+    assert len(prompts) == 2
+    assert "в истории нет блока «SIC: …»" in prompts[1]
+    assert "caption имеет длину" in prompts[1]
 
 
 def test_reviewer_stage_retries_transient_provider_timeout() -> None:
