@@ -28,8 +28,72 @@
   function money(value) {
     var number = Number(value) || 0;
     var whole = Math.abs(number - Math.round(number)) < 0.005;
-    var text = whole ? String(Math.round(number)) : number.toFixed(2);
+    var text = whole ? String(Math.round(number)) : String(Math.round(number * 100) / 100);
     return text.replace(/\B(?=(\d{3})+(?!\d))/g, "\u00a0");
+  }
+
+  // Суммы на кухне рисуем пиксельными глифами 5×7, а не шрифтом: SVG
+  // масштабируется дробно, и текстовые цифры «плывут» — пятёрка читалась
+  // как S. Прямоугольники остаются чёткими при любом масштабе.
+  var DIGITS = {
+    "0": ["01110", "10001", "10011", "10101", "11001", "10001", "01110"],
+    "1": ["00100", "01100", "00100", "00100", "00100", "00100", "01110"],
+    "2": ["01110", "10001", "00001", "00010", "00100", "01000", "11111"],
+    "3": ["11111", "00010", "00100", "00010", "00001", "10001", "01110"],
+    "4": ["00010", "00110", "01010", "10010", "11111", "00010", "00010"],
+    "5": ["11111", "10000", "11110", "00001", "00001", "10001", "01110"],
+    "6": ["00110", "01000", "10000", "11110", "10001", "10001", "01110"],
+    "7": ["11111", "00001", "00010", "00100", "01000", "01000", "01000"],
+    "8": ["01110", "10001", "10001", "01110", "10001", "10001", "01110"],
+    "9": ["01110", "10001", "10001", "01111", "00001", "00010", "01100"],
+    ".": ["00000", "00000", "00000", "00000", "00000", "01100", "01100"],
+    ",": ["00000", "00000", "00000", "00000", "01100", "00100", "01000"],
+    "-": ["00000", "00000", "00000", "11111", "00000", "00000", "00000"],
+    // Разделитель тысяч — узкий пробел, чтобы «2 280» не растягивалось.
+    "\u00a0": ["00", "00", "00", "00", "00", "00", "00"],
+    " ": ["000", "000", "000", "000", "000", "000", "000"]
+  };
+
+  function pixelNumber(value, x, baselineY, fill, scale) {
+    scale = scale || 1.15;
+    var gap = scale;
+    var text = String(value);
+    var widths = [];
+    var totalWidth = 0;
+    for (var index = 0; index < text.length; index += 1) {
+      var glyph = DIGITS[text[index]];
+      var width = (glyph ? glyph[0].length : 3) * scale;
+      widths.push(width);
+      totalWidth += width;
+    }
+    totalWidth += gap * Math.max(0, text.length - 1);
+
+    var cursor = x - totalWidth / 2;
+    var out = "";
+    for (var position = 0; position < text.length; position += 1) {
+      var rows = DIGITS[text[position]];
+      if (rows) {
+        for (var row = 0; row < rows.length; row += 1) {
+          var run = 0;
+          for (var column = 0; column <= rows[row].length; column += 1) {
+            var on = column < rows[row].length && rows[row][column] === "1";
+            if (on) { run += 1; continue; }
+            if (run > 0) {
+              out += rect(
+                cursor + (column - run) * scale,
+                baselineY - 7 * scale + row * scale,
+                run * scale,
+                scale,
+                fill
+              );
+              run = 0;
+            }
+          }
+        }
+      }
+      cursor += widths[position] + gap;
+    }
+    return out;
   }
 
   function hotspot(x, y, w, h, action, label) {
@@ -248,8 +312,9 @@
       out.push('<g transform="translate(' + (cx - 9) + "," + (avatarY - 13) + ')">' +
         '<g class="crown" transform="scale(2)">' + art.crownMarkup() + "</g></g>");
     }
-    out.push(text(cx, 171, member.name, member.color, 8, "middle", 700));
-    out.push(text(cx, 181, money(total), "#eef1f7", 9, "middle", 700));
+    // Имя — прописными: у строчных «д» и «ы» в пиксельном шрифте кривые начертания.
+    out.push(text(cx, 171, String(member.name).toUpperCase(), member.color, 8, "middle", 700));
+    out.push(pixelNumber(money(total), cx, 182, "#eef1f7"));
     out.push("</g>");
     return out.join("");
   }

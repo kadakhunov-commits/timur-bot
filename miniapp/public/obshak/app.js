@@ -309,7 +309,7 @@
         '<span class="bar-value">' + money(row.total) + "</span>" +
         '<div class="bar-track"><div class="bar-fill" style="height:' + percent + "%;background:" + h(row.color) + '"></div></div>' +
         '<span class="bar-foot">' + art.avatar(row.member_id, { size: 18 }) +
-        '<span class="bar-name">' + h(row.name) + "</span></span></button>";
+        '<span class="bar-name">' + h(String(row.name).toUpperCase()) + "</span></span></button>";
     }).join("") + "</div>";
   }
 

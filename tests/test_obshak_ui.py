@@ -60,6 +60,32 @@ def test_picker_buttons_answer_the_pick_action():
     assert 'case "pick":' in APP_JS
 
 
+def test_pixel_digit_glyphs_are_well_formed():
+    """Суммы на кухне рисуются пиксельными глифами — проверяем, что они целые.
+
+    Текст шрифтом в SVG масштабируется дробно и «плывёт» (пятёрка читалась как S),
+    поэтому цифры рисуются прямоугольниками. Опечатка в карте ломает вид молча.
+    """
+    body = re.search(r"var DIGITS = \{(.*?)\n  \};", SCENE_JS, re.S)
+    assert body, "в scene.js не нашлась карта DIGITS"
+    glyphs = {}
+    for key, block in re.findall(r'"((?:\\u00a0|[^"])+)"\s*:\s*\[(.*?)\]', body.group(1), re.S):
+        glyphs[key.replace("\\u00a0", "\u00a0")] = re.findall(r'"([01]*)"', block)
+    for digit in "0123456789":
+        assert digit in glyphs, f"нет глифа для цифры {digit}"
+        rows = glyphs[digit]
+        assert len(rows) == 7, f"глиф {digit} должен быть высотой 7 строк"
+        widths = {len(row) for row in rows}
+        assert len(widths) == 1, f"глиф {digit} должен быть одной ширины, а он {widths}"
+    assert "\u00a0" in glyphs, "нет узкого разделителя тысяч"
+
+
+def test_amounts_use_pixel_digits_not_font_text():
+    # Имя рисуем шрифтом (прописными), сумму — прямоугольниками.
+    assert "pixelNumber(money(total)" in SCENE_JS
+    assert "String(member.name).toUpperCase()" in SCENE_JS
+
+
 def test_obshak_page_references_existing_assets():
     assets = re.findall(r'/miniapp/assets/([^"?]+)', OBSHAK_HTML)
     assert assets, "страница общака не подключает ни одного ассета"

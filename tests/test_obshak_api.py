@@ -250,7 +250,9 @@ def test_member_card_and_calendar(client):
     assert client.get("/api/obshak/members/ghost", headers=headers(AMIR)).status_code == 404
     calendar = client.get("/api/obshak/calendar", headers=headers(AMIR)).get_json()["calendar"]
     assert calendar["peak"] == 140
-    day = calendar["days"][-1]["date"]
+    # Берём день с покупкой, а не последний в окне: окно заканчивается воскресеньем
+    # текущей недели, то есть в начале недели смотрит в будущее.
+    day = next(entry["date"] for entry in calendar["days"] if entry["count"] > 0)
     day_expenses = client.get(f"/api/obshak/calendar/{day}", headers=headers(AMIR)).get_json()
     assert day_expenses["expenses"][0]["title"] == "Майонез"
     assert client.get("/api/obshak/news", headers=headers(AMIR)).status_code == 200
