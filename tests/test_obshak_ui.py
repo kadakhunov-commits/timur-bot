@@ -14,6 +14,14 @@ OBSHAK_DIR = ROOT / "miniapp" / "public" / "obshak"
 APP_JS = (OBSHAK_DIR / "app.js").read_text(encoding="utf-8")
 SCENE_JS = (OBSHAK_DIR / "scene.js").read_text(encoding="utf-8")
 OBSHAK_HTML = (ROOT / "miniapp" / "public" / "obshak.html").read_text(encoding="utf-8")
+APP_CSS = (OBSHAK_DIR / "app.css").read_text(encoding="utf-8")
+
+FONT_FILES = (
+    "press-start-2p-latin.woff2",
+    "press-start-2p-cyrillic.woff2",
+    "pixelify-sans-latin.woff2",
+    "pixelify-sans-cyrillic.woff2",
+)
 
 # Действия сцены, которые обрабатываются не как "action-open", а отдельной веткой.
 SPECIAL_SCENE_ACTIONS = {"member", "light"}
@@ -86,8 +94,25 @@ def test_amounts_use_pixel_digits_not_font_text():
     assert "String(member.name).toUpperCase()" in SCENE_JS
 
 
+def test_fonts_are_self_hosted_with_cyrillic():
+    """Шрифты обязаны лежать у нас вместе с кириллическим набором.
+
+    На Google Fonts кириллица — отдельный файл, который грузится лениво; когда
+    он не доезжал, кириллический текст оставался системным шрифтом и выглядел
+    «кривым». Держим оба набора локально, чтобы это не вернулось.
+    """
+    assert "fonts.googleapis.com" not in OBSHAK_HTML
+    assert "fonts.gstatic.com" not in OBSHAK_HTML
+    for name in FONT_FILES:
+        assert (OBSHAK_DIR / "fonts" / name).exists(), f"нет файла шрифта {name}"
+        assert f"fonts/{name}" in APP_CSS, f"{name} не подключён в app.css"
+    cyrillic_ranges = re.findall(r"unicode-range: ([^;]*U\+0400[^;]*);", APP_CSS)
+    assert len(cyrillic_ranges) >= 2, "у обоих шрифтов должен быть кириллический набор"
+    assert APP_CSS.count("@font-face") >= 4
+
+
 def test_obshak_page_references_existing_assets():
-    assets = re.findall(r'/miniapp/assets/([^"?]+)', OBSHAK_HTML)
+    assets = re.findall(r'/miniapp/assets/([^"?]+)', OBSHAK_HTML + APP_CSS)
     assert assets, "страница общака не подключает ни одного ассета"
     for asset in assets:
         assert (ROOT / "miniapp" / "public" / asset).exists(), f"нет файла {asset}"

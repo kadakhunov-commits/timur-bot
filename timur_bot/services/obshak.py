@@ -1232,7 +1232,7 @@ def achievements(
         oldest = min(stamps).astimezone(resolve_timezone(tz_name))
         if (local_now - oldest).days >= veteran_days:
             badges.append(
-                _badge("veteran", "Долгожитель общака", "trophy", member_id, f"{veteran_days}+ дней")
+                _badge("veteran", "Старожил", "trophy", member_id, f"{veteran_days}+ дней")
             )
 
     reaction_counts: Dict[str, int] = {}

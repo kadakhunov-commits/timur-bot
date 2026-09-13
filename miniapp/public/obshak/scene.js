@@ -351,11 +351,11 @@
 
     // Хотспоты рисуем до персонажей: в наложении клик забирает персонаж.
     parts.push(hotspot(12, 14, 44, 44, "calendar", "Календарь активности"));
-    parts.push(hotspot(58, 16, 46, 44, "news", "Общацкие новости"));
+    parts.push(hotspot(58, 16, 46, 44, "news", "Соседские новости"));
     parts.push(hotspot(112, 34, 56, 22, "achievements", "Зал славы"));
     parts.push(hotspot(176, 14, 56, 50, "history", "Чеки"));
     parts.push(hotspot(6, 66, 48, 92, "wishlist", "Надо купить"));
-    parts.push(hotspot(148, 78, 28, 36, "jar", "Банка общака"));
+    parts.push(hotspot(148, 78, 28, 36, "jar", "Общая банка"));
     parts.push(hotspot(194, 156, 34, 30, "pet", "Кот"));
     parts.push(hotspot(10, 152, 34, 46, "roulette", "Кто идёт в магазин"));
     parts.push(hotspot(210, 60, 28, 34, "light", "Выключатель"));
@@ -366,7 +366,7 @@
       parts.push(character(member, row.total || 0, maxTotal, index, ctx.me === member.key, animate));
     });
 
-    return '<svg class="scene" viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="xMidYMid meet" aria-label="Кухня общака">' +
+    return '<svg class="scene" viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="xMidYMid meet" aria-label="Кухня соседей">' +
       parts.join("") + "</svg>";
   }
 

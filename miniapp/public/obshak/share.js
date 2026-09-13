@@ -79,7 +79,7 @@
     ctx.fillStyle = "#2b2f3d";
     pixelFont(ctx, 30);
     ctx.textAlign = "center";
-    ctx.fillText("ОБЩАК", width / 2, 86);
+    ctx.fillText("СОСЕДИ", width / 2, 86);
 
     bodyFont(ctx, 22, 600);
     ctx.fillStyle = "#6d6350";
@@ -134,7 +134,7 @@
     ctx.textAlign = "center";
     pixelFont(ctx, 16);
     ctx.fillStyle = "#8b90a3";
-    ctx.fillText("ГРАМОТА ОБЩАКА", width / 2, 78);
+    ctx.fillText("ГРАМОТА СОСЕДЕЙ", width / 2, 78);
 
     pixelFont(ctx, 26);
     ctx.fillStyle = "#ffd447";

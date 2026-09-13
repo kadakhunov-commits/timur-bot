@@ -190,7 +190,7 @@ def news(
         return [
             {
                 "kind": "starter",
-                "text": "ОБЩАК ПУСТ: первая покупка войдёт в историю",
+                "text": "КАССА ПУСТА: первая покупка войдёт в историю",
             }
         ]
 
@@ -393,7 +393,7 @@ def roast(
     try:
         text = template.format(**placeholders)
     except (KeyError, IndexError):
-        fallback = (templates.get("default") or ["{name}, общак ждёт твоих подвигов"])[0]
+        fallback = (templates.get("default") or ["{name}, соседи ждут твоих подвигов"])[0]
         text = str(fallback).format(name=name, total=format_money(grand_total))
     return {"key": key, "text": text}
 

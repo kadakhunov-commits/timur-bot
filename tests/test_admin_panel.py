@@ -61,7 +61,7 @@ def test_miniapp_launch_serves_the_obshak_app_without_redirect() -> None:
     response = client.get("/miniapp/launch?state=test-state")
 
     assert response.status_code == 200
-    assert "ОБЩАК" in response.get_data(as_text=True)
+    assert "СОСЕДИ" in response.get_data(as_text=True)
     assert response.headers["Cache-Control"] == "no-store, max-age=0"
 
 
@@ -73,5 +73,5 @@ def test_old_admin_web_address_serves_the_obshak_app() -> None:
         response = client.get(path)
         assert response.status_code == 200, path
         body = response.get_data(as_text=True)
-        assert "ОБЩАК" in body, path
+        assert "СОСЕДИ" in body, path
         assert "ТЕЛЕГРАМ ADMIN PANEL" not in body, path

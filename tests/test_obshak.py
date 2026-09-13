@@ -303,7 +303,7 @@ def test_jar_magnate_at_top_level():
     state = fresh_state()
     add(state, "amir", 30000, "всё сразу")
     jar = obshak_flavor.jar_state(state, CONFIG)
-    assert jar["level"]["name"] == "Общацкий магнат"
+    assert jar["level"]["name"] == "Магнат соседей"
     assert jar["next"] is None
     assert jar["progress"] == 1
 

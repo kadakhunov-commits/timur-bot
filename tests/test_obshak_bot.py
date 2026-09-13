@@ -39,7 +39,7 @@ def test_summary_text_for_empty_state():
 
 def test_summary_text_lists_leader_and_jar():
     text = bot_logic._obshak_summary_text(build_state())
-    assert "общак: 140" in text
+    assert "касса: 140" in text
     assert "Амир" in text
     assert "банка:" in text
     assert "надо купить: 1" in text
@@ -143,7 +143,7 @@ def test_card_is_pinned_once_and_force_repins(monkeypatch, tmp_path):
 
     asyncio.run(bot_logic._send_obshak_card(context, GROUP_ID))
     assert context.bot.sent[0].pinned is True
-    assert "открыть общак" in str(context.bot.sent[0].reply_markup.to_dict())
+    assert "открыть «Соседей»" in str(context.bot.sent[0].reply_markup.to_dict())
 
     asyncio.run(bot_logic._send_obshak_card(context, GROUP_ID))
     assert context.bot.sent[1].pinned is False, "повторный /obshak не должен тасовать закреп"
@@ -203,7 +203,7 @@ def test_menu_button_and_commands_are_configured_when_url_present(monkeypatch):
     assert len(application.bot.menu_calls) == 1
     menu = application.bot.menu_calls[0]
     assert menu.web_app.url == "https://example.com/miniapp"
-    assert menu.text == "Общак"
+    assert menu.text == "Соседи"
     commands = [command.command for command in application.bot.command_calls[0]]
     assert "obshak" in commands
 

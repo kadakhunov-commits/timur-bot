@@ -328,7 +328,7 @@ def test_weather_requires_link(client):
 def test_pages_are_served(client):
     miniapp = client.get("/miniapp")
     assert miniapp.status_code == 200
-    assert "ОБЩАК" in miniapp.data.decode("utf-8")
+    assert "СОСЕДИ" in miniapp.data.decode("utf-8")
     assert miniapp.headers["Cache-Control"] == "no-store, max-age=0"
     legacy = client.get("/admin-panel")
     assert legacy.status_code == 200

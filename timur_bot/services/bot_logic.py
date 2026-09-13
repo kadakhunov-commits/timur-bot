@@ -7712,9 +7712,9 @@ def _obshak_summary_text(state: Dict[str, Any], member_id: Optional[str] = None)
     currency = str(OBSHAK_DEFAULTS.get("currency") or "₽")
     totals = obshak_service.totals(state)
     if not totals["count"]:
-        lines = ["общак пока пуст.", "открой кухню и запиши первую покупку — она появится в летописи."]
+        lines = ["у соседей пока пусто.", "открой кухню и запиши первую покупку — она появится в летописи."]
     else:
-        lines = [f"общак: {obshak_flavor.format_money(totals['total'])} {currency} · покупок {totals['count']}"]
+        lines = [f"касса: {obshak_flavor.format_money(totals['total'])} {currency} · покупок {totals['count']}"]
         medals = ["🥇", "🥈", "🥉"]
         for index, row in enumerate(obshak_service.leaderboard(state)[:3]):
             lines.append(
@@ -7738,7 +7738,7 @@ def _obshak_summary_text(state: Dict[str, Any], member_id: Optional[str] = None)
 def _obshak_keyboard(bot_username: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("открыть общак", url=obshak_deep_link(bot_username, "home"))],
+            [InlineKeyboardButton("открыть «Соседей»", url=obshak_deep_link(bot_username, "home"))],
             [InlineKeyboardButton("записать покупку", url=obshak_deep_link(bot_username, "add"))],
         ]
     )
@@ -7755,7 +7755,7 @@ async def _send_obshak_card(
     force_pin: bool = False,
 ) -> None:
     if not MINIAPP_URL:
-        await context.bot.send_message(chat_id, "общак не настроен: добавь MINIAPP_URL в .env")
+        await context.bot.send_message(chat_id, "«Соседи» не настроены: добавь MINIAPP_URL в .env")
         return
     bot_username = await _obshak_bot_username(context)
     if not bot_username:
@@ -7777,7 +7777,7 @@ async def _send_obshak_card(
                 _OBSHAK_PIN_HINTED.add(int(chat_id))
                 await context.bot.send_message(
                     chat_id,
-                    "кнопка общака живёт в pinned-сообщении, а закрепить я не могу: выдай боту право "
+                    "не смог закрепить карточку: выдай боту право "
                     "«Закреплять сообщения» (админка беседы) и позови /obshak ещё раз.",
                 )
         else:
@@ -7821,7 +7821,7 @@ async def obshak_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 
 async def obshak_group_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Когда бота добавляют в беседу — сразу показываем кнопку общака."""
+    """Когда бота добавляют в беседу — сразу показываем карточку «Соседей»."""
     message = update.effective_message
     if not message or not message.new_chat_members:
         return
@@ -7837,7 +7837,7 @@ async def obshak_group_welcome(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 def _obshak_links_text(state: Dict[str, Any]) -> str:
-    lines = ["привязка аватаров общака:"]
+    lines = ["привязка аватаров:"]
     for member_id, entry in obshak_service.member_map(state).items():
         linked = entry.get("telegram_id")
         lines.append(f"{member_id} ({entry.get('name')}) — {'id ' + str(linked) if linked else 'свободен'}")
@@ -7866,7 +7866,7 @@ async def obshak_reset_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 OBSHAK_BOT_COMMANDS = [
-    BotCommand("obshak", "Общак: кухня, вклады и кто идёт в магазин"),
+    BotCommand("obshak", "Соседи: кухня, вклады и кто идёт в магазин"),
     BotCommand("start", "Познакомиться"),
 ]
 
@@ -7886,7 +7886,7 @@ async def setup_obshak_bot_ui(application: Application) -> None:
         return
     try:
         await application.bot.set_chat_menu_button(
-            menu_button=MenuButtonWebApp(text="Общак", web_app=WebAppInfo(url=MINIAPP_URL))
+            menu_button=MenuButtonWebApp(text="Соседи", web_app=WebAppInfo(url=MINIAPP_URL))
         )
     except TelegramError as exc:
         logger.warning("общак: не удалось настроить кнопку меню: %s", exc)

@@ -13,7 +13,7 @@
     needs_link: "Выбери, кто ты",
     slot_taken: "Этот аватар уже занят",
     already_linked: "Ты уже привязан к другому аватару",
-    not_a_member: "Тебя нет в беседе общака",
+    not_a_member: "Тебя нет в беседе соседей",
     not_allowed: "Чужие покупки трогать нельзя",
     already_paid: "Ты уже скинулся",
     not_a_target: "Этот запрос не к тебе",
@@ -30,7 +30,7 @@
     bad_reaction: "Неизвестная реакция",
     bad_hash: "Подпись Telegram не сошлась",
     expired: "Сессия устарела, открой миниапп заново",
-    missing_init_data: "Открой общак кнопкой в беседе",
+    missing_init_data: "Открой «Соседей» кнопкой в беседе",
     server_misconfigured: "Сервер не настроен",
     bad_user: "Не удалось определить пользователя"
   };
@@ -322,7 +322,7 @@
     parts.push(
       '<span class="' + (hot ? "is-hot" : "") + '">' +
       art.badge("flame", { size: 14, color: hot ? "#ffd447" : "#4c5165", contrast: "#2a2205" }) +
-      " " + (hot ? streak.current + " " + pluralDays(streak.current) + " подряд" : "общак остыл") +
+      " " + (hot ? streak.current + " " + pluralDays(streak.current) + " подряд" : "соседи затихли") +
       "</span>"
     );
     if (quest) {
@@ -636,12 +636,12 @@
   }
 
   function showReceipt(expense) {
-    var jokes = ["майонез одобрен администрацией", "общага благодарит за вклад", "внесено в летопись общака"];
+    var jokes = ["майонез одобрен администрацией", "общага благодарит за вклад", "внесено в летопись соседей"];
     setPanel({
       title: "ЧЕК",
       body: function () {
         return '<div class="receipt">' +
-          '<div class="receipt-title">ОБЩАК • ЧЕК</div>' +
+          '<div class="receipt-title">СОСЕДИ • ЧЕК</div>' +
           '<div class="receipt-dash"></div>' +
           art.avatar(expense.member_id, { size: 44 }) +
           '<div class="receipt-item">' + h(expense.title) + "</div>" +
@@ -914,7 +914,7 @@
   }
 
   function openJar() {
-    setPanel({ title: "БАНКА ОБЩАКА", body: jarBody });
+    setPanel({ title: "ОБЩАЯ БАНКА", body: jarBody });
   }
 
   function jarBody() {
@@ -962,7 +962,7 @@
   }
 
   function openNews() {
-    setPanel({ title: "ОБЩАЦКИЕ НОВОСТИ", body: newsBody });
+    setPanel({ title: "СОСЕДСКИЕ НОВОСТИ", body: newsBody });
   }
 
   function newsBody() {
@@ -970,7 +970,7 @@
     var today = new Date();
     var months = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
     return '<div class="news-item"><div class="news-kicker">ВЫПУСК • ' + today.getDate() + " " + months[today.getMonth()] + "</div>" +
-      '<div class="news-text">ОБЩАК ЖИВ</div></div>' +
+      '<div class="news-text">СОСЕДИ ЖИВЫ</div></div>' +
       headlines.map(function (headline) {
         return '<div class="news-item"><div class="news-text">' + h(headline.text) + "</div></div>";
       }).join("");
@@ -1028,7 +1028,7 @@
 
   function openHelp() {
     setPanel({ title: "ЧТО ЭТО", body: function () {
-      return '<p style="line-height:1.5">Это общак нашей квартиры. Кто что купил — записываем сюда, а кухня сама считает, кто сколько вложил.</p>' +
+      return '<p style="line-height:1.5">Это касса соседей: кто что купил в общий котёл — записываем сюда, а кухня сама считает, кто сколько вложил.</p>' +
         '<div class="section-title">КАК ПОЛЬЗОВАТЬСЯ</div>' +
         '<div class="rows">' +
         '<div class="row"><div class="row-main"><div class="row-title">Калькулятор</div><div class="row-sub">записать покупку: сумма, что купил, кто платил</div></div></div>' +
@@ -1038,7 +1038,7 @@
         '<div class="row"><div class="row-main"><div class="row-title">Кот</div><div class="row-sub">живёт под столом и следит за активностью</div></div></div>' +
         "</div>" +
         '<div class="section-title">ЗАПРОСЫ ДЕНЕГ</div>' +
-        '<p class="muted" style="line-height:1.5">По умолчанию никто никому не должен: общак — это только вклады. Если надо скинуться — создай запрос, и он появится у всех.</p>';
+        '<p class="muted" style="line-height:1.5">По умолчанию никто никому не должен: соседи просто вкладываются в общее. Если надо скинуться — создай запрос, и он появится у всех.</p>';
     } });
   }
 
@@ -1171,7 +1171,7 @@
       "</div>" +
       '<div class="flame-row">' + cells + "</div>" +
       '<div class="section-title">КВЕСТ НЕДЕЛИ</div>' + questHtml +
-      '<p class="muted" style="margin-top:14px;line-height:1.5">Стрик — дни подряд, когда в общак что-то покупали. ' +
+      '<p class="muted" style="margin-top:14px;line-height:1.5">Стрик — дни подряд, когда соседи что-то покупали. ' +
       "Пропустили день — огонь гаснет. Квест общий и меняется каждый понедельник.</p>";
   }
 
@@ -1387,22 +1387,22 @@
       amountText: money(row.amount),
       currency: currency(),
       joke: (state.data.news && state.data.news[0] && state.data.news[0].text) || "спасибо за вклад",
-      totalsLabel: "общак " + money(state.data.totals_all.total) + "\u00a0" + currency()
+      totalsLabel: "всего " + money(state.data.totals_all.total) + "\u00a0" + currency()
     });
-    share.shareImage(canvas, "obshak-chek.png", row.title + " — " + money(row.amount) + "\u00a0" + currency());
+    share.shareImage(canvas, "sosedi-chek.png", row.title + " — " + money(row.amount) + "\u00a0" + currency());
   }
 
   function shareCertificate(memberKey) {
     var row = leaderRow(memberKey);
     var canvas = share.certificateCanvas({
-      title: "Участник общака",
+      title: "Участник",
       memberKey: memberKey,
       memberName: memberName(memberKey),
       amountText: money(row.total),
       currency: currency(),
       periodLabel: "вложено за всё время • вкладок: " + row.count
     });
-    share.shareImage(canvas, "obshak-gramota.png", memberName(memberKey) + " — " + money(row.total) + "\u00a0" + currency());
+    share.shareImage(canvas, "sosedi-gramota.png", memberName(memberKey) + " — " + money(row.total) + "\u00a0" + currency());
   }
 
   // --- события ----------------------------------------------------------
@@ -1510,10 +1510,10 @@
     window.setInterval(function () { el.app.setAttribute("data-time", timeOfDay()); }, 60000);
 
     if (!tg || !tg.initData) {
-      showBootError("Открой общак кнопкой в беседе с Тимуром");
+      showBootError("Открой «Соседей» кнопкой в беседе с Тимуром");
       renderPicker();
       setPanel({ title: "НЕТ ДОСТУПА", body: function () {
-        return '<div class="empty">Миниапп открывается из Telegram. Зайди в беседу и нажми «Открыть общак».</div>';
+        return '<div class="empty">Миниапп открывается из Telegram. Зайди в беседу и нажми «Открыть Соседей».</div>';
       } });
       return;
     }
