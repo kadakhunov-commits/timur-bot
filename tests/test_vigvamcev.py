@@ -429,6 +429,41 @@ def test_service_reuses_ready_draft_without_regenerating_image(tmp_path: Path) -
     assert CORPUS_ROOT / "references" / "clones.jpg" in image_client.reference_paths
 
 
+def test_retry_replaces_invalid_saved_candidate_before_marking_draft_ready(tmp_path: Path) -> None:
+    invalid = replace(
+        _candidate(),
+        clone_name="Несуществословцев",
+        source_word="несуществослов",
+    )
+    memory = {
+        "config": {
+            "vigvamcev": {
+                "post_no": 22,
+                "experiment_no": 44,
+                "draft": {
+                    "status": "failed",
+                    "candidate": invalid.to_dict(),
+                },
+            }
+        }
+    }
+    text_calls = 0
+
+    async def text_request(_prompt: str, _max_tokens: int) -> str:
+        nonlocal text_calls
+        text_calls += 1
+        return json.dumps(_candidate().to_dict(), ensure_ascii=False)
+
+    service, state, _ = _service(tmp_path, memory=memory, text_request_fn=text_request)
+
+    prepared = asyncio.run(service.prepare_draft())
+
+    assert text_calls == 1
+    assert prepared.candidate.source_word == "фотон"
+    assert state["config"]["vigvamcev"]["draft"]["status"] == "ready"
+    assert state["config"]["vigvamcev"]["draft"]["candidate"]["source_word"] == "фотон"
+
+
 class _OwnerPreviewMessage:
     def __init__(self, text: str) -> None:
         self.text = text

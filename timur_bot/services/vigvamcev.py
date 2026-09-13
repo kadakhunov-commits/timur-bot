@@ -957,7 +957,12 @@ class VigvamcevService:
     async def _candidate(self, memory: dict[str, Any], state: dict[str, Any], *, force_new: bool) -> VigvamcevCandidate:
         if not force_new:
             current = self._candidate_from_state(state)
-            if current:
+            if current and not validate_candidate(
+                current,
+                state=state,
+                corpus=self.corpus,
+                settings=self.settings,
+            ):
                 return current
         post_no = int(state.get("post_no", 22) or 22) + 1
         experiment_no = int(state.get("experiment_no", 44) or 44) + 1
