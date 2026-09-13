@@ -25,7 +25,7 @@ def test_register_handlers_smoke() -> None:
     app = DummyApp()
     register_handlers(app)
 
-    assert len(app.handlers) == 52
+    assert len(app.handlers) == 55
     assert any(isinstance(h, MessageReactionHandler) for h in app.handlers)
 
     commands = []
@@ -45,6 +45,8 @@ def test_register_handlers_smoke() -> None:
             "panel",
             "miniapp",
             "miniappdebug",
+            "obshak",
+            "obshakreset",
             "billhelp",
             "billquote",
             "billsetup",
@@ -85,6 +87,7 @@ def test_register_handlers_smoke() -> None:
 def test_post_init_does_not_eagerly_warm_secure_model() -> None:
     application = SimpleNamespace()
     with (
+        patch.object(runner, "setup_obshak_menu_button", new=AsyncMock()) as setup_menu,
         patch.object(runner, "start_life_loop", new=AsyncMock()) as start_life,
         patch.object(runner, "start_funny_scan_loop", new=AsyncMock()) as start_funny,
         patch.object(runner, "start_rolling_memory_loop", new=AsyncMock()) as start_memory,
@@ -93,6 +96,7 @@ def test_post_init_does_not_eagerly_warm_secure_model() -> None:
     ):
         asyncio.run(runner._post_init(application))
 
+    setup_menu.assert_awaited_once_with(application)
     start_life.assert_awaited_once_with(application)
     start_vigvam.assert_awaited_once_with(application)
     start_funny.assert_awaited_once_with(application)

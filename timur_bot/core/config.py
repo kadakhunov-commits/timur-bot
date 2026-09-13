@@ -81,6 +81,8 @@ class AppConfig:
     funny_scan_defaults: Dict[str, Any]
     funny_scan_lexicon: Dict[str, Any]
     mood_events_catalog: Dict[str, Any]
+    obshak_defaults: Dict[str, Any]
+    obshak_path: Path
 
 
 def _read_yaml(path: Path) -> Dict[str, Any]:
@@ -330,6 +332,241 @@ def _normalize_mood_events_catalog(raw: Any) -> Dict[str, Any]:
     }
 
 
+DEFAULT_OBSHAK_MEMBERS: List[Dict[str, str]] = [
+    {"key": "rustem", "name": "Рустем", "color": "#3ddc97", "avatar": "rustem"},
+    {"key": "kadyr", "name": "Кадыр", "color": "#ffb347", "avatar": "kadyr"},
+    {"key": "dilyara", "name": "Диляра", "color": "#ff6b9d", "avatar": "dilyara"},
+    {"key": "amir", "name": "Амир", "color": "#6bb8ff", "avatar": "amir"},
+]
+
+DEFAULT_OBSHAK_CATEGORIES: List[Dict[str, str]] = [
+    {"key": "food", "name": "Еда", "icon": "jar"},
+    {"key": "household", "name": "Быт", "icon": "soap"},
+    {"key": "drinks", "name": "Напитки", "icon": "bottle"},
+    {"key": "fun", "name": "Веселье", "icon": "spark"},
+    {"key": "other", "name": "Прочее", "icon": "box"},
+]
+
+DEFAULT_OBSHAK_NEWS: Dict[str, List[str]] = {
+    "sponsor_week": ["СПОНСОР НЕДЕЛИ: {name} — {amount} {currency}"],
+    "frequent_item": ["ХИТ ОБЩАКА: {item} — уже {count} раз"],
+    "big_purchase": ["РЕКОРД: {name} выложил {amount} {currency} за раз"],
+    "night_owl": ["НОЧНОЙ ДОЗОР: {name} закупается в {time}"],
+    "idle": ["ТИШИНА НА КУХНЕ: покупок не было {days} дн."],
+    "starter": ["Общак открыт. Первый вклад — {name}"],
+}
+
+DEFAULT_OBSHAK_JAR_LEVELS: List[Dict[str, Any]] = [
+    {"name": "Пустая банка", "threshold": 0},
+    {"name": "На доширак", "threshold": 1000},
+    {"name": "На пельмени", "threshold": 3000},
+    {"name": "На шашлык", "threshold": 7000},
+    {"name": "На новогодний стол", "threshold": 15000},
+    {"name": "Общацкий магнат", "threshold": 30000},
+]
+
+DEFAULT_OBSHAK_PET_LEVELS: List[Dict[str, Any]] = [
+    {"name": "Котёнок", "threshold": 0},
+    {"name": "Молодой кот", "threshold": 10},
+    {"name": "Упитанный кот", "threshold": 40},
+    {"name": "Кот-барон", "threshold": 120},
+    {"name": "Легенда общака", "threshold": 300},
+]
+
+DEFAULT_OBSHAK_PET_PHRASES: Dict[str, List[str]] = {
+    "happy": ["мур. хороший сегодня общак", "я всё вижу. и одобряю", "кормите общак, кормите меня"],
+    "proud": ["уважаю. это был серьёзный вклад", "за такое я даже мурлыкну"],
+    "bored": ["что-то вы затихли. майонез кончается", "может, хоть хлеба купите?"],
+    "hungry": ["в холодильнике мышь повесилась", "я не наглый, я голодный"],
+}
+
+DEFAULT_OBSHAK_ACHIEVEMENTS: Dict[str, int] = {
+    "big_one": 1000,
+    "collector_categories": 5,
+    "repeat_title_count": 5,
+    "patron_month_count": 10,
+    "stability_weeks": 4,
+    "veteran_days": 100,
+    "night_from": 0,
+    "night_to": 5,
+    "early_from": 6,
+    "early_to": 8,
+}
+
+DEFAULT_OBSHAK_QUESTS: List[Dict[str, Any]] = [
+    {"key": "days", "title": "Закупиться в три разных дня", "target": 3},
+    {"key": "household", "title": "Закрыть быт: что-то из «Быта»", "target": 1},
+    {"key": "everyone", "title": "Отметиться всем четверым", "target": 4},
+    {"key": "amount", "title": "Собрать 3 000 ₽ за неделю", "target": 3000},
+]
+
+DEFAULT_OBSHAK_ROASTS: Dict[str, List[str]] = {
+    "zero": ["{name}, ноль покупок. ты вообще тут живёшь?"],
+    "absent": ["{name}, {days} дней без вклада. общак начал забывать твоё имя"],
+    "last_place": ["{name}, ты последний в рейтинге. даже я вложил больше"],
+    "same_item": ["{item} ×{count}. {name}, ты в порядке?"],
+    "big_spender": ["{name}, ты снова всех содержишь. научись говорить «нет»"],
+    "night": ["{name} в {time} по магазинам. ночной дозор, как всегда"],
+    "default": ["{name}, общак ждёт твоих подвигов"],
+}
+
+DEFAULT_OBSHAK_LIGHT_PHRASES: List[str] = [
+    "мяу. я тут вообще-то читал",
+    "светло — значит можно жрать",
+]
+
+DEFAULT_OBSHAK_RECEIPT_JOKES: List[str] = [
+    "майонез одобрен администрацией",
+    "общага благодарит за вклад",
+    "внесено в летопись общака",
+]
+
+
+def _as_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _normalize_named_levels(raw: Any, fallback: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    items = raw if isinstance(raw, list) else []
+    levels: List[Dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name", "")).strip()
+        if not name:
+            continue
+        levels.append({"name": name, "threshold": max(0, _as_int(item.get("threshold"), 0))})
+    if not levels:
+        return [dict(entry) for entry in fallback]
+    levels.sort(key=lambda entry: entry["threshold"])
+    return levels
+
+
+def _normalize_obshak_defaults(raw: Any) -> Dict[str, Any]:
+    data = raw if isinstance(raw, dict) else {}
+
+    members_raw = data.get("members") if isinstance(data.get("members"), list) else []
+    members: List[Dict[str, str]] = []
+    seen_keys: Set[str] = set()
+    for item in members_raw:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("key", "")).strip()
+        if not key or key in seen_keys:
+            continue
+        seen_keys.add(key)
+        members.append(
+            {
+                "key": key,
+                "name": str(item.get("name", key)).strip() or key,
+                "color": str(item.get("color", "#8b90a3")).strip() or "#8b90a3",
+                "avatar": str(item.get("avatar", key)).strip() or key,
+            }
+        )
+    if not members:
+        members = [dict(entry) for entry in DEFAULT_OBSHAK_MEMBERS]
+
+    categories_raw = data.get("categories") if isinstance(data.get("categories"), list) else []
+    categories: List[Dict[str, str]] = []
+    seen_categories: Set[str] = set()
+    for item in categories_raw:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("key", "")).strip()
+        if not key or key in seen_categories:
+            continue
+        seen_categories.add(key)
+        categories.append(
+            {
+                "key": key,
+                "name": str(item.get("name", key)).strip() or key,
+                "icon": str(item.get("icon", "box")).strip() or "box",
+            }
+        )
+    if not categories:
+        categories = [dict(entry) for entry in DEFAULT_OBSHAK_CATEGORIES]
+
+    pet_raw = data.get("pet") if isinstance(data.get("pet"), dict) else {}
+    phrases_raw = pet_raw.get("phrases") if isinstance(pet_raw.get("phrases"), dict) else {}
+    phrases: Dict[str, List[str]] = {}
+    for mood, fallback_phrases in DEFAULT_OBSHAK_PET_PHRASES.items():
+        given = _coerce_str_list(phrases_raw.get(mood))
+        phrases[mood] = given or list(fallback_phrases)
+
+    achievements_raw = data.get("achievements") if isinstance(data.get("achievements"), dict) else {}
+    achievements = {
+        key: max(0, _as_int(achievements_raw.get(key), default))
+        for key, default in DEFAULT_OBSHAK_ACHIEVEMENTS.items()
+    }
+
+    news_raw = data.get("news") if isinstance(data.get("news"), dict) else {}
+    news: Dict[str, List[str]] = {}
+    for key, fallback_templates in DEFAULT_OBSHAK_NEWS.items():
+        given = _coerce_str_list(news_raw.get(key))
+        news[key] = given or list(fallback_templates)
+
+    quests_raw = data.get("weekly_quests") if isinstance(data.get("weekly_quests"), list) else []
+    weekly_quests: List[Dict[str, Any]] = []
+    for item in quests_raw:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("key", "")).strip()
+        if not key:
+            continue
+        weekly_quests.append(
+            {
+                "key": key,
+                "title": str(item.get("title", key)).strip() or key,
+                "target": max(1, _as_int(item.get("target"), 1)),
+            }
+        )
+    if not weekly_quests:
+        weekly_quests = [dict(entry) for entry in DEFAULT_OBSHAK_QUESTS]
+
+    roasts_raw = data.get("roasts") if isinstance(data.get("roasts"), dict) else {}
+    roasts: Dict[str, List[str]] = {}
+    for key, fallback_templates in DEFAULT_OBSHAK_ROASTS.items():
+        given = _coerce_str_list(roasts_raw.get(key))
+        roasts[key] = given or list(fallback_templates)
+
+    weather_raw = data.get("weather") if isinstance(data.get("weather"), dict) else {}
+
+    return {
+        "currency": str(data.get("currency", "₽")).strip() or "₽",
+        "currency_short": str(data.get("currency_short", "руб")).strip() or "руб",
+        "chat_id": _as_int(data.get("chat_id"), 0),
+        "pin_group_card": bool(data.get("pin_group_card", False)),
+        "timezone": str(data.get("timezone", "Europe/Moscow")).strip() or "Europe/Moscow",
+        "calendar_weeks": max(1, min(52, _as_int(data.get("calendar_weeks"), 8))),
+        "members": members,
+        "categories": categories,
+        "quick_titles": _coerce_str_list(data.get("quick_titles")),
+        "receipt_jokes": _coerce_str_list(data.get("receipt_jokes")) or list(DEFAULT_OBSHAK_RECEIPT_JOKES),
+        "jar_levels": _normalize_named_levels(data.get("jar_levels"), DEFAULT_OBSHAK_JAR_LEVELS),
+        "pet": {
+            "name": str(pet_raw.get("name", "Барсик")).strip() or "Барсик",
+            "levels": _normalize_named_levels(pet_raw.get("levels"), DEFAULT_OBSHAK_PET_LEVELS),
+            "phrases": phrases,
+        },
+        "achievements": achievements,
+        "poke_phrases": _coerce_str_list(data.get("poke_phrases"))
+        or ["ну ты чё, мы же свои", "общак всё помнит", "скинь, не позорься"],
+        "news": news,
+        "weekly_quests": weekly_quests,
+        "roasts": roasts,
+        "light_phrases": _coerce_str_list(data.get("light_phrases"))
+        or list(DEFAULT_OBSHAK_LIGHT_PHRASES),
+        "weather": {
+            "enabled": bool(weather_raw.get("enabled", True)),
+            "city": str(weather_raw.get("city", "Moscow")).strip() or "Moscow",
+            "cache_minutes": max(5, min(360, _as_int(weather_raw.get("cache_minutes"), 30))),
+        },
+    }
+
+
 def load_app_config(base_dir: Path | None = None) -> AppConfig:
     root = (base_dir or Path(__file__).resolve().parents[2]).resolve()
     load_dotenv(root / ".env")
@@ -339,6 +576,7 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
     runtime = _read_yaml(root / "config" / "runtime.yaml")
     mood_events_raw = _read_yaml_optional(root / "config" / "mood_events.yaml")
     vigvamcev_defaults = _read_yaml_optional(root / "config" / "vigvamcev.yaml")
+    obshak_raw = _read_yaml_optional(root / "config" / "obshak.yaml")
 
     telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
@@ -394,12 +632,14 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
     bot_rivals = _normalize_bot_rivals(persona.get("bot_rivals"))
     funny_scan_lexicon = _normalize_funny_scan_lexicon(lexicon.get("funny_scan_lexicon"))
     mood_events_catalog = _normalize_mood_events_catalog(mood_events_raw)
+    obshak_defaults = _normalize_obshak_defaults(obshak_raw)
 
     active_mode = str(defaults.get("active_mode", "default"))
     if active_mode not in modes:
         active_mode = "default" if "default" in modes else next(iter(modes.keys()))
     memory_path_env = os.getenv("MEMORY_PATH", "").strip()
     billing_path_env = os.getenv("BILLING_PATH", "").strip()
+    obshak_path_env = os.getenv("OBSHAK_PATH", "").strip()
 
     owner_id = int(runtime.get("owner_id", 428469927))
     owner_ids_raw = runtime.get("owner_ids") if isinstance(runtime.get("owner_ids"), list) else []
@@ -428,6 +668,7 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
         base_dir=root,
         memory_path=Path(memory_path_env) if memory_path_env else root / "memory.json",
         billing_path=Path(billing_path_env) if billing_path_env else root / "billing_state.json",
+        obshak_path=Path(obshak_path_env) if obshak_path_env else root / "data" / "obshak.json",
         telegram_bot_token=telegram_bot_token,
         openai_api_key=openai_api_key,
         openai_base_url=openai_base_url,
@@ -486,4 +727,5 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
         funny_scan_defaults=funny_scan_defaults,
         funny_scan_lexicon=funny_scan_lexicon,
         mood_events_catalog=mood_events_catalog,
+        obshak_defaults=obshak_defaults,
     )

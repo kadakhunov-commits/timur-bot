@@ -20,6 +20,7 @@ from timur_bot.handlers.billing import (
 )
 from timur_bot.handlers.chat import command_memory_tap, photo_handler, reaction_handler, start_cmd, story_cmd, summary_cmd, text_handler
 from timur_bot.handlers.noire import noire_cmd
+from timur_bot.handlers.obshak import obshak_cmd, obshak_group_welcome, obshak_reset_cmd
 from timur_bot.handlers.secure import secure_auto_photo_handler, secure_cmd
 from timur_bot.handlers.vigvamcev import vigvamcev_cmd
 from timur_bot.handlers.owner import (
@@ -63,6 +64,9 @@ def register_handlers(application) -> None:
     application.add_handler(CommandHandler("panel", admin_cmd))
     application.add_handler(CommandHandler("miniapp", miniapp_cmd))
     application.add_handler(CommandHandler("miniappdebug", miniappdebug_cmd))
+    application.add_handler(CommandHandler("obshak", obshak_cmd))
+    application.add_handler(CommandHandler("obshakreset", obshak_reset_cmd))
+    application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, obshak_group_welcome))
     application.add_handler(CommandHandler("billhelp", billhelp_cmd))
     application.add_handler(CommandHandler("billquote", billquote_cmd))
     application.add_handler(CommandHandler("billsetup", billsetup_cmd))

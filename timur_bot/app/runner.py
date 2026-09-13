@@ -5,6 +5,7 @@ from timur_bot.app.router import register_handlers
 from timur_bot.services.bot_logic import (
     TELEGRAM_BOT_TOKEN,
     logger,
+    setup_obshak_menu_button,
     start_funny_scan_loop,
     start_life_loop,
     start_rolling_memory_loop,
@@ -17,6 +18,7 @@ from timur_bot.services.bot_logic import (
 
 
 async def _post_init(application: Application) -> None:
+    await setup_obshak_menu_button(application)
     await start_life_loop(application)
     await start_vigvamcev_loop(application)
     await start_funny_scan_loop(application)

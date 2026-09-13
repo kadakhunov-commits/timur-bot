@@ -36,9 +36,26 @@ def test_miniapp_injects_client_meta_script(monkeypatch) -> None:
     assert '"environment": "preview"' in html
 
 
-def test_launch_redirect_preserves_state() -> None:
+def test_legacy_admin_page_is_still_served() -> None:
+    client = app.test_client()
+    response = client.get("/admin-web")
+
+    assert response.status_code == 200
+    assert "window.__TIMUR_MINIAPP_META__" in response.get_data(as_text=True)
+
+
+def test_launch_redirect_moves_legacy_panel_to_admin_web() -> None:
+    # Старые ссылки на /miniapp/launch теперь ведут на прежнюю админ-панель.
     client = app.test_client()
     response = client.get("/miniapp/launch?state=test-state")
 
     assert response.status_code == 302
-    assert response.headers["Location"].endswith("/miniapp?state=test-state")
+    assert response.headers["Location"].endswith("/admin-web?state=test-state")
+
+
+def test_legacy_launch_redirect_preserves_state() -> None:
+    client = app.test_client()
+    response = client.get("/admin-web/launch?state=test-state")
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/admin-web?state=test-state")

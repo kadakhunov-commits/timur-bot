@@ -15,11 +15,11 @@ import time
 import uuid
 import weakref
 from contextlib import nullcontext
-from urllib.parse import urlencode, urlsplit, urlunsplit, parse_qsl
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 from billing_system import BillingEngine, BillingError
@@ -29,6 +29,7 @@ from telegram import (
     InlineKeyboardMarkup,
     InputFile,
     KeyboardButton,
+    MenuButtonWebApp,
     Message,
     ReplyKeyboardMarkup,
     ReplyKeyboardRemove,
@@ -38,6 +39,7 @@ from telegram import (
 from telegram.constants import ChatAction
 from telegram.error import BadRequest, Forbidden, NetworkError, RetryAfter, TelegramError, TimedOut
 from telegram.ext import (
+    Application,
     ContextTypes,
 )
 from timur_bot.core.config import ConfigError, load_app_config
@@ -156,6 +158,8 @@ from timur_bot.services.episodes import (
     recall_episodes,
 )
 from timur_bot.services import feature_gate
+from timur_bot.services import obshak as obshak_service
+from timur_bot.services import obshak_flavor
 from timur_bot.services.participant_memory import (
     build_participant_dossier,
     learn_participant_facts,
@@ -229,6 +233,8 @@ OPENAI_BASE_URL = APP_CONFIG.openai_base_url
 POLZA_API_KEY = APP_CONFIG.polza_api_key
 GEMINI_API_KEY = APP_CONFIG.gemini_api_key
 MINIAPP_URL = APP_CONFIG.miniapp_url
+OBSHAK_DEFAULTS = APP_CONFIG.obshak_defaults
+OBSHAK_PATH = APP_CONFIG.obshak_path
 
 TEXT_TRANSPORT_TIMEOUT_SECONDS = 9.0
 POLZA_IGNORED_TEXT_PROVIDERS = ("DeepInfra",)
@@ -7666,6 +7672,174 @@ async def miniappdebug_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             ]
         )
     )
+
+
+def _obshak_store() -> Dict[str, Any]:
+    return obshak_service.load_state(OBSHAK_PATH, OBSHAK_DEFAULTS)
+
+
+def obshak_deep_link(bot_username: str, start: str = "home") -> str:
+    """Ссылка, открывающая Main Mini App из любого чата (web_app-кнопки в группах нельзя)."""
+    return f"https://t.me/{bot_username}?startapp={quote(start)}"
+
+
+async def _obshak_bot_username(context: ContextTypes.DEFAULT_TYPE) -> str:
+    username = getattr(context.bot, "username", "") or ""
+    if username:
+        return username
+    try:
+        me = await context.bot.get_me()
+    except TelegramError:
+        return ""
+    return me.username or ""
+
+
+def _obshak_cat_line(state: Dict[str, Any], member_id: Optional[str]) -> str:
+    if not member_id:
+        return ""
+    try:
+        barb = obshak_flavor.roast(state, OBSHAK_DEFAULTS, member_id)
+    except Exception:  # noqa: BLE001 — подкол не повод ронять команду
+        return ""
+    if not barb or not barb.get("text"):
+        return ""
+    pet_name = str((OBSHAK_DEFAULTS.get("pet") or {}).get("name") or "Кот")
+    return f"🐈 {pet_name}: {barb['text']}"
+
+
+def _obshak_summary_text(state: Dict[str, Any], member_id: Optional[str] = None) -> str:
+    currency = str(OBSHAK_DEFAULTS.get("currency") or "₽")
+    totals = obshak_service.totals(state)
+    if not totals["count"]:
+        lines = ["общак пока пуст.", "открой кухню и запиши первую покупку — она появится в летописи."]
+    else:
+        lines = [f"общак: {obshak_flavor.format_money(totals['total'])} {currency} · покупок {totals['count']}"]
+        medals = ["🥇", "🥈", "🥉"]
+        for index, row in enumerate(obshak_service.leaderboard(state)[:3]):
+            lines.append(
+                f"{medals[index]} {row['name']} — {obshak_flavor.format_money(row['total'])} {currency}"
+            )
+        jar = obshak_flavor.jar_state(state, OBSHAK_DEFAULTS)
+        if jar.get("next"):
+            lines.append(
+                f"банка: {jar['level']['name']} — до «{jar['next']['name']}» "
+                f"{obshak_flavor.format_money(jar['remaining'])} {currency}"
+            )
+        open_wishes = obshak_service.wishlist_open(state)
+        if open_wishes:
+            lines.append(f"надо купить: {len(open_wishes)} шт — «{open_wishes[0]['title']}»")
+    cat_line = _obshak_cat_line(state, member_id)
+    if cat_line:
+        lines.append(cat_line)
+    return "\n".join(lines)
+
+
+def _obshak_keyboard(bot_username: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("открыть общак", url=obshak_deep_link(bot_username, "home"))],
+            [InlineKeyboardButton("записать покупку", url=obshak_deep_link(bot_username, "add"))],
+        ]
+    )
+
+
+async def _send_obshak_card(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    *,
+    member_id: Optional[str] = None,
+) -> None:
+    if not MINIAPP_URL:
+        await context.bot.send_message(chat_id, "общак не настроен: добавь MINIAPP_URL в .env")
+        return
+    bot_username = await _obshak_bot_username(context)
+    if not bot_username:
+        await context.bot.send_message(chat_id, "не удалось получить username бота")
+        return
+    state = _obshak_store()
+    sent = await context.bot.send_message(
+        chat_id,
+        _obshak_summary_text(state, member_id) + "\n\nкухня, банка, кот и вишлист — внутри.",
+        reply_markup=_obshak_keyboard(bot_username),
+        disable_web_page_preview=True,
+    )
+    if OBSHAK_DEFAULTS.get("pin_group_card") and int(chat_id) < 0:
+        try:
+            await sent.pin(disable_notification=True)
+        except TelegramError as exc:
+            logger.warning("obshak: не удалось закрепить карточку в %s: %s", chat_id, exc)
+
+
+async def obshak_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.effective_message
+    if not message:
+        return
+    member_id = None
+    user = update.effective_user
+    if user is not None:
+        try:
+            member_id = obshak_service.resolve_member_id(_obshak_store(), user.id)
+        except Exception:  # noqa: BLE001 — привязан или нет, карточка всё равно нужна
+            member_id = None
+    await _send_obshak_card(context, int(message.chat_id), member_id=member_id)
+
+
+async def obshak_group_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Когда бота добавляют в беседу — сразу показываем кнопку общака."""
+    message = update.effective_message
+    if not message or not message.new_chat_members:
+        return
+    bot_id = getattr(context.bot, "id", None)
+    if bot_id is None:
+        try:
+            bot_id = (await context.bot.get_me()).id
+        except TelegramError:
+            return
+    if not any(member.id == bot_id for member in message.new_chat_members):
+        return
+    await _send_obshak_card(context, int(message.chat_id))
+
+
+def _obshak_links_text(state: Dict[str, Any]) -> str:
+    lines = ["привязка аватаров общака:"]
+    for member_id, entry in obshak_service.member_map(state).items():
+        linked = entry.get("telegram_id")
+        lines.append(f"{member_id} ({entry.get('name')}) — {'id ' + str(linked) if linked else 'свободен'}")
+    return "\n".join(lines)
+
+
+async def obshak_reset_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    del context
+    if not _is_owner(update):
+        return
+    message = update.effective_message
+    if not message:
+        return
+    parts = (message.text or "").split(maxsplit=1)
+    target = parts[1].strip() if len(parts) > 1 else ""
+    with obshak_service.lock():
+        state = _obshak_store()
+        if not target:
+            await message.reply_text(_obshak_links_text(state))
+            return
+        if not obshak_service.unlink_member(state, target):
+            await message.reply_text(f"не знаю участника «{target}»\n\n{_obshak_links_text(state)}")
+            return
+        obshak_service.save_state(OBSHAK_PATH, state)
+    await message.reply_text(f"аватар {target} освобождён — пусть человек выберет себя заново")
+
+
+async def setup_obshak_menu_button(application: Application) -> None:
+    """Делает общак главным миниаппом бота: без этого deep-link из беседы не откроет приложение."""
+    if not MINIAPP_URL:
+        logger.info("общак: MINIAPP_URL пуст, кнопку меню не настраиваю")
+        return
+    try:
+        await application.bot.set_chat_menu_button(
+            menu_button=MenuButtonWebApp(text="Общак", web_app=WebAppInfo(url=MINIAPP_URL))
+        )
+    except TelegramError as exc:
+        logger.warning("общак: не удалось настроить кнопку меню: %s", exc)
 
 
 async def _handle_admin_pending_text(

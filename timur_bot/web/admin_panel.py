@@ -5,15 +5,19 @@ import os
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from flask import Flask, Response, redirect, request
+from flask import Flask, Response, redirect, request, send_from_directory
 
+from timur_bot.web.obshak_api import obshak_api
 from timur_bot.web.runtime_meta import get_runtime_meta
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
-MINIAPP_INDEX = ROOT_DIR / "miniapp" / "public" / "index.html"
+MINIAPP_PUBLIC = ROOT_DIR / "miniapp" / "public"
+OBSHAK_INDEX = MINIAPP_PUBLIC / "obshak.html"
+LEGACY_ADMIN_INDEX = MINIAPP_PUBLIC / "admin.html"
 
 app = Flask(__name__)
+app.register_blueprint(obshak_api)
 
 
 def _with_query_param(url: str, key: str, value: str) -> str:
@@ -23,8 +27,8 @@ def _with_query_param(url: str, key: str, value: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
 
 
-def _read_index() -> str:
-    return MINIAPP_INDEX.read_text(encoding="utf-8")
+def _read_index(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
 
 
 def _build_client_meta() -> dict[str, object]:
@@ -46,6 +50,21 @@ def _build_client_meta() -> dict[str, object]:
         "buildLabel": build_label,
         "source": "git" if meta.source in {"git", "env"} else "runtime",
     }
+
+
+def _render_page(path: Path) -> Response:
+    html = _read_index(path)
+    banner = "<script>window.__TIMUR_MINIAPP_META__ = " + json.dumps(_build_client_meta(), ensure_ascii=False) + ";</script>"
+    html = html.replace("</head>", f"{banner}\n</head>", 1)
+    return Response(
+        html,
+        status=200,
+        mimetype="text/html",
+        headers={
+            # Состояние миниаппа разное для разных чатов; HTML не кэшируем.
+            "Cache-Control": "no-store, max-age=0",
+        },
+    )
 
 
 @app.get("/")
@@ -73,26 +92,37 @@ def version() -> dict[str, str]:
 
 @app.get("/miniapp")
 def miniapp() -> Response:
-    html = _read_index()
-    banner = "<script>window.__TIMUR_MINIAPP_META__ = " + json.dumps(_build_client_meta(), ensure_ascii=False) + ";</script>"
-    html = html.replace("</head>", f"{banner}\n</head>", 1)
-    return Response(
-        html,
-        status=200,
-        mimetype="text/html",
-        headers={
-            # Mini App state may differ per chat; disable HTML caching.
-            "Cache-Control": "no-store, max-age=0",
-        },
-    )
+    return _render_page(OBSHAK_INDEX)
+
+
+@app.get("/miniapp/assets/<path:filename>")
+def miniapp_asset(filename: str) -> Response:
+    response = send_from_directory(MINIAPP_PUBLIC, filename)
+    # Ассеты небольшие; ревалидация надёжнее, чем залипший старый JS после деплоя.
+    response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
+@app.get("/admin-web")
+def legacy_admin() -> Response:
+    return _render_page(LEGACY_ADMIN_INDEX)
+
+
+@app.get("/admin-web/launch")
+def legacy_admin_launch() -> Response:
+    state = request.args.get("state", "")
+    if not state:
+        return redirect("/admin-web", code=302)
+    return redirect(_with_query_param("/admin-web", "state", state), code=302)
 
 
 @app.get("/miniapp/launch")
 def miniapp_launch() -> Response:
+    # Старые ссылки на запуск админ-панели ведут на неё же под новым адресом.
     state = request.args.get("state", "")
     if not state:
-        return redirect("/miniapp", code=302)
-    return redirect(_with_query_param("/miniapp", "state", state), code=302)
+        return redirect("/admin-web", code=302)
+    return redirect(_with_query_param("/admin-web", "state", state), code=302)
 
 
 def main() -> None:

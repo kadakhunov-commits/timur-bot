@@ -14,7 +14,7 @@ Timur Bot — Telegram-бот с заданной персоной, кратко
 | `timur_bot/app` | Сборка Telegram-приложения, регистрация handler-ов, старт и остановка фоновых циклов. |
 | `timur_bot/handlers` | Тонкие re-export-обёртки над командами из runtime. Новую логику не следует добавлять сюда без необходимости. |
 | `timur_bot/services` | Runtime, память, юмор, policy, LLM-вызовы, TTS, обработка изображений и чистые доменные функции. |
-| `timur_bot/web` и `miniapp` | Flask-раздача Mini App, версия runtime и браузерная админка. |
+| `timur_bot/web` и `miniapp` | Flask-раздача Mini App (общак), REST `/api/obshak/*`, версия runtime и прежняя браузерная админка на `/admin-web`. |
 | `billing_system.py` | Состояние подписок, entitlement-ы, квоты, мок-платёжный путь и реферальная механика. |
 
 Центральный runtime — `timur_bot/services/bot_logic.py`. Он большой, потому что соединяет Telegram, память, LLM, отправку и фоновые циклы. Новые чистые правила предпочтительно выносить в профильный модуль `services/`, а в `bot_logic.py` оставлять orchestration.
@@ -62,6 +62,37 @@ generation → Pillow composition → draft validation → Telegram send. Неи
 Telegram переводит состояние в `publish_unknown` и блокирует повторную отправку до ручного
 разбора владельцем, чтобы не создать дубль.
 
+## Общак: отдельный миниапп-трекер
+
+`/miniapp` отдаёт «пиксельную кухню» — трекер вкладов в общий котёл для четверых соседей.
+Это независимый от персоны контур: он не читает `memory.json` и не влияет на юмор Тимура.
+Прежняя админ-панель переехала на `/admin-web` и осталась без изменений.
+
+- `config/obshak.yaml` — состав участников, категории, пороги уровней банки и кубков, фразы кота.
+- `timur_bot/services/obshak.py` — единственное хранилище (`data/obshak.json`, env `OBSHAK_PATH`)
+  и домен: расходы, участники, вишлист, запросы денег, лидерборд, ачивки, календарь, CSV.
+  Запись атомарная (`tmp` + `os.replace`), все операции идут под общим `RLock`.
+- `timur_bot/services/obshak_flavor.py` — производные и «вкусовые» срезы: уровни банки,
+  настроение кота, гонка недели, газета-новости, квест недели и подколы кота для конкретного
+  человека. Чистые функции, отдельного состояния нет.
+- `timur_bot/services/obshak_weather.py` — погода для окна кухни (wttr.in без ключа) с кэшем
+  в процессе; сетевые сбои наружу не пробрасываются, миниапп просто покажет обычное небо.
+
+Рулетка «кто идёт в магазин» хранит историю прокруток в самом общаке (`state["roulette"]`) и
+считает веса как `1 / (1 + число походов за 14 дней)` — кто ходил чаще, у того шанс ниже.
+Стрик считается по дням с покупками, квест недели — по номеру ISO-недели из конфига.
+- `timur_bot/web/obshak_auth.py` — проверка Telegram `initData` (HMAC-SHA256, `auth_date` 24 ч).
+- `timur_bot/web/obshak_api.py` — Blueprint `/api/obshak/*`; все данные закрыты initData.
+- `miniapp/public/obshak.html` + `miniapp/public/obshak/*` — сцена кухни, панели, звук, шеринг.
+
+Все расходы и вклады считаются из одного списка `expenses`, поэтому лидерборд, банка, кот,
+ачивки и гонка всегда согласованы. Взаимозачётов по умолчанию нет: общак — это вклады, а
+запросы денег остаются опциональной просьбой с прогрессом.
+
+В беседе Telegram запрещает `web_app`-кнопки, поэтому `/obshak` постит inline-кнопку на
+deep-link `https://t.me/<bot>?startapp=...`. Чтобы он открывал приложение, `_post_init`
+выставляет Main Mini App через `set_chat_menu_button` (`setup_obshak_menu_button`).
+
 ## Юмор: два разных контура
 
 ### Прямой ответ
@@ -89,16 +120,16 @@ Positive-сигналы: сердечная реакция на сообщени
 
 ## Конфигурация и приоритеты
 
-`core/config.py` читает `config/persona.yaml`, `config/lexicon.yaml`, `config/runtime.yaml`, опциональный `config/mood_events.yaml` и `.env`.
+`core/config.py` читает `config/persona.yaml`, `config/lexicon.yaml`, `config/runtime.yaml`, опциональные `config/mood_events.yaml` и `config/obshak.yaml`, а также `.env`.
 
-- Секреты и пути runtime (`TELEGRAM_BOT_TOKEN`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `GEMINI_API_KEY`, `MEMORY_PATH`, `BILLING_PATH`) — только в окружении.
+- Секреты и пути runtime (`TELEGRAM_BOT_TOKEN`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `GEMINI_API_KEY`, `MEMORY_PATH`, `BILLING_PATH`, `OBSHAK_PATH`, `MINIAPP_URL`) — только в окружении.
 - Дефолтная персона, словари, модели и лимиты — в YAML.
 - Оперативные owner-настройки (`/setprompt`, `/setstyle`, `/setheat`, `/mode`) сохраняются в `memory.json` и перекрывают дефолт там, где это предусмотрено runtime.
 - Подписка гейтит глубину памяти, режимы, voice, watermark и дневную квоту через `feature_gate.py`; источник истины по entitlement-ам — `billing_system.py`.
 
 ## Фоновые циклы и внешние возможности
 
-После запуска `app/runner.py` стартует три фоновых цикла: life/mood stories, funny scan и rolling memory. Все они должны останавливаться в `post_shutdown` и не конкурировать с foreground LLM-запросом.
+После запуска `app/runner.py` стартует четыре фоновых цикла: life/mood stories, vigvamcev, funny scan и rolling memory. Все они должны останавливаться в `post_shutdown` и не конкурировать с foreground LLM-запросом.
 
 Другие пользовательские возможности:
 
