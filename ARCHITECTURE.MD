@@ -14,7 +14,7 @@ Timur Bot — Telegram-бот с заданной персоной, кратко
 | `timur_bot/app` | Сборка Telegram-приложения, регистрация handler-ов, старт и остановка фоновых циклов. |
 | `timur_bot/handlers` | Тонкие re-export-обёртки над командами из runtime. Новую логику не следует добавлять сюда без необходимости. |
 | `timur_bot/services` | Runtime, память, юмор, policy, LLM-вызовы, TTS, обработка изображений и чистые доменные функции. |
-| `timur_bot/web` и `miniapp` | Flask-раздача Mini App (общак), REST `/api/obshak/*`, версия runtime и прежняя браузерная админка на `/admin-web`. |
+| `timur_bot/web` и `miniapp` | Flask-раздача Mini App (общак), REST `/api/obshak/*`, версия runtime и прежняя браузерная админка на `/admin-panel`. |
 | `billing_system.py` | Состояние подписок, entitlement-ы, квоты, мок-платёжный путь и реферальная механика. |
 
 Центральный runtime — `timur_bot/services/bot_logic.py`. Он большой, потому что соединяет Telegram, память, LLM, отправку и фоновые циклы. Новые чистые правила предпочтительно выносить в профильный модуль `services/`, а в `bot_logic.py` оставлять orchestration.
@@ -66,7 +66,7 @@ Telegram переводит состояние в `publish_unknown` и блок�
 
 `/miniapp` отдаёт «пиксельную кухню» — трекер вкладов в общий котёл для четверых соседей.
 Это независимый от персоны контур: он не читает `memory.json` и не влияет на юмор Тимура.
-Прежняя админ-панель переехала на `/admin-web` и осталась без изменений.
+Прежняя админ-панель переехала на `/admin-panel` и осталась без изменений. Старые адреса `/admin-web` и `/miniapp/launch` отдают кухню: на них смотрел Main Mini App бота, поэтому deep-link из беседы показывал прежнюю админку.
 
 - `config/obshak.yaml` — состав участников, категории, пороги уровней банки и кубков, фразы кота.
 - `timur_bot/services/obshak.py` — единственное хранилище (`data/obshak.json`, env `OBSHAK_PATH`)

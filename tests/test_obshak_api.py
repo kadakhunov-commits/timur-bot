@@ -328,8 +328,9 @@ def test_pages_are_served(client):
     assert miniapp.status_code == 200
     assert "ОБЩАК" in miniapp.data.decode("utf-8")
     assert miniapp.headers["Cache-Control"] == "no-store, max-age=0"
-    legacy = client.get("/admin-web")
+    legacy = client.get("/admin-panel")
     assert legacy.status_code == 200
+    assert "personaGrid" in legacy.data.decode("utf-8")
     assert client.get("/").status_code == 302
     assert client.get("/healthz").get_json()["status"] == "ok"
 

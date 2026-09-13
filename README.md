@@ -81,7 +81,7 @@ python3 timur_bot.py
 - `amvera.yaml` — основной продовый runtime, который поднимает и бота, и admin miniapp через [run_combined.py](run_combined.py).
 - `amvera-miniapp.yaml` — отдельный admin-only runtime для preview/отладки через [timur_bot/web/admin_panel.py](timur_bot/web/admin_panel.py).
 
-Оба runtime отдают `miniapp/public/obshak.html` через Flask и отключают кеш HTML (`Cache-Control: no-store`), чтобы state для разных чатов не залипал. Прежняя админ-панель лежит рядом (`miniapp/public/admin.html`) и открывается на `/admin-web`.
+Оба runtime отдают `miniapp/public/obshak.html` через Flask и отключают кеш HTML (`Cache-Control: no-store`), чтобы state для разных чатов не залипал. Прежняя админ-панель лежит рядом (`miniapp/public/admin.html`) и открывается на `/admin-panel`. Адрес `/admin-web` (а также `/miniapp/launch`) теперь отдаёт саму кухню: на эти пути смотрел Main Mini App бота, и deep-link из карточки в беседе открывал старую админку.
 
 ### Git -> Amvera -> Mini App
 

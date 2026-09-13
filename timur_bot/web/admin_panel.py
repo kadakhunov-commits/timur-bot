@@ -109,30 +109,39 @@ def miniapp_asset(filename: str) -> Response:
     return response
 
 
+@app.get("/miniapp/launch")
+def miniapp_launch() -> Response:
+    """Старые ссылки «открыть миниапп» отдают кухню.
+
+    Отдаём страницу сразу, без редиректа: клиенты умеют залипать на
+    закэшированном 302 и тогда вместо кухни открывают старое.
+    """
+    return _render_page(OBSHAK_INDEX)
+
+
 @app.get("/admin-web")
+@app.get("/admin-web/launch")
+def legacy_admin_alias() -> Response:
+    """Старый адрес легаси-панели.
+
+    На него смотрел Main Mini App бота: deep-link из карточки в беседе
+    открывал именно этот путь и показывал прежнюю админку. Поэтому теперь
+    здесь кухня, а панель переехала на /admin-panel.
+    """
+    return _render_page(OBSHAK_INDEX)
+
+
+@app.get("/admin-panel")
 def legacy_admin() -> Response:
     return _render_page(LEGACY_ADMIN_INDEX)
 
 
-@app.get("/admin-web/launch")
+@app.get("/admin-panel/launch")
 def legacy_admin_launch() -> Response:
     state = request.args.get("state", "")
     if not state:
-        return _no_store(redirect("/admin-web", code=302))
-    return _no_store(redirect(_with_query_param("/admin-web", "state", state), code=302))
-
-
-@app.get("/miniapp/launch")
-def miniapp_launch() -> Response:
-    """Старые ссылки «открыть миниапп» ведут в общак, а не в прежнюю админ-панель.
-
-    Именно на этот путь смотрели кнопки из старых сообщений, поэтому раньше
-    вместо кухни открывалась legacy-панель.
-    """
-    state = request.args.get("state", "")
-    if not state:
-        return _no_store(redirect("/miniapp", code=302))
-    return _no_store(redirect(_with_query_param("/miniapp", "state", state), code=302))
+        return _no_store(redirect("/admin-panel", code=302))
+    return _no_store(redirect(_with_query_param("/admin-panel", "state", state), code=302))
 
 
 def main() -> None:
