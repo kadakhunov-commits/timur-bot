@@ -427,7 +427,7 @@
     el.pickerRoot.hidden = false;
     el.pickerRoot.innerHTML =
       '<div class="picker">' +
-      '<div class="picker-title">КТО ТЫ В ОБЩАКЕ?</div>' +
+      '<div class="picker-title">КТО ТЫ</div>' +
       '<p class="picker-sub">Выбери свой аватар — это запомнится, и вклады будут считаться на тебя.</p>' +
       '<div class="picker-grid">' +
       members.map(function (member) {
@@ -1291,6 +1291,7 @@
       case "cal-day": openCalendarDay(node.dataset.day); break;
 
       case "pet-pat": sfx.hop(); haptic("light"); celebratePat(); break;
+      case "pick": pick(node.dataset.member); break;
       case "roulette-open": sfx.click(); openRoulette(); break;
       case "roulette-spin": spinRoulette(); break;
       case "quests-open": sfx.click(); openQuests(); break;
