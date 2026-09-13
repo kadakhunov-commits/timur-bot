@@ -76,9 +76,13 @@ def test_links_text_marks_free_and_taken_slots():
 class FakeBot:
     def __init__(self):
         self.menu_calls = []
+        self.command_calls = []
 
     async def set_chat_menu_button(self, menu_button=None):
         self.menu_calls.append(menu_button)
+
+    async def set_my_commands(self, commands):
+        self.command_calls.append(commands)
 
 
 class FakeApplication:
@@ -86,18 +90,22 @@ class FakeApplication:
         self.bot = FakeBot()
 
 
-def test_menu_button_is_configured_when_url_present(monkeypatch):
+def test_menu_button_and_commands_are_configured_when_url_present(monkeypatch):
     monkeypatch.setattr(bot_logic, "MINIAPP_URL", "https://example.com/miniapp")
     application = FakeApplication()
-    asyncio.run(bot_logic.setup_obshak_menu_button(application))
+    asyncio.run(bot_logic.setup_obshak_bot_ui(application))
     assert len(application.bot.menu_calls) == 1
     menu = application.bot.menu_calls[0]
     assert menu.web_app.url == "https://example.com/miniapp"
     assert menu.text == "Общак"
+    commands = [command.command for command in application.bot.command_calls[0]]
+    assert "obshak" in commands
 
 
-def test_menu_button_is_skipped_without_url(monkeypatch):
+def test_commands_are_registered_even_without_miniapp_url(monkeypatch):
     monkeypatch.setattr(bot_logic, "MINIAPP_URL", "")
     application = FakeApplication()
-    asyncio.run(bot_logic.setup_obshak_menu_button(application))
+    asyncio.run(bot_logic.setup_obshak_bot_ui(application))
     assert application.bot.menu_calls == []
+    commands = [command.command for command in application.bot.command_calls[0]]
+    assert commands == ["obshak", "start"]

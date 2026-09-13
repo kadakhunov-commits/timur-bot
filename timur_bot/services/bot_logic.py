@@ -25,6 +25,7 @@ from zoneinfo import ZoneInfo
 from billing_system import BillingEngine, BillingError
 from openai import APIConnectionError, APITimeoutError, RateLimitError, AsyncOpenAI, OpenAI
 from telegram import (
+    BotCommand,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     InputFile,
@@ -7829,8 +7830,22 @@ async def obshak_reset_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await message.reply_text(f"аватар {target} освобождён — пусть человек выберет себя заново")
 
 
-async def setup_obshak_menu_button(application: Application) -> None:
-    """Делает общак главным миниаппом бота: без этого deep-link из беседы не откроет приложение."""
+OBSHAK_BOT_COMMANDS = [
+    BotCommand("obshak", "Общак: кухня, вклады и кто идёт в магазин"),
+    BotCommand("start", "Познакомиться"),
+]
+
+
+async def setup_obshak_bot_ui(application: Application) -> None:
+    """Настраивает бота под общак: список команд в меню и Main Mini App.
+
+    Без списка команд `/obshak` не видно в меню, и в беседе непонятно, как
+    достать кнопку. Без Main Mini App deep-link из беседы не откроет кухню.
+    """
+    try:
+        await application.bot.set_my_commands(OBSHAK_BOT_COMMANDS)
+    except TelegramError as exc:
+        logger.warning("общак: не удалось зарегистрировать команды: %s", exc)
     if not MINIAPP_URL:
         logger.info("общак: MINIAPP_URL пуст, кнопку меню не настраиваю")
         return

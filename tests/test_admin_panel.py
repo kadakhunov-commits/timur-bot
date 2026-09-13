@@ -44,13 +44,23 @@ def test_legacy_admin_page_is_still_served() -> None:
     assert "window.__TIMUR_MINIAPP_META__" in response.get_data(as_text=True)
 
 
-def test_launch_redirect_moves_legacy_panel_to_admin_web() -> None:
-    # Старые ссылки на /miniapp/launch теперь ведут на прежнюю админ-панель.
+def test_miniapp_launch_redirects_to_the_obshak_app() -> None:
+    # Старые кнопки «открыть миниапп» били в /miniapp/launch и раньше
+    # открывали legacy-панель — теперь ведут на кухню.
     client = app.test_client()
     response = client.get("/miniapp/launch?state=test-state")
 
     assert response.status_code == 302
-    assert response.headers["Location"].endswith("/admin-web?state=test-state")
+    assert response.headers["Location"].endswith("/miniapp?state=test-state")
+    assert response.headers["Cache-Control"] == "no-store, max-age=0"
+
+
+def test_miniapp_launch_without_state_goes_to_obshak() -> None:
+    client = app.test_client()
+    response = client.get("/miniapp/launch")
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/miniapp")
 
 
 def test_legacy_launch_redirect_preserves_state() -> None:

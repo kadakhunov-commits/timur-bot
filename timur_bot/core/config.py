@@ -16,6 +16,23 @@ class ConfigError(RuntimeError):
     pass
 
 
+def _resolve_obshak_path(root: Path) -> Path:
+    """Путь к хранилищу общака.
+
+    На Amvera персистентный диск смонтирован в /data, а рабочая копия кода
+    пересобирается при каждом деплое. Без явного OBSHAK_PATH вклады лежали бы
+    внутри контейнера и стирались вместе с ним, поэтому при наличии /data
+    по умолчанию пишем туда.
+    """
+    explicit = os.getenv("OBSHAK_PATH", "").strip()
+    if explicit:
+        return Path(explicit)
+    persistent = Path("/data")
+    if persistent.is_dir() and os.access(persistent, os.W_OK):
+        return persistent / "obshak.json"
+    return root / "data" / "obshak.json"
+
+
 def _resolve_miniapp_url() -> str:
     raw_url = os.getenv("MINIAPP_URL", "").strip()
     if raw_url and any(host in raw_url for host in DEAD_MINIAPP_HOSTS):
@@ -639,7 +656,6 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
         active_mode = "default" if "default" in modes else next(iter(modes.keys()))
     memory_path_env = os.getenv("MEMORY_PATH", "").strip()
     billing_path_env = os.getenv("BILLING_PATH", "").strip()
-    obshak_path_env = os.getenv("OBSHAK_PATH", "").strip()
 
     owner_id = int(runtime.get("owner_id", 428469927))
     owner_ids_raw = runtime.get("owner_ids") if isinstance(runtime.get("owner_ids"), list) else []
@@ -668,7 +684,7 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
         base_dir=root,
         memory_path=Path(memory_path_env) if memory_path_env else root / "memory.json",
         billing_path=Path(billing_path_env) if billing_path_env else root / "billing_state.json",
-        obshak_path=Path(obshak_path_env) if obshak_path_env else root / "data" / "obshak.json",
+        obshak_path=_resolve_obshak_path(root),
         telegram_bot_token=telegram_bot_token,
         openai_api_key=openai_api_key,
         openai_base_url=openai_base_url,

@@ -67,9 +67,15 @@ def _render_page(path: Path) -> Response:
     )
 
 
+def _no_store(response: Response) -> Response:
+    # 302 тоже не кэшируем: старые клиенты иначе залипают на прежней странице.
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    return response
+
+
 @app.get("/")
 def root() -> Response:
-    return redirect("/miniapp", code=302)
+    return _no_store(redirect("/miniapp", code=302))
 
 
 @app.get("/healthz")
@@ -112,17 +118,21 @@ def legacy_admin() -> Response:
 def legacy_admin_launch() -> Response:
     state = request.args.get("state", "")
     if not state:
-        return redirect("/admin-web", code=302)
-    return redirect(_with_query_param("/admin-web", "state", state), code=302)
+        return _no_store(redirect("/admin-web", code=302))
+    return _no_store(redirect(_with_query_param("/admin-web", "state", state), code=302))
 
 
 @app.get("/miniapp/launch")
 def miniapp_launch() -> Response:
-    # Старые ссылки на запуск админ-панели ведут на неё же под новым адресом.
+    """Старые ссылки «открыть миниапп» ведут в общак, а не в прежнюю админ-панель.
+
+    Именно на этот путь смотрели кнопки из старых сообщений, поэтому раньше
+    вместо кухни открывалась legacy-панель.
+    """
     state = request.args.get("state", "")
     if not state:
-        return redirect("/admin-web", code=302)
-    return redirect(_with_query_param("/admin-web", "state", state), code=302)
+        return _no_store(redirect("/miniapp", code=302))
+    return _no_store(redirect(_with_query_param("/miniapp", "state", state), code=302))
 
 
 def main() -> None:

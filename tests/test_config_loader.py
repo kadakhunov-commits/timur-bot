@@ -159,3 +159,23 @@ def test_load_config_reuses_existing_polza_key_when_base_url_is_polza(
     cfg = load_app_config(tmp_path)
 
     assert cfg.polza_api_key == "existing-polza-key"
+
+
+def test_obshak_path_prefers_env_then_data_then_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "config").mkdir(parents=True, exist_ok=True)
+    _write(
+        tmp_path / "config" / "persona.yaml",
+        'default_system_prompt: "x"\nmodes:\n  default: "default mode"\ndefaults:\n  active_mode: "default"\n',
+    )
+    _write(tmp_path / "config" / "lexicon.yaml", "archetype_lexicon: {}\n")
+    _write(tmp_path / "config" / "runtime.yaml", "models: {}\nlimits: {}\nprobabilities: {}\n")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+
+    monkeypatch.delenv("OBSHAK_PATH", raising=False)
+    assert load_app_config(tmp_path).obshak_path == tmp_path / "data" / "obshak.json"
+
+    monkeypatch.setenv("OBSHAK_PATH", "/tmp/obshak-custom.json")
+    assert load_app_config(tmp_path).obshak_path == Path("/tmp/obshak-custom.json")
