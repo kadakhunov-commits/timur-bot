@@ -555,7 +555,7 @@ def _normalize_obshak_defaults(raw: Any) -> Dict[str, Any]:
         "currency": str(data.get("currency", "₽")).strip() or "₽",
         "currency_short": str(data.get("currency_short", "руб")).strip() or "руб",
         "chat_id": _as_int(data.get("chat_id"), 0),
-        "pin_group_card": bool(data.get("pin_group_card", False)),
+        "pin_group_card": bool(data.get("pin_group_card", True)),
         "timezone": str(data.get("timezone", "Europe/Moscow")).strip() or "Europe/Moscow",
         "calendar_weeks": max(1, min(52, _as_int(data.get("calendar_weeks"), 8))),
         "members": members,

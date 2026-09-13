@@ -7744,11 +7744,15 @@ def _obshak_keyboard(bot_username: str) -> InlineKeyboardMarkup:
     )
 
 
+_OBSHAK_PIN_HINTED: set = set()
+
+
 async def _send_obshak_card(
     context: ContextTypes.DEFAULT_TYPE,
     chat_id: int,
     *,
     member_id: Optional[str] = None,
+    force_pin: bool = False,
 ) -> None:
     if not MINIAPP_URL:
         await context.bot.send_message(chat_id, "общак не настроен: добавь MINIAPP_URL в .env")
@@ -7764,11 +7768,38 @@ async def _send_obshak_card(
         reply_markup=_obshak_keyboard(bot_username),
         disable_web_page_preview=True,
     )
-    if OBSHAK_DEFAULTS.get("pin_group_card") and int(chat_id) < 0:
+    if _obshak_pin_decision(state, chat_id, force=force_pin):
         try:
             await sent.pin(disable_notification=True)
         except TelegramError as exc:
             logger.warning("obshak: не удалось закрепить карточку в %s: %s", chat_id, exc)
+            if int(chat_id) not in _OBSHAK_PIN_HINTED:
+                _OBSHAK_PIN_HINTED.add(int(chat_id))
+                await context.bot.send_message(
+                    chat_id,
+                    "кнопка общака живёт в pinned-сообщении, а закрепить я не могу: выдай боту право "
+                    "«Закреплять сообщения» (админка беседы) и позови /obshak ещё раз.",
+                )
+        else:
+            _obshak_remember_pinned_card(chat_id)
+
+
+def _obshak_pin_decision(state: Dict[str, Any], chat_id: int, *, force: bool = False) -> bool:
+    """Закрепляем только в беседах и только один раз, чтобы не тасовать закреп."""
+    if force:
+        return int(chat_id) < 0
+    if not OBSHAK_DEFAULTS.get("pin_group_card") or int(chat_id) >= 0:
+        return False
+    pinned = (state.get("meta") or {}).get("pinned_cards") or {}
+    return str(chat_id) not in pinned
+
+
+def _obshak_remember_pinned_card(chat_id: int) -> None:
+    with obshak_service.lock():
+        fresh = _obshak_store()
+        meta = fresh.setdefault("meta", {})
+        meta.setdefault("pinned_cards", {})[str(chat_id)] = datetime.now(timezone.utc).isoformat()
+        obshak_service.save_state(OBSHAK_PATH, fresh)
 
 
 async def obshak_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -7782,7 +7813,11 @@ async def obshak_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             member_id = obshak_service.resolve_member_id(_obshak_store(), user.id)
         except Exception:  # noqa: BLE001 — привязан или нет, карточка всё равно нужна
             member_id = None
-    await _send_obshak_card(context, int(message.chat_id), member_id=member_id)
+    # `/obshak pin` перезакрепляет карточку, если прежний pinned потерялся.
+    force_pin = "pin" in (message.text or "").split()[1:]
+    await _send_obshak_card(
+        context, int(message.chat_id), member_id=member_id, force_pin=force_pin
+    )
 
 
 async def obshak_group_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

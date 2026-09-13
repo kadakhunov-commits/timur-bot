@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 os.environ.setdefault("TELEGRAM_BOT_TOKEN", "test-token")
 os.environ.setdefault("OPENAI_API_KEY", "test-api-key")
 
+from telegram.error import TelegramError
+
 from timur_bot.services import bot_logic, obshak as obshak_service
 
 
@@ -71,6 +73,110 @@ def test_links_text_marks_free_and_taken_slots():
     text = bot_logic._obshak_links_text(state)
     assert "amir (Амир) — id 111" in text
     assert "kadyr (Кадыр) — свободен" in text
+
+
+class FakeCardMessage:
+    def __init__(self, chat_id, text, reply_markup, fail_pin=False):
+        self.chat_id = chat_id
+        self.text = text
+        self.reply_markup = reply_markup
+        self.pinned = False
+        self._fail_pin = fail_pin
+
+    async def pin(self, disable_notification=False):
+        if self._fail_pin:
+            raise TelegramError("not enough rights")
+        self.pinned = True
+
+
+class FakeCardBot:
+    def __init__(self, fail_pin=False):
+        self.username = "timur_aibot"
+        self.id = 42
+        self.sent = []
+        self._fail_pin = fail_pin
+
+    async def send_message(self, chat_id, text, **kwargs):
+        message = FakeCardMessage(chat_id, text, kwargs.get("reply_markup"), fail_pin=self._fail_pin)
+        self.sent.append(message)
+        return message
+
+
+class FakeCardContext:
+    def __init__(self, fail_pin=False):
+        self.bot = FakeCardBot(fail_pin=fail_pin)
+
+
+def _prepare_card_env(monkeypatch, tmp_path, *, pin=True):
+    config = dict(bot_logic.OBSHAK_DEFAULTS)
+    config["pin_group_card"] = pin
+    monkeypatch.setattr(bot_logic, "OBSHAK_DEFAULTS", config)
+    monkeypatch.setattr(bot_logic, "OBSHAK_PATH", tmp_path / "obshak.json")
+    monkeypatch.setattr(bot_logic, "MINIAPP_URL", "https://example.com/miniapp")
+    monkeypatch.setattr(bot_logic, "_OBSHAK_PIN_HINTED", set())
+    return config
+
+
+GROUP_ID = -1001234567890
+
+
+def test_pin_decision_only_for_groups_and_only_once(monkeypatch, tmp_path):
+    _prepare_card_env(monkeypatch, tmp_path)
+    state = obshak_service.default_state(bot_logic.OBSHAK_DEFAULTS)
+    assert bot_logic._obshak_pin_decision(state, GROUP_ID) is True
+    assert bot_logic._obshak_pin_decision(state, 444) is False
+    state["meta"]["pinned_cards"] = {str(GROUP_ID): "2026-01-01T00:00:00+00:00"}
+    assert bot_logic._obshak_pin_decision(state, GROUP_ID) is False
+    assert bot_logic._obshak_pin_decision(state, GROUP_ID, force=True) is True
+    assert bot_logic._obshak_pin_decision(state, 444, force=True) is False
+
+
+def test_pin_decision_respects_config_flag(monkeypatch, tmp_path):
+    _prepare_card_env(monkeypatch, tmp_path, pin=False)
+    state = obshak_service.default_state(bot_logic.OBSHAK_DEFAULTS)
+    assert bot_logic._obshak_pin_decision(state, GROUP_ID) is False
+
+
+def test_card_is_pinned_once_and_force_repins(monkeypatch, tmp_path):
+    _prepare_card_env(monkeypatch, tmp_path)
+    context = FakeCardContext()
+
+    asyncio.run(bot_logic._send_obshak_card(context, GROUP_ID))
+    assert context.bot.sent[0].pinned is True
+    assert "открыть общак" in str(context.bot.sent[0].reply_markup.to_dict())
+
+    asyncio.run(bot_logic._send_obshak_card(context, GROUP_ID))
+    assert context.bot.sent[1].pinned is False, "повторный /obshak не должен тасовать закреп"
+
+    asyncio.run(bot_logic._send_obshak_card(context, GROUP_ID, force_pin=True))
+    assert context.bot.sent[2].pinned is True
+
+    saved = obshak_service.load_state(bot_logic.OBSHAK_PATH, bot_logic.OBSHAK_DEFAULTS)
+    assert str(GROUP_ID) in saved["meta"]["pinned_cards"]
+
+
+def test_card_is_not_pinned_in_private_chat(monkeypatch, tmp_path):
+    _prepare_card_env(monkeypatch, tmp_path)
+    context = FakeCardContext()
+    asyncio.run(bot_logic._send_obshak_card(context, 444))
+    assert context.bot.sent[0].pinned is False
+
+
+def test_pin_failure_explains_what_to_do(monkeypatch, tmp_path):
+    _prepare_card_env(monkeypatch, tmp_path)
+    context = FakeCardContext(fail_pin=True)
+
+    asyncio.run(bot_logic._send_obshak_card(context, GROUP_ID))
+    assert context.bot.sent[0].pinned is False
+    hint = context.bot.sent[1].text
+    assert "Закреплять сообщения" in hint
+
+    # Подсказка не должна повторяться на каждый /obshak.
+    asyncio.run(bot_logic._send_obshak_card(context, GROUP_ID))
+    assert len(context.bot.sent) == 3
+
+    saved = obshak_service.load_state(bot_logic.OBSHAK_PATH, bot_logic.OBSHAK_DEFAULTS)
+    assert (saved.get("meta") or {}).get("pinned_cards") in (None, {})
 
 
 class FakeBot:
