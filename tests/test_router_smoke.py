@@ -92,6 +92,7 @@ def test_post_init_does_not_eagerly_warm_secure_model() -> None:
         patch.object(runner, "start_funny_scan_loop", new=AsyncMock()) as start_funny,
         patch.object(runner, "start_rolling_memory_loop", new=AsyncMock()) as start_memory,
         patch.object(runner, "start_vigvamcev_loop", new=AsyncMock()) as start_vigvam,
+        patch.object(runner, "start_obshak_notify_loop", new=AsyncMock()) as start_obshak,
         patch("asyncio.create_task") as create_task,
     ):
         asyncio.run(runner._post_init(application))
@@ -101,4 +102,5 @@ def test_post_init_does_not_eagerly_warm_secure_model() -> None:
     start_vigvam.assert_awaited_once_with(application)
     start_funny.assert_awaited_once_with(application)
     start_memory.assert_awaited_once_with(application)
+    start_obshak.assert_awaited_once_with(application)
     create_task.assert_not_called()

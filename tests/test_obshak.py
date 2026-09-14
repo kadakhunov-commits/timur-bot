@@ -4,6 +4,8 @@ import os
 import random
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 os.environ.setdefault("TELEGRAM_BOT_TOKEN", "test-token")
 os.environ.setdefault("OPENAI_API_KEY", "test-api-key")
 
@@ -581,3 +583,297 @@ def test_format_money_and_amount():
     assert obshak_flavor.format_money(140.5) == "140.50"
     assert obshak.format_amount(300.0) == "300"
     assert obshak.format_amount(140.25) == "140.25"
+
+
+# --- новые фичи: бюджет, статистика, секретки, корона -------------
+
+
+def test_month_budget_counts_only_current_month():
+    state = fresh_state()
+    add(state, "amir", 1000, "текущее", days_ago=1)
+    add(state, "kadyr", 5000, "старое", days_ago=45)
+    budget = obshak.month_budget(state, CONFIG, now=NOW)
+    assert budget["enabled"] is True
+    assert budget["spent"] == 1000
+    assert budget["limit"] == float(CONFIG.get("monthly_budget") or 0)
+    assert budget["remaining"] == budget["limit"] - 1000
+    assert budget["alert"] is None
+
+
+def test_month_budget_alerts_on_threshold():
+    state = fresh_state()
+    limit = float(CONFIG.get("monthly_budget") or 0)
+    assert limit > 0
+    add(state, "amir", limit * 0.85, "почти всё")
+    assert obshak.month_budget(state, CONFIG, now=NOW)["alert"] == 0.8
+    add(state, "kadyr", limit * 0.2, "перебор")
+    assert obshak.month_budget(state, CONFIG, now=NOW)["alert"] == 1.0
+
+
+def test_month_budget_disabled_without_limit():
+    state = fresh_state()
+    add(state, "amir", 100, "чай")
+    budget = obshak.month_budget(state, {**CONFIG, "monthly_budget": 0}, now=NOW)
+    assert budget["enabled"] is False
+    assert budget["progress"] == 0
+    assert budget["alert"] is None
+
+
+def test_month_forecast_projects_by_daily_rate():
+    state = fresh_state()
+    add(state, "amir", 1000, "старт месяца", days_ago=12)
+    forecast = obshak.month_forecast(state, CONFIG, now=NOW)
+    assert forecast["days_elapsed"] == 13
+    assert forecast["daily_rate"] == round(1000 / 13, 2)
+    assert forecast["projected"] == round(forecast["daily_rate"] * forecast["days_in_month"], 2)
+
+
+def test_category_totals_share_and_order():
+    state = fresh_state()
+    add(state, "amir", 300, "майонез", category="food")
+    add(state, "kadyr", 100, "мыло", category="household")
+    rows = obshak.category_totals(state, CONFIG)
+    assert rows[0]["key"] == "food"
+    assert rows[0]["total"] == 300
+    assert rows[0]["share"] == 0.75
+    assert rows[0]["name"] == "Еда"
+
+
+def test_spending_stats_average_and_biggest():
+    state = fresh_state()
+    add(state, "amir", 100, "чай")
+    add(state, "amir", 300, "пылесос", category="household")
+    stats = obshak.spending_stats(state, CONFIG)
+    assert stats["count"] == 2
+    assert stats["average"] == 200
+    assert stats["biggest"]["title"] == "пылесос"
+
+
+def test_achievement_progress_tracks_quantitative_badges():
+    state = fresh_state()
+    for index in range(3):
+        add(state, "amir", 100, "майонез", days_ago=index)
+    rows = {(row["id"], row["member_id"]): row for row in obshak.achievement_progress(state, CONFIG, now=NOW)}
+    repeat = rows[("repeat", "amir")]
+    assert repeat["progress"] == 3
+    assert repeat["target"] == float(CONFIG["achievements"]["repeat_title_count"])
+    assert repeat["done"] is False
+    collector = rows[("collector", "amir")]
+    assert collector["progress"] == 1
+    assert collector["target"] == 5
+
+
+def test_secret_badges_appear_only_when_earned():
+    state = fresh_state()
+    add(state, "amir", 100, "чай", days_ago=40)
+    ids = {badge["id"] for badge in obshak.achievements(state, CONFIG, now=NOW)}
+    assert "secret_ghost" not in ids
+    assert "secret_marathon" not in ids
+
+    night = fresh_state()
+    # 01:00 UTC — это 04:00 по Москве: глухая ночь.
+    obshak.add_expense(
+        night, member_id="amir", amount=100, title="чипсы",
+        created_at=NOW.replace(hour=1), tz_name=TZ,
+    )
+    ghost = [badge for badge in obshak.achievements(night, CONFIG, now=NOW) if badge["id"] == "secret_ghost"]
+    assert ghost and ghost[0]["secret"] is True
+
+
+def test_secret_marathon_unlocks_on_streak():
+    state = fresh_state()
+    target = int(CONFIG["secret_achievements"]["marathon"]["days_in_row"])
+    for index in range(target):
+        add(state, "amir", 50, "чай", days_ago=index)
+    ids = {badge["id"] for badge in obshak.achievements(state, CONFIG, now=NOW)}
+    assert "secret_marathon" in ids
+
+
+def test_crown_holder_uses_config_order_tiebreak():
+    state = fresh_state()
+    # У Кадыра и Диляры равные суммы: корону берёт тот, кто раньше в конфиге.
+    add(state, "dilyara", 500, "закупка")
+    add(state, "kadyr", 500, "закупка")
+    crown = obshak.crown_holder(state, CONFIG, now=NOW)
+    assert crown["member_id"] == "kadyr"
+    assert crown["total"] == 500
+
+
+def test_award_crown_is_idempotent_per_month():
+    state = fresh_state()
+    add(state, "amir", 700, "закупка")
+    first = obshak.award_crown(state, CONFIG, now=NOW)
+    second = obshak.award_crown(state, CONFIG, now=NOW)
+    assert first["member_id"] == second["member_id"] == "amir"
+    assert len(state["crowns"]) == 1
+    assert obshak.crowns_history(state)[0]["month"] == first["month"]
+
+
+def test_award_crown_skips_empty_month():
+    state = fresh_state()
+    assert obshak.award_crown(state, CONFIG, now=NOW) is None
+    assert state["crowns"] == []
+
+
+def test_pet_xp_includes_streak_and_quest():
+    state = fresh_state()
+    for index in range(3):
+        add(state, "amir", 100, "чай", days_ago=index)
+    pet = obshak_flavor.pet_state(state, CONFIG, now=NOW)
+    bonus = CONFIG["pet"]["xp_bonus"]["streak_per_day"]
+    assert pet["count"] == 3
+    assert pet["xp"] >= 3 + 3 * bonus
+
+
+def test_pet_pat_respects_daily_limit():
+    state = fresh_state()
+    for _ in range(2):
+        result = obshak.pet_pat(state, CONFIG, member_id="amir", now=NOW, daily_limit=2)
+    assert result["today"] == 2
+    with pytest.raises(obshak.ObshakError):
+        obshak.pet_pat(state, CONFIG, member_id="amir", now=NOW, daily_limit=2)
+
+
+def test_light_state_is_shared():
+    state = fresh_state()
+    assert obshak.light_state(state)["on"] is True
+    off = obshak.light_set(state, on=False, member_id="amir")
+    assert off["on"] is False
+    assert off["changed_by"] == "amir"
+    assert obshak.light_state(state)["on"] is False
+
+
+def test_fridge_notes_add_and_delete():
+    state = fresh_state()
+    note = obshak.note_add(state, text="кто съел мой сыр", created_by="amir")
+    assert state["fridge_notes"][0]["text"] == "кто съел мой сыр"
+    assert obshak.note_delete(state, note["id"]) is True
+    assert state["fridge_notes"] == []
+    assert obshak.note_delete(state, "n_missing") is False
+
+
+def test_outbox_requires_target_chat():
+    state = fresh_state()
+    config = {**CONFIG, "notify_chat_id": 0, "chat_id": 0}
+    assert obshak.enqueue_notification(state, config, kind="expense", text="привет") is None
+    assert obshak.take_outbox(state) == []
+
+
+def test_outbox_queues_and_drains_notifications():
+    state = fresh_state()
+    config = {**CONFIG, "notify_chat_id": -100500}
+    queued = obshak.enqueue_notification(state, config, kind="expense", text="купили майонез")
+    assert queued["chat_id"] == -100500
+    batch = obshak.take_outbox(state)
+    assert len(batch) == 1
+    assert obshak.take_outbox(state) == []
+
+
+def test_outbox_respects_disabled_events():
+    state = fresh_state()
+    config = {**CONFIG, "notify_chat_id": -100500, "notifications": {"enabled": True, "events": ["request_created"]}}
+    assert obshak.enqueue_notification(state, config, kind="expense", text="мимо") is None
+    assert obshak.enqueue_notification(state, config, kind="request_created", text="ок") is not None
+
+
+def test_notification_cooldown_blocks_repeat():
+    state = fresh_state()
+    config = {**CONFIG, "notify_chat_id": -100500, "notifications": {"enabled": True, "events": ["budget_alert"], "cooldown_minutes": 5}}
+    assert obshak.notification_cooldown_left(state, config, "budget_alert", now=NOW) == 0
+    obshak.mark_notified(state, "budget_alert", now=NOW)
+    assert obshak.notification_cooldown_left(state, config, "budget_alert", now=NOW) > 0
+
+
+def test_request_poke_notifies_targets_with_cooldown():
+    state = fresh_state()
+    config = {**CONFIG, "notify_chat_id": -100500}
+    item = obshak.request_create(state, created_by="amir", title="шашлык", amount=500)
+    result = obshak.request_poke(state, config, item["id"], member_id="amir", now=NOW)
+    assert set(result["targets"]) == {"rustem", "kadyr", "dilyara"}
+    assert result["phrase"]
+    assert result["title"] == "шашлык"
+    with pytest.raises(obshak.ObshakError) as exc:
+        obshak.request_poke(state, config, item["id"], member_id="amir", now=NOW)
+    assert str(exc.value) == "poke_cooldown"
+
+
+def test_request_poke_skips_paid_members():
+    state = fresh_state()
+    config = {**CONFIG, "notify_chat_id": -100500}
+    item = obshak.request_create(state, created_by="amir", title="шашлык", amount=500)
+    obshak.request_pay(state, item["id"], member_id="kadyr", tz_name=TZ)
+    result = obshak.request_poke(state, config, item["id"], member_id="amir", now=NOW)
+    assert result["targets"] == ["rustem", "dilyara"]
+
+
+def test_roulette_limits_enforce_cooldown_and_daily_cap():
+    state = fresh_state()
+    config = {**CONFIG, "roulette": {"cooldown_hours": 2, "max_spins_per_day": 1, "no_repeat_winner": False}}
+    obshak.roulette_spin_checked(state, config, now=NOW, rng=random.Random(3))
+    limits = obshak.roulette_limits(state, config, now=NOW)
+    assert limits["spins_today"] == 1
+    assert limits["spins_left"] == 0
+    assert limits["can_spin"] is False
+    with pytest.raises(obshak.ObshakError) as exc:
+        obshak.roulette_spin_checked(state, config, now=NOW, rng=random.Random(3))
+    assert str(exc.value) in {"roulette_cooldown", "roulette_limit"}
+
+
+def test_roulette_cooldown_expires():
+    state = fresh_state()
+    config = {**CONFIG, "roulette": {"cooldown_hours": 1, "max_spins_per_day": 0, "no_repeat_winner": False}}
+    obshak.roulette_spin_checked(state, config, now=NOW, rng=random.Random(3))
+    later = NOW + timedelta(hours=2)
+    assert obshak.roulette_limits(state, config, now=later)["can_spin"] is True
+    obshak.roulette_spin_checked(state, config, now=later, rng=random.Random(3))
+
+
+def test_roulette_confirm_marks_own_spin_only():
+    state = fresh_state()
+    config = {**CONFIG, "roulette": {"cooldown_hours": 0, "max_spins_per_day": 0, "no_repeat_winner": False}}
+    result = obshak.roulette_spin_checked(state, config, now=NOW, rng=random.Random(5))
+    winner = result["winner"]
+    loser = next(key for key in obshak.member_ids(state) if key != winner)
+    with pytest.raises(obshak.ObshakError):
+        obshak.roulette_confirm(state, config, member_id=loser, now=NOW)
+    confirmed = obshak.roulette_confirm(state, config, member_id=winner, now=NOW)
+    assert confirmed["confirmed"] is True
+    assert confirmed["total_confirmed"] == 1
+    with pytest.raises(obshak.ObshakError):
+        obshak.roulette_confirm(state, config, member_id=winner, now=NOW)
+
+
+def test_roulette_preview_does_not_record():
+    state = fresh_state()
+    preview = obshak.roulette_preview(state, CONFIG, now=NOW)
+    assert preview["stats"]["total"] == 0
+    assert state["roulette"] == []
+    assert set(preview["chance"]) == set(obshak.member_ids(state))
+
+
+def test_query_expenses_search_and_offset():
+    state = fresh_state()
+    add(state, "amir", 100, "майонез")
+    add(state, "kadyr", 200, "хлеб")
+    add(state, "amir", 300, "майонез провансаль")
+    assert len(obshak.query_expenses(state, search="майонез")) == 2
+    assert len(obshak.query_expenses(state, limit=1)) == 1
+    assert len(obshak.query_expenses(state, offset=1)) == 2
+
+
+def test_member_mention_links_linked_members_only():
+    state = fresh_state()
+    state["members"]["amir"]["telegram_id"] = 111
+    assert '<a href="tg://user?id=111">' in obshak.member_mention(state, "amir")
+    assert obshak.member_mention(state, "kadyr") == "Кадыр"
+
+
+def test_bootstrap_exposes_new_sections():
+    state = fresh_state()
+    add(state, "amir", 500, "закупка")
+    payload = obshak.bootstrap(state, CONFIG, telegram_id=None, now=NOW)
+    for key in ("budget", "forecast", "spending", "light", "notes", "crown", "crowns", "achievement_progress", "secret_hints"):
+        assert key in payload, key
+    assert payload["budget"]["spent"] == 500
+    assert payload["light"]["on"] is True
+    assert "limits" in payload["roulette"]

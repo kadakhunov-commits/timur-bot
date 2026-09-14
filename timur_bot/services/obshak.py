@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import csv
+import html
 import io
 import json
 import os
@@ -161,7 +162,18 @@ def default_state(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         "wishlist": [],
         "requests": [],
         "roulette": [],
-        "meta": {"created_at": datetime.now(_UTC).isoformat(), "revision": 0},
+        "light": {"on": True, "updated_at": datetime.now(_UTC).isoformat(), "changed_by": None},
+        "crowns": [],
+        "fridge_notes": [],
+        "outbox": [],
+        "pets_pats": {},
+        "meta": {
+            "created_at": datetime.now(_UTC).isoformat(),
+            "revision": 0,
+            "digest": {"last_monday": "", "last_budget_alert": ""},
+            "poke_last": {},
+            "notify_last": {},
+        },
     }
 
 
@@ -221,9 +233,89 @@ def ensure_state_schema(state: Dict[str, Any], config: Optional[Dict[str, Any]] 
             normalized_roulette.append(normalized)
     state["roulette"] = normalized_roulette[-ROULETTE_HISTORY_LIMIT:]
 
+    # Новые разделы схемы: свет, короны, записки, outbox, поглаживания.
+    light = state.get("light") if isinstance(state.get("light"), dict) else {}
+    state["light"] = {
+        "on": bool(light.get("on", True)),
+        "updated_at": str(light.get("updated_at") or datetime.now(_UTC).isoformat()),
+        "changed_by": light.get("changed_by"),
+    }
+    crowns_raw = state.get("crowns") if isinstance(state.get("crowns"), list) else []
+    crowns: List[Dict[str, Any]] = []
+    for item in crowns_raw:
+        if not isinstance(item, dict):
+            continue
+        member_id = str(item.get("member_id") or "")
+        if not member_id:
+            continue
+        crowns.append(
+            {
+                "member_id": member_id,
+                "month": str(item.get("month") or ""),
+                "total": round(float(item.get("total") or 0), 2),
+                "awarded_at": str(item.get("awarded_at") or datetime.now(_UTC).isoformat()),
+            }
+        )
+    state["crowns"] = crowns
+    notes_raw = state.get("fridge_notes") if isinstance(state.get("fridge_notes"), list) else []
+    notes: List[Dict[str, Any]] = []
+    for item in notes_raw:
+        if not isinstance(item, dict):
+            continue
+        text = _clean_title(item.get("text"))
+        if not text:
+            continue
+        notes.append(
+            {
+                "id": str(item.get("id") or _new_id("n")),
+                "text": text[:120],
+                "created_by": item.get("created_by"),
+                "created_at": str(item.get("created_at") or datetime.now(_UTC).isoformat()),
+            }
+        )
+    state["fridge_notes"] = notes[-30:]
+    outbox_raw = state.get("outbox") if isinstance(state.get("outbox"), list) else []
+    outbox: List[Dict[str, Any]] = []
+    for item in outbox_raw:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text") or "").strip()
+        if not text:
+            continue
+        outbox.append(
+            {
+                "id": str(item.get("id") or _new_id("q")),
+                "kind": str(item.get("kind") or "note"),
+                "text": text[:3500],
+                "chat_id": item.get("chat_id"),
+                "created_at": str(item.get("created_at") or datetime.now(_UTC).isoformat()),
+            }
+        )
+    state["outbox"] = outbox[-100:]
+    pats_raw = state.get("pets_pats") if isinstance(state.get("pets_pats"), dict) else {}
+    pats: Dict[str, List[str]] = {}
+    for key, value in pats_raw.items():
+        stamps: List[str] = []
+        if isinstance(value, list):
+            stamps = [str(entry) for entry in value if isinstance(entry, str) and entry.strip()]
+        elif isinstance(value, int):
+            # Старая схема хранила просто счётчик — переносим как «когда-то гладили».
+            stamps = [datetime.now(_UTC).isoformat()] * max(0, value)
+        pats[str(key)] = stamps[-100:]
+    state["pets_pats"] = pats
+
     meta = state.get("meta") if isinstance(state.get("meta"), dict) else {}
     meta.setdefault("created_at", datetime.now(_UTC).isoformat())
     meta["revision"] = int(meta.get("revision", 0) or 0)
+    digest = meta.get("digest") if isinstance(meta.get("digest"), dict) else {}
+    meta["digest"] = {
+        "last_monday": str(digest.get("last_monday") or ""),
+        "last_budget_alert": str(digest.get("last_budget_alert") or ""),
+    }
+    poke_last = meta.get("poke_last") if isinstance(meta.get("poke_last"), dict) else {}
+    meta["poke_last"] = {str(k): str(v) for k, v in poke_last.items() if isinstance(v, str)}
+    notify_last = meta.get("notify_last") if isinstance(meta.get("notify_last"), dict) else {}
+    meta["notify_last"] = {str(k): str(v) for k, v in notify_last.items() if isinstance(v, str)}
     state["meta"] = meta
     return state
 
@@ -331,10 +423,13 @@ def _normalize_roulette(item: Any) -> Optional[Dict[str, Any]]:
     member_id = str(item.get("member_id", "")).strip()
     if not member_id:
         return None
-    return {
+    normalized = {
         "member_id": member_id,
         "ts": str(item.get("ts") or datetime.now(_UTC).isoformat()),
     }
+    if item.get("confirmed_at"):
+        normalized["confirmed_at"] = str(item.get("confirmed_at"))
+    return normalized
 
 
 def load_state(path: Path, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -545,24 +640,45 @@ def query_expenses(
     *,
     member_id: Optional[str] = None,
     category: Optional[str] = None,
+    search: Optional[str] = None,
     since: Optional[datetime] = None,
     until: Optional[datetime] = None,
     limit: Optional[int] = None,
+    offset: int = 0,
     newest_first: bool = True,
 ) -> List[Dict[str, Any]]:
+    needle = str(search or "").strip().lower()
     result: List[Dict[str, Any]] = []
     for item in state.get("expenses", []):
         if member_id and item.get("member_id") != member_id:
             continue
         if category and item.get("category") != category:
             continue
+        if needle and needle not in str(item.get("title") or "").lower():
+            continue
         if not in_window(_expense_ts(item), since, until):
             continue
         result.append(item)
     result.sort(key=lambda entry: entry.get("created_at", ""), reverse=newest_first)
+    if offset:
+        result = result[max(0, offset):]
     if limit is not None and limit >= 0:
         result = result[:limit]
     return result
+
+
+def member_mention(state: Dict[str, Any], member_id: str) -> str:
+    """Имя для уведомления: у привязанных — кликабельное упоминание."""
+    entry = member(state, member_id) or {}
+    name = html.escape(str(entry.get("name") or member_id))
+    telegram_id = entry.get("telegram_id")
+    if telegram_id is None:
+        return name
+    try:
+        numeric = int(telegram_id)
+    except (TypeError, ValueError):
+        return name
+    return f'<a href="tg://user?id={numeric}">{name}</a>'
 
 
 def totals(state: Dict[str, Any], expenses: Optional[Iterable[Dict[str, Any]]] = None) -> Dict[str, Any]:
@@ -1064,13 +1180,22 @@ def format_amount(value: Any) -> str:
     return f"{number:.2f}".rstrip("0").rstrip(".")
 
 
-def _badge(badge_id: str, title: str, icon: str, member_id: Optional[str], detail: str = "") -> Dict[str, Any]:
+def _badge(
+    badge_id: str,
+    title: str,
+    icon: str,
+    member_id: Optional[str],
+    detail: str = "",
+    *,
+    secret: bool = False,
+) -> Dict[str, Any]:
     return {
         "id": badge_id,
         "title": title,
         "icon": icon,
         "member_id": member_id,
         "detail": detail,
+        "secret": secret,
     }
 
 
@@ -1246,6 +1371,82 @@ def achievements(
                 _badge("reaction_magnet", "Реакция-магнит", "heart", top, f"{reaction_counts[top]} реакций")
             )
 
+    badges.extend(_secret_badges(state, config, by_member, now=now))
+    return badges
+
+
+def _secret_badges(
+    state: Dict[str, Any],
+    config: Dict[str, Any],
+    by_member: Dict[str, List[Dict[str, Any]]],
+    *,
+    now: Optional[datetime] = None,
+) -> List[Dict[str, Any]]:
+    """Секретки: пока не открылись — их просто нет в списке, условие не подсказываем."""
+    secrets = (config or {}).get("secret_achievements") or {}
+    if not secrets:
+        return []
+    tz_name = str((config or {}).get("timezone") or "Europe/Moscow")
+    month_start, month_end = period_bounds("month", tz_name, now=now)
+    badges: List[Dict[str, Any]] = []
+
+    ghost = secrets.get("ghost") or {}
+    if ghost:
+        # «Призрак кухни»: покупка в глухую ночь, 3:00–5:00.
+        for member_id, items in by_member.items():
+            for item in items:
+                ts = _expense_ts(item)
+                if ts is None:
+                    continue
+                if 3 <= ts.astimezone(resolve_timezone(tz_name)).hour < 5:
+                    badges.append(
+                        _badge(
+                            "secret_ghost",
+                            str(ghost.get("title") or "Призрак кухни"),
+                            str(ghost.get("icon") or "ghost"),
+                            member_id,
+                            "покупка в 3–5 утра",
+                            secret=True,
+                        )
+                    )
+                    break
+
+    marathon = secrets.get("marathon") or {}
+    if marathon:
+        target = int(marathon.get("days_in_row") or 7)
+        for member_id, items in by_member.items():
+            if _member_streak_days(items, tz_name) >= target:
+                badges.append(
+                    _badge(
+                        "secret_marathon",
+                        str(marathon.get("title") or "Марафонец"),
+                        str(marathon.get("icon") or "flame"),
+                        member_id,
+                        f"{target} дней подряд",
+                        secret=True,
+                    )
+                )
+
+    sugar = secrets.get("sugar_daddy") or {}
+    if sugar:
+        target = float(sugar.get("month_total") or 10000)
+        for member_id, items in by_member.items():
+            spent = sum(
+                float(item.get("amount", 0))
+                for item in items
+                if in_window(_expense_ts(item), month_start, month_end)
+            )
+            if spent >= target:
+                badges.append(
+                    _badge(
+                        "secret_sugar_daddy",
+                        str(sugar.get("title") or "Кормилец"),
+                        str(sugar.get("icon") or "crown"),
+                        member_id,
+                        f"{format_amount(spent)} за месяц",
+                        secret=True,
+                    )
+                )
     return badges
 
 
@@ -1339,6 +1540,720 @@ def export_csv(state: Dict[str, Any], config: Dict[str, Any]) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Деньги месяца: бюджет, темп, срезы по категориям
+# ---------------------------------------------------------------------------
+
+
+def _month_span(tz_name: str, now: Optional[datetime]) -> Tuple[datetime, datetime]:
+    start, _ = period_bounds("month", tz_name, now=now)
+    assert start is not None
+    if start.month == 12:
+        following = start.replace(year=start.year + 1, month=1)
+    else:
+        following = start.replace(month=start.month + 1)
+    return start, following
+
+
+def category_totals(
+    state: Dict[str, Any],
+    config: Dict[str, Any],
+    *,
+    since: Optional[datetime] = None,
+    until: Optional[datetime] = None,
+) -> List[Dict[str, Any]]:
+    """Пирог по категориям: сумма, число покупок и доля от общего."""
+    labels = {
+        str(entry.get("key")): str(entry.get("name", entry.get("key")))
+        for entry in (config.get("categories") or [])
+    }
+    counts: Dict[str, int] = {}
+    sums: Dict[str, float] = {}
+    for item in query_expenses(state, since=since, until=until):
+        key = str(item.get("category") or "other")
+        counts[key] = counts.get(key, 0) + 1
+        sums[key] = round(sums.get(key, 0.0) + float(item.get("amount", 0)), 2)
+    total = round(sum(sums.values()), 2)
+    rows = [
+        {
+            "key": key,
+            "name": labels.get(key, key),
+            "count": counts[key],
+            "total": sums[key],
+            "share": round(sums[key] / total, 4) if total else 0.0,
+        }
+        for key in sums
+    ]
+    rows.sort(key=lambda row: (-row["total"], row["key"]))
+    return rows
+
+
+def spending_stats(
+    state: Dict[str, Any],
+    config: Dict[str, Any],
+    *,
+    since: Optional[datetime] = None,
+    until: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """Цифры за окно: итог, средний чек, крупнейшая покупка, срез по категориям."""
+    items = query_expenses(state, since=since, until=until)
+    summary = totals(state, items)
+    biggest = max(items, key=lambda item: float(item.get("amount", 0)), default=None)
+    return {
+        "total": summary["total"],
+        "count": summary["count"],
+        "average": round(summary["total"] / summary["count"], 2) if summary["count"] else 0.0,
+        "biggest": biggest,
+        "categories": category_totals(state, config, since=since, until=until),
+    }
+
+
+def month_budget(
+    state: Dict[str, Any],
+    config: Dict[str, Any],
+    *,
+    now: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """Бюджет календарного месяца: сколько ушло, сколько осталось, пора ли тормозить."""
+    tz_name = str((config or {}).get("timezone") or "Europe/Moscow")
+    limit = float((config or {}).get("monthly_budget") or 0)
+    start, following = _month_span(tz_name, now)
+    local_now = now_local(tz_name, now=now)
+    spent = round(totals(state, query_expenses(state, since=start, until=local_now))["total"], 2)
+    days_in_month = (following.date() - start.date()).days
+    days_elapsed = max(1, (local_now.date() - start.date()).days + 1)
+    days_left = max(0, days_in_month - days_elapsed)
+    progress = round(spent / limit, 4) if limit > 0 else 0.0
+    thresholds = [float(value) for value in ((config or {}).get("budget_alert_thresholds") or [])]
+    crossed = max((value for value in thresholds if progress >= value), default=None)
+    return {
+        "limit": limit,
+        "spent": spent,
+        "remaining": round(max(0.0, limit - spent), 2) if limit > 0 else None,
+        "over": round(max(0.0, spent - limit), 2) if limit > 0 else 0.0,
+        "progress": progress,
+        "days_in_month": days_in_month,
+        "days_elapsed": days_elapsed,
+        "days_left": days_left,
+        "daily_allowance": round(max(0.0, limit - spent) / days_left, 2) if limit > 0 and days_left else None,
+        "alert": crossed,
+        "enabled": limit > 0,
+        "month_start": start.isoformat(),
+    }
+
+
+def month_forecast(
+    state: Dict[str, Any],
+    config: Dict[str, Any],
+    *,
+    now: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """Прогноз до конца месяца по текущему темпу трат."""
+    tz_name = str((config or {}).get("timezone") or "Europe/Moscow")
+    limit = float((config or {}).get("monthly_budget") or 0)
+    start, following = _month_span(tz_name, now)
+    local_now = now_local(tz_name, now=now)
+    spent = totals(state, query_expenses(state, since=start, until=local_now))["total"]
+    days_elapsed = max(1, (local_now.date() - start.date()).days + 1)
+    days_in_month = (following.date() - start.date()).days
+    daily_rate = round(spent / days_elapsed, 2)
+    projected = round(daily_rate * days_in_month, 2)
+    return {
+        "daily_rate": daily_rate,
+        "projected": projected,
+        "days_elapsed": days_elapsed,
+        "days_in_month": days_in_month,
+        "will_exceed": bool(limit > 0 and projected > limit),
+        "over_by": round(max(0.0, projected - limit), 2) if limit > 0 else 0.0,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Свет на кухне, записки на холодильнике
+# ---------------------------------------------------------------------------
+
+
+def light_state(state: Dict[str, Any]) -> Dict[str, Any]:
+    light = state.get("light") if isinstance(state.get("light"), dict) else {}
+    return {
+        "on": bool(light.get("on", True)),
+        "updated_at": light.get("updated_at"),
+        "changed_by": light.get("changed_by"),
+    }
+
+
+def light_set(state: Dict[str, Any], *, on: bool, member_id: Optional[str] = None) -> Dict[str, Any]:
+    """Свет общий: выключатель одного виден всем, кто откроет кухню."""
+    state["light"] = {
+        "on": bool(on),
+        "updated_at": datetime.now(_UTC).isoformat(),
+        "changed_by": member_id,
+    }
+    return light_state(state)
+
+
+def note_add(state: Dict[str, Any], *, text: str, created_by: Optional[str] = None) -> Dict[str, Any]:
+    clean = _clean_title(text)
+    if not clean:
+        raise ObshakError("empty_title")
+    note = {
+        "id": _new_id("n"),
+        "text": clean[:120],
+        "created_by": created_by,
+        "created_at": datetime.now(_UTC).isoformat(),
+    }
+    state.setdefault("fridge_notes", []).append(note)
+    del state["fridge_notes"][:-30]
+    return note
+
+
+def note_delete(state: Dict[str, Any], note_id: str) -> bool:
+    notes = state.get("fridge_notes", [])
+    for index, item in enumerate(notes):
+        if item.get("id") == note_id:
+            del notes[index]
+            return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Очередь уведомлений: веб-слой кладёт, бот-луп отправляет
+# ---------------------------------------------------------------------------
+
+
+def notify_target_chat(state: Dict[str, Any], config: Dict[str, Any]) -> Optional[int]:
+    """Куда слать уведомления: явный адрес → chat_id → беседы с закрепом."""
+    for candidate in (
+        (config or {}).get("notify_chat_id"),
+        (config or {}).get("chat_id"),
+    ):
+        try:
+            value = int(candidate or 0)
+        except (TypeError, ValueError):
+            continue
+        if value:
+            return value
+    pinned = (state.get("meta") or {}).get("pinned_cards") or {}
+    for key in pinned:
+        try:
+            return int(key)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def enqueue_notification(
+    state: Dict[str, Any],
+    config: Dict[str, Any],
+    *,
+    kind: str,
+    text: str,
+    chat_id: Optional[int] = None,
+    now: Optional[datetime] = None,
+) -> Optional[Dict[str, Any]]:
+    """Кладёт сообщение в outbox. Бот-луп заберёт и отправит от имени бота."""
+    settings = (config or {}).get("notifications") or {}
+    if not settings.get("enabled", True):
+        return None
+    events = settings.get("events") or []
+    if events and kind not in events:
+        return None
+    clean = str(text or "").strip()
+    if not clean:
+        return None
+    target = chat_id if chat_id is not None else notify_target_chat(state, config)
+    if not target:
+        return None
+    item = {
+        "id": _new_id("q"),
+        "kind": str(kind),
+        "text": clean[:3500],
+        "chat_id": target,
+        "created_at": datetime.now(_UTC).isoformat(),
+    }
+    state.setdefault("outbox", []).append(item)
+    del state["outbox"][:-100]
+    return item
+
+
+def take_outbox(state: Dict[str, Any], limit: int = 10) -> List[Dict[str, Any]]:
+    """Забирает пачку уведомлений из очереди (бот-луп отправляет по одной)."""
+    queue = state.get("outbox") if isinstance(state.get("outbox"), list) else []
+    batch = queue[: max(1, limit)]
+    del queue[: len(batch)]
+    state["outbox"] = queue
+    return batch
+
+
+def notification_cooldown_left(
+    state: Dict[str, Any],
+    config: Dict[str, Any],
+    kind: str,
+    *,
+    now: Optional[datetime] = None,
+) -> int:
+    """Сколько секунд ещё нельзя слать уведомление этого типа (0 — можно)."""
+    minutes = int(((config or {}).get("notifications") or {}).get("cooldown_minutes") or 0)
+    if minutes <= 0:
+        return 0
+    stamps = ((state.get("meta") or {}).get("notify_last") or {})
+    last = parse_ts(stamps.get(str(kind)))
+    if last is None:
+        return 0
+    elapsed = (now_local("UTC", now=now) - last.astimezone(_UTC)).total_seconds()
+    return max(0, int(minutes * 60 - elapsed))
+
+
+def mark_notified(
+    state: Dict[str, Any],
+    kind: str,
+    *,
+    now: Optional[datetime] = None,
+) -> None:
+    meta = state.setdefault("meta", {})
+    stamps = meta.setdefault("notify_last", {})
+    if not isinstance(stamps, dict):
+        stamps = {}
+        meta["notify_last"] = stamps
+    stamps[str(kind)] = now_local("UTC", now=now).isoformat()
+
+
+# ---------------------------------------------------------------------------
+# Пнуть должника по запросу
+# ---------------------------------------------------------------------------
+
+
+def request_poke(
+    state: Dict[str, Any],
+    config: Dict[str, Any],
+    request_id: str,
+    *,
+    member_id: str,
+    now: Optional[datetime] = None,
+    cooldown_hours: int = 6,
+) -> Dict[str, Any]:
+    """Напоминание участникам запроса. Кулдаун — чтобы «пнуть» не стало спамом."""
+    item = find_request(state, request_id)
+    if item is None:
+        raise ObshakError("unknown_request")
+    if member(state, member_id) is None:
+        raise ObshakError("unknown_member")
+    if item.get("status") != "open":
+        raise ObshakError("request_closed")
+    progress = request_progress(state, item)
+    targets = [key for key in progress["targets"] if key not in set(progress["paid_by"])]
+    if not targets:
+        raise ObshakError("nobody_to_poke")
+    meta = state.setdefault("meta", {})
+    stamps = meta.setdefault("poke_last", {})
+    if not isinstance(stamps, dict):
+        stamps = {}
+        meta["poke_last"] = stamps
+    key = f"{request_id}:{member_id}"
+    local_now = now_local(str((config or {}).get("timezone") or "Europe/Moscow"), now=now)
+    last = parse_ts(stamps.get(key))
+    if last is not None and cooldown_hours > 0:
+        elapsed = (local_now - last.astimezone(local_now.tzinfo)).total_seconds()
+        if elapsed < cooldown_hours * 3600:
+            raise ObshakError("poke_cooldown")
+    stamps[key] = local_now.isoformat()
+    phrases = list((config or {}).get("poke_phrases") or [])
+    seed = local_now.timetuple().tm_yday + len(item.get("payments") or []) + len(targets)
+    phrase = str(phrases[seed % len(phrases)]) if phrases else "скиньтесь, соседи"
+    return {
+        "request_id": request_id,
+        "targets": targets,
+        "phrase": phrase,
+        "title": item.get("title"),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Корона месяца
+# ---------------------------------------------------------------------------
+
+
+def month_key(tz_name: str, *, now: Optional[datetime] = None) -> str:
+    return now_local(tz_name, now=now).strftime("%Y-%m")
+
+
+def crown_holder(
+    state: Dict[str, Any],
+    config: Dict[str, Any],
+    *,
+    now: Optional[datetime] = None,
+) -> Optional[Dict[str, Any]]:
+    """Победитель месяца по детерминированному тай-брейку (порядок из конфига)."""
+    tz_name = str((config or {}).get("timezone") or "Europe/Moscow")
+    start, following = _month_span(tz_name, now)
+    rows = leaderboard(state, since=start, until=following)
+    if not rows or rows[0]["total"] <= 0:
+        return None
+    top = rows[0]
+    return {
+        "member_id": top["member_id"],
+        "name": top["name"],
+        "total": top["total"],
+        "month": month_key(tz_name, now=now),
+    }
+
+
+def award_crown(
+    state: Dict[str, Any],
+    config: Dict[str, Any],
+    *,
+    now: Optional[datetime] = None,
+) -> Optional[Dict[str, Any]]:
+    """Идемпотентно записывает корону месяца в летопись (раз в месяц)."""
+    holder = crown_holder(state, config, now=now)
+    if holder is None:
+        return None
+    crowns = state.setdefault("crowns", [])
+    if any(entry.get("month") == holder["month"] for entry in crowns):
+        return holder
+    crowns.append(
+        {
+            "member_id": holder["member_id"],
+            "month": holder["month"],
+            "total": holder["total"],
+            "awarded_at": datetime.now(_UTC).isoformat(),
+        }
+    )
+    del crowns[:-36]
+    return holder
+
+
+def crowns_history(state: Dict[str, Any], *, limit: int = 12) -> List[Dict[str, Any]]:
+    crowns = state.get("crowns") if isinstance(state.get("crowns"), list) else []
+    return [dict(entry) for entry in crowns[-max(1, limit):]][::-1]
+
+
+# ---------------------------------------------------------------------------
+# Кот: поглаживания
+# ---------------------------------------------------------------------------
+
+
+def pet_pats(state: Dict[str, Any], member_id: str) -> int:
+    pats = state.get("pets_pats") if isinstance(state.get("pets_pats"), dict) else {}
+    return len(pats.get(member_id) or [])
+
+
+def pet_pat(
+    state: Dict[str, Any],
+    config: Dict[str, Any],
+    *,
+    member_id: str,
+    now: Optional[datetime] = None,
+    daily_limit: int = 5,
+) -> Dict[str, Any]:
+    """Погладить кота: счётчик и мягкий дневной лимит, чтобы кот не замурчал насмерть."""
+    if member(state, member_id) is None:
+        raise ObshakError("unknown_member")
+    tz_name = str((config or {}).get("timezone") or "Europe/Moscow")
+    local_now = now_local(tz_name, now=now)
+    pats = state.setdefault("pets_pats", {})
+    if not isinstance(pats, dict):
+        pats = {}
+        state["pets_pats"] = pats
+    stamps = [str(entry) for entry in (pats.get(member_id) or []) if isinstance(entry, str)]
+    today = local_now.date()
+    today_count = 0
+    for stamp in stamps:
+        parsed = parse_ts(stamp)
+        if parsed is not None and parsed.astimezone(resolve_timezone(tz_name)).date() == today:
+            today_count += 1
+    if daily_limit > 0 and today_count >= daily_limit:
+        raise ObshakError("pet_tired")
+    stamps.append(local_now.isoformat())
+    pats[member_id] = stamps[-100:]
+    return {
+        "today": today_count + 1,
+        "limit": daily_limit,
+        "total": len(pats[member_id]),
+        "left": max(0, daily_limit - today_count - 1) if daily_limit > 0 else None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Рулетка 2.0: превью, кулдаун, суточный лимит, «я сходил»
+# ---------------------------------------------------------------------------
+
+
+def roulette_limits(
+    state: Dict[str, Any],
+    config: Dict[str, Any],
+    *,
+    now: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    tz_name = str((config or {}).get("timezone") or "Europe/Moscow")
+    settings = (config or {}).get("roulette") or {}
+    local_now = now_local(tz_name, now=now)
+    cooldown_hours = int(settings.get("cooldown_hours") or 0)
+    max_per_day = int(settings.get("max_spins_per_day") or 0)
+    stamps = [ts for ts in (parse_ts(entry.get("ts")) for entry in state.get("roulette", [])) if ts]
+    last = max(stamps) if stamps else None
+    cooldown_left = 0
+    if last is not None and cooldown_hours > 0:
+        elapsed = (local_now - last.astimezone(resolve_timezone(tz_name))).total_seconds()
+        cooldown_left = max(0, int(cooldown_hours * 3600 - elapsed))
+    today = local_now.date()
+    spins_today = sum(
+        1
+        for ts in stamps
+        if ts.astimezone(resolve_timezone(tz_name)).date() == today
+    )
+    last_member = None
+    if stamps:
+        latest = max(
+            (entry for entry in state.get("roulette", []) if parse_ts(entry.get("ts")) is not None),
+            key=lambda entry: str(entry.get("ts")),
+            default=None,
+        )
+        if latest is not None:
+            last_member = str(latest.get("member_id") or "") or None
+    return {
+        "cooldown_hours": cooldown_hours,
+        "cooldown_left": cooldown_left,
+        "max_spins_per_day": max_per_day,
+        "spins_today": spins_today,
+        "spins_left": max(0, max_per_day - spins_today) if max_per_day > 0 else None,
+        "can_spin": cooldown_left == 0 and (max_per_day <= 0 or spins_today < max_per_day),
+        "no_repeat_winner": bool(settings.get("no_repeat_winner", True)),
+        "last_member": last_member,
+    }
+
+
+def roulette_preview(
+    state: Dict[str, Any],
+    config: Optional[Dict[str, Any]] = None,
+    *,
+    now: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """Шансы без броска: можно смотреть, но история не пухнет."""
+    config = config or {}
+    tz_name = str(config.get("timezone") or "Europe/Moscow")
+    weights = roulette_weights(state, now=now, tz_name=tz_name)
+    total = sum(weights.values()) or 1.0
+    return {
+        "chance": {key: round(value / total, 4) for key, value in weights.items()},
+        "stats": roulette_stats(state, now=now, tz_name=tz_name),
+        "limits": roulette_limits(state, config, now=now),
+    }
+
+
+def roulette_spin_checked(
+    state: Dict[str, Any],
+    config: Optional[Dict[str, Any]] = None,
+    *,
+    now: Optional[datetime] = None,
+    rng: Any = None,
+) -> Dict[str, Any]:
+    """Бросок с правилами: кулдаун, суточный лимит и защита от повтора победителя."""
+    config = config or {}
+    limits = roulette_limits(state, config, now=now)
+    if limits["cooldown_left"] > 0:
+        raise ObshakError("roulette_cooldown")
+    if limits["max_spins_per_day"] > 0 and limits["spins_today"] >= limits["max_spins_per_day"]:
+        raise ObshakError("roulette_limit")
+    members = list(member_map(state))
+    if not members:
+        raise ObshakError("no_members")
+    skip: Optional[str] = None
+    if limits["no_repeat_winner"] and len(members) > 1:
+        skip = limits.get("last_member")
+    result = roulette_spin(
+        state,
+        config,
+        now=now,
+        rng=rng,
+        days=ROULETTE_WINDOW_DAYS,
+    )
+    if skip and result["winner"] == skip:
+        # Один переброс без прошлого победителя, чтобы «тот же сходил ещё раз» не бесило.
+        weights = roulette_weights(
+            state, now=now, tz_name=str(config.get("timezone") or "Europe/Moscow")
+        )
+        weights.pop(skip, None)
+        total = sum(weights.values())
+        if total > 0:
+            roll = (rng or random).random() * total
+            accumulated = 0.0
+            winner = next(iter(weights))
+            for member_id, value in weights.items():
+                accumulated += value
+                if roll <= accumulated:
+                    winner = member_id
+                    break
+            state["roulette"][-1]["member_id"] = winner
+            result["winner"] = winner
+            result["rerolled"] = True
+            result["chance"] = round(weights[winner] / total, 4)
+            result["weights"] = {key: round(value / total, 4) for key, value in weights.items()}
+    result["limits"] = roulette_limits(state, config, now=now)
+    return result
+
+
+def roulette_confirm(
+    state: Dict[str, Any],
+    config: Optional[Dict[str, Any]] = None,
+    *,
+    member_id: str,
+    now: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """«Я правда сходил»: подтверждаем последний бросок — это и есть настоящий поход."""
+    config = config or {}
+    tz_name = str(config.get("timezone") or "Europe/Moscow")
+    history = state.get("roulette") if isinstance(state.get("roulette"), list) else []
+    if not history:
+        raise ObshakError("no_spins")
+    entry = history[-1]
+    if str(entry.get("member_id")) != member_id:
+        raise ObshakError("not_your_spin")
+    if entry.get("confirmed_at"):
+        raise ObshakError("already_confirmed")
+    entry["confirmed_at"] = now_local(tz_name, now=now).isoformat()
+    confirmed = [item for item in history if item.get("confirmed_at")]
+    return {
+        "confirmed": True,
+        "total_confirmed": len(confirmed),
+        "member_id": member_id,
+    }
+
+
+def roulette_history(state: Dict[str, Any], *, limit: int = 20) -> List[Dict[str, Any]]:
+    history = state.get("roulette") if isinstance(state.get("roulette"), list) else []
+    names = {key: str(entry.get("name", key)) for key, entry in member_map(state).items()}
+    rows: List[Dict[str, Any]] = []
+    for entry in history[-max(1, limit):][::-1]:
+        member_id = str(entry.get("member_id") or "")
+        rows.append(
+            {
+                "member_id": member_id,
+                "name": names.get(member_id, member_id),
+                "ts": entry.get("ts"),
+                "confirmed_at": entry.get("confirmed_at"),
+            }
+        )
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# Секретные ачивки и прогресс до следующей
+# ---------------------------------------------------------------------------
+
+
+def _member_streak_days(items: List[Dict[str, Any]], tz_name: str) -> int:
+    tz = resolve_timezone(tz_name)
+    days = set()
+    for item in items:
+        ts = _expense_ts(item)
+        if ts is not None:
+            days.add(ts.astimezone(tz).date())
+    if not days:
+        return 0
+    best = 0
+    run = 0
+    previous = None
+    for day in sorted(days):
+        run = run + 1 if previous is not None and (day - previous).days == 1 else 1
+        best = max(best, run)
+        previous = day
+    return best
+
+
+def achievement_progress(
+    state: Dict[str, Any],
+    config: Dict[str, Any],
+    *,
+    now: Optional[datetime] = None,
+) -> List[Dict[str, Any]]:
+    """Числители ачивок: сколько уже набрано и сколько нужно."""
+    settings = dict((config or {}).get("achievements") or {})
+    tz_name = str((config or {}).get("timezone") or "Europe/Moscow")
+    expenses = list(state.get("expenses", []))
+    rows: List[Dict[str, Any]] = []
+    by_member: Dict[str, List[Dict[str, Any]]] = {key: [] for key in member_map(state)}
+    for item in expenses:
+        member_id = str(item.get("member_id"))
+        if member_id in by_member:
+            by_member[member_id].append(item)
+    month_start, month_end = period_bounds("month", tz_name, now=now)
+
+    def push(member_id: str, badge_id: str, progress: float, target: float) -> None:
+        rows.append(
+            {
+                "id": badge_id,
+                "member_id": member_id,
+                "progress": round(float(progress), 2),
+                "target": float(target),
+                "done": float(progress) >= float(target),
+            }
+        )
+
+    collector_target = int(settings.get("collector_categories", 5))
+    repeat_target = int(settings.get("repeat_title_count", 5))
+    patron_target = int(settings.get("patron_month_count", 10))
+    stability_target = int(settings.get("stability_weeks", 4))
+    veteran_target = int(settings.get("veteran_days", 100))
+    big_target = float(settings.get("big_one", 1000))
+
+    for member_id, items in by_member.items():
+        if not items:
+            continue
+        categories = {str(item.get("category") or "other") for item in items}
+        push(member_id, "collector", len(categories), collector_target)
+
+        title_counts: Dict[str, int] = {}
+        for item in items:
+            key = title_key(item.get("title"))
+            title_counts[key] = title_counts.get(key, 0) + 1
+        push(member_id, "repeat", max(title_counts.values(), default=0), repeat_target)
+
+        push(member_id, "big_one", max((float(item.get("amount", 0)) for item in items), default=0), big_target)
+
+        month_items = [
+            item for item in items if in_window(_expense_ts(item), month_start, month_end)
+        ]
+        push(member_id, "patron", len(month_items), patron_target)
+
+        weeks = set()
+        for item in items:
+            ts = _expense_ts(item)
+            if ts is not None:
+                iso = ts.astimezone(resolve_timezone(tz_name)).isocalendar()
+                weeks.add((iso.year, iso.week))
+        run = 0
+        best_run = 0
+        previous_week = None
+        for week in sorted(weeks):
+            run = run + 1 if previous_week is not None and _iso_week_distance(previous_week, week) == 1 else 1
+            best_run = max(best_run, run)
+            previous_week = week
+        push(member_id, "stability", best_run, stability_target)
+
+        stamps = [ts for ts in (_expense_ts(item) for item in items) if ts is not None]
+        if stamps:
+            oldest = min(stamps).astimezone(resolve_timezone(tz_name))
+            age = (now_local(tz_name, now=now) - oldest).days
+            push(member_id, "veteran", max(0, age), veteran_target)
+
+    # Секретные: прогресс показываем, условие — нет.
+    secrets = (config or {}).get("secret_achievements") or {}
+    for member_id, items in by_member.items():
+        if not items:
+            continue
+        marathon = secrets.get("marathon") or {}
+        push(member_id, "secret_marathon", _member_streak_days(items, tz_name), int(marathon.get("days_in_row") or 7))
+        sugar = secrets.get("sugar_daddy") or {}
+        month_total = sum(
+            float(item.get("amount", 0))
+            for item in items
+            if in_window(_expense_ts(item), month_start, month_end)
+        )
+        push(member_id, "secret_sugar_daddy", month_total, float(sugar.get("month_total") or 10000))
+    return rows
+
+
+# ---------------------------------------------------------------------------
 # Составные вьюхи для API
 # ---------------------------------------------------------------------------
 
@@ -1374,18 +2289,31 @@ def bootstrap(
         "leaderboard": leaderboard(state, expenses=period_expenses),
         "totals_all": totals(state),
         "totals_period": totals(state, period_expenses),
+        "spending": spending_stats(state, config, since=since, until=until),
         "recent": query_expenses(state, limit=40),
         "wishlist_open": wishlist_open(state),
         "wishlist_done": wishlist_done(state),
         "requests": requests_view(state),
         "achievements": achievements(state, config, now=now),
+        "achievement_progress": achievement_progress(state, config, now=now),
+        "secret_hints": [
+            {"id": key, "title": str(value.get("title") or key), "hint": str(value.get("hint") or "????")}
+            for key, value in ((config.get("secret_achievements") or {}).items())
+        ],
         "me": me,
         "quick_titles": list(config.get("quick_titles") or []),
         "poke_phrases": list(config.get("poke_phrases") or []),
         "light_phrases": list(config.get("light_phrases") or []),
         "streak": streak(state, config, now=now),
+        "budget": month_budget(state, config, now=now),
+        "forecast": month_forecast(state, config, now=now),
+        "light": light_state(state),
+        "notes": [dict(entry) for entry in (state.get("fridge_notes") or [])][::-1],
+        "crown": crown_holder(state, config, now=now),
+        "crowns": crowns_history(state),
         "roulette": {
             "stats": roulette_stats(state, now=now, tz_name=tz_name),
-            "history": [dict(entry) for entry in state.get("roulette", [])[-10:]][::-1],
+            "history": roulette_history(state, limit=10),
+            "limits": roulette_limits(state, config, now=now),
         },
     }

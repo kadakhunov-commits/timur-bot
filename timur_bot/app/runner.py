@@ -8,10 +8,12 @@ from timur_bot.services.bot_logic import (
     setup_obshak_bot_ui,
     start_funny_scan_loop,
     start_life_loop,
+    start_obshak_notify_loop,
     start_rolling_memory_loop,
     start_vigvamcev_loop,
     stop_funny_scan_loop,
     stop_life_loop,
+    stop_obshak_notify_loop,
     stop_rolling_memory_loop,
     stop_vigvamcev_loop,
 )
@@ -23,6 +25,7 @@ async def _post_init(application: Application) -> None:
     await start_vigvamcev_loop(application)
     await start_funny_scan_loop(application)
     await start_rolling_memory_loop(application)
+    await start_obshak_notify_loop(application)
 
 
 async def _post_shutdown(application: Application) -> None:
@@ -31,6 +34,7 @@ async def _post_shutdown(application: Application) -> None:
     await stop_rolling_memory_loop()
     await stop_life_loop()
     await stop_vigvamcev_loop()
+    await stop_obshak_notify_loop()
 
 
 def main() -> None:

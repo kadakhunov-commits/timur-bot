@@ -215,3 +215,148 @@ def test_commands_are_registered_even_without_miniapp_url(monkeypatch):
     assert application.bot.menu_calls == []
     commands = [command.command for command in application.bot.command_calls[0]]
     assert commands == ["obshak", "start"]
+
+
+# --- быстрая запись и фоновая рассылка -------------------------------
+
+
+def test_quick_add_parses_amount_and_title():
+    parsed = bot_logic.parse_quick_add("/obshak 500 майонез", bot_logic.OBSHAK_DEFAULTS, {})
+    assert parsed == {"amount": 500.0, "title": "майонез", "category": "other"}
+
+
+def test_quick_add_accepts_category_and_currency_suffix():
+    parsed = bot_logic.parse_quick_add("/obshak 120,50 хлеб еда", bot_logic.OBSHAK_DEFAULTS, {})
+    assert parsed["amount"] == 120.5
+    assert parsed["title"] == "хлеб"
+    assert parsed["category"] == "food"
+    rub = bot_logic.parse_quick_add("/obshak 300р мыло быт", bot_logic.OBSHAK_DEFAULTS, {})
+    assert rub["amount"] == 300.0
+    assert rub["category"] == "household"
+
+
+def test_quick_add_guesses_category_from_history():
+    state = build_state()
+    parsed = bot_logic.parse_quick_add("/obshak 200 Майонез", bot_logic.OBSHAK_DEFAULTS, state)
+    assert parsed["category"] == "food"
+
+
+def test_quick_add_ignores_card_and_pin_commands():
+    assert bot_logic.parse_quick_add("/obshak", bot_logic.OBSHAK_DEFAULTS, {}) is None
+    assert bot_logic.parse_quick_add("/obshak pin", bot_logic.OBSHAK_DEFAULTS, {}) is None
+    assert bot_logic.parse_quick_add("/obshak майонез", bot_logic.OBSHAK_DEFAULTS, {}) is None
+
+
+def test_digest_text_summarizes_week():
+    # Дайджест считает текущую неделю, поэтому покупку ставим «сейчас».
+    state = obshak_service.default_state(bot_logic.OBSHAK_DEFAULTS)
+    obshak_service.add_expense(
+        state,
+        member_id="amir",
+        amount=700,
+        title="закупка",
+        category="food",
+        created_at=obshak_service.now_local("Europe/Moscow"),
+    )
+    text = bot_logic._obshak_digest_text(state)
+    assert "ГАЗЕТА СОСЕДЕЙ" in text
+    assert "Амир" in text
+
+
+def test_digest_skips_empty_state():
+    state = obshak_service.default_state(bot_logic.OBSHAK_DEFAULTS)
+    assert bot_logic._obshak_digest_text(state)
+
+
+class _FakeSendBot:
+    def __init__(self):
+        self.sent = []
+
+    async def send_message(self, chat_id, text, **kwargs):
+        self.sent.append({"chat_id": chat_id, "text": text, "kwargs": kwargs})
+        return None
+
+
+def test_outbox_loop_sends_and_clears(monkeypatch, tmp_path):
+    monkeypatch.setattr(bot_logic, "OBSHAK_PATH", tmp_path / "obshak.json")
+    config = dict(bot_logic.OBSHAK_DEFAULTS)
+    config["notify_chat_id"] = -100500
+    monkeypatch.setattr(bot_logic, "OBSHAK_DEFAULTS", config)
+
+    with obshak_service.lock():
+        state = obshak_service.load_state(bot_logic.OBSHAK_PATH, config)
+        obshak_service.enqueue_notification(state, config, kind="expense", text="купили майонез")
+        obshak_service.save_state(bot_logic.OBSHAK_PATH, state)
+
+    class _App:
+        def __init__(self):
+            self.bot = _FakeSendBot()
+
+    app = _App()
+    asyncio.run(bot_logic._obshak_send_outbox(app))
+    assert app.bot.sent[0]["chat_id"] == -100500
+    assert "майонез" in app.bot.sent[0]["text"]
+    assert app.bot.sent[0]["kwargs"].get("parse_mode") == "HTML"
+
+    saved = obshak_service.load_state(bot_logic.OBSHAK_PATH, config)
+    assert saved["outbox"] == []
+
+
+def test_digest_runs_once_per_monday(monkeypatch, tmp_path):
+    monkeypatch.setattr(bot_logic, "OBSHAK_PATH", tmp_path / "obshak.json")
+    config = dict(bot_logic.OBSHAK_DEFAULTS)
+    config["notify_chat_id"] = -100500
+    monkeypatch.setattr(bot_logic, "OBSHAK_DEFAULTS", config)
+
+    monday = datetime(2026, 9, 14, 10, 0, tzinfo=timezone.utc)  # понедельник
+    monkeypatch.setattr(
+        obshak_service, "now_local", lambda tz_name="Europe/Moscow", now=None: monday.astimezone(
+            obshak_service.resolve_timezone(tz_name)
+        )
+    )
+    with obshak_service.lock():
+        state = obshak_service.load_state(bot_logic.OBSHAK_PATH, config)
+        obshak_service.add_expense(
+            state, member_id="amir", amount=500, title="закупка",
+            created_at=monday, tz_name="Europe/Moscow",
+        )
+        obshak_service.save_state(bot_logic.OBSHAK_PATH, state)
+
+    class _App:
+        def __init__(self):
+            self.bot = _FakeSendBot()
+
+    app = _App()
+    asyncio.run(bot_logic._obshak_maybe_digest(app))
+    asyncio.run(bot_logic._obshak_maybe_digest(app))
+    assert len(app.bot.sent) == 1, "газета не должна дублироваться в один день"
+    assert "ГАЗЕТА СОСЕДЕЙ" in app.bot.sent[0]["text"]
+
+
+def test_digest_skips_other_weekdays(monkeypatch, tmp_path):
+    monkeypatch.setattr(bot_logic, "OBSHAK_PATH", tmp_path / "obshak.json")
+    config = dict(bot_logic.OBSHAK_DEFAULTS)
+    config["notify_chat_id"] = -100500
+    monkeypatch.setattr(bot_logic, "OBSHAK_DEFAULTS", config)
+
+    wednesday = datetime(2026, 9, 16, 10, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(
+        obshak_service, "now_local", lambda tz_name="Europe/Moscow", now=None: wednesday.astimezone(
+            obshak_service.resolve_timezone(tz_name)
+        )
+    )
+    with obshak_service.lock():
+        state = obshak_service.load_state(bot_logic.OBSHAK_PATH, config)
+        obshak_service.add_expense(
+            state, member_id="amir", amount=500, title="закупка",
+            created_at=wednesday, tz_name="Europe/Moscow",
+        )
+        obshak_service.save_state(bot_logic.OBSHAK_PATH, state)
+
+    class _App:
+        def __init__(self):
+            self.bot = _FakeSendBot()
+
+    app = _App()
+    asyncio.run(bot_logic._obshak_maybe_digest(app))
+    assert app.bot.sent == []

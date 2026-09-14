@@ -343,3 +343,165 @@ def test_static_assets_are_served(client):
         assert response.status_code == 200, name
         assert response.headers["Cache-Control"] == "no-cache"
     assert client.get("/miniapp/assets/../obshak.html").status_code in (400, 404)
+
+
+# --- новые эндпоинты: свет, записки, кот, рулетка, пнуть, фильтры -----
+
+
+def test_expenses_filters_search_and_paging(client):
+    link(client, AMIR, "amir")
+    link(client, KADYR, "kadyr")
+    for index in range(3):
+        client.post(
+            "/api/obshak/expenses",
+            json={"amount": 100 + index, "title": "майонез" if index % 2 == 0 else "хлеб", "category": "food"},
+            headers=headers(AMIR),
+        )
+    client.post(
+        "/api/obshak/expenses",
+        json={"amount": 700, "title": "мыло", "category": "household"},
+        headers=headers(KADYR),
+    )
+    by_search = client.get("/api/obshak/expenses?q=майонез", headers=headers(AMIR)).get_json()
+    assert by_search["total"] == 2
+    by_member = client.get("/api/obshak/expenses?member=kadyr", headers=headers(AMIR)).get_json()
+    assert by_member["total"] == 1
+    by_category = client.get("/api/obshak/expenses?category=household", headers=headers(AMIR)).get_json()
+    assert by_category["total"] == 1
+    page = client.get("/api/obshak/expenses?limit=2", headers=headers(AMIR)).get_json()
+    assert len(page["expenses"]) == 2
+    assert page["has_more"] is True
+    last = client.get("/api/obshak/expenses?limit=2&offset=2", headers=headers(AMIR)).get_json()
+    assert len(last["expenses"]) == 2
+    assert last["has_more"] is False
+
+
+def test_light_endpoint_is_shared(client):
+    link(client, AMIR, "amir")
+    off = client.post("/api/obshak/light", json={"on": False}, headers=headers(AMIR)).get_json()
+    assert off["light"]["on"] is False
+    payload = client.get("/api/obshak/bootstrap", headers=headers(AMIR)).get_json()
+    assert payload["light"]["on"] is False
+
+
+def test_notes_endpoints(client):
+    link(client, AMIR, "amir")
+    created = client.post("/api/obshak/notes", json={"text": "кто съел сыр"}, headers=headers(AMIR))
+    assert created.status_code == 201
+    note = created.get_json()["note"]
+    payload = client.get("/api/obshak/bootstrap", headers=headers(AMIR)).get_json()
+    assert payload["notes"][0]["text"] == "кто съел сыр"
+    empty = client.post("/api/obshak/notes", json={"text": "  "}, headers=headers(AMIR))
+    assert empty.get_json()["error"] == "empty_title"
+    removed = client.delete("/api/obshak/notes/" + note["id"], headers=headers(AMIR))
+    assert removed.status_code == 200
+    again = client.delete("/api/obshak/notes/" + note["id"], headers=headers(AMIR))
+    assert again.status_code == 404
+
+
+def test_pet_pat_endpoint_and_limit(client):
+    link(client, AMIR, "amir")
+    first = client.post("/api/obshak/pet/pat", headers=headers(AMIR)).get_json()
+    assert first["today"] == 1
+    assert first["total"] == 1
+    payload = client.get("/api/obshak/bootstrap", headers=headers(AMIR)).get_json()
+    assert payload["pet"]["pats"] == 1
+
+
+def test_poke_endpoint_sends_and_cooldowns(client):
+    link(client, AMIR, "amir")
+    link(client, KADYR, "kadyr")
+    created = client.post(
+        "/api/obshak/requests",
+        json={"title": "шашлык", "amount": 500, "scope": "all", "per_person": True},
+        headers=headers(AMIR),
+    )
+    request_id = created.get_json()["request"]["id"]
+    first = client.post("/api/obshak/requests/" + request_id + "/poke", headers=headers(AMIR))
+    assert first.status_code == 200
+    assert "kadyr" in first.get_json()["poked"]
+    second = client.post("/api/obshak/requests/" + request_id + "/poke", headers=headers(AMIR))
+    assert second.status_code == 409
+    assert second.get_json()["error"] == "poke_cooldown"
+
+
+def test_roulette_history_and_confirm(client):
+    from timur_bot.services import obshak as domain
+
+    link(client, AMIR, "amir")
+    spin = client.post("/api/obshak/roulette", headers=headers(AMIR)).get_json()
+    history = client.get("/api/obshak/roulette/history", headers=headers(AMIR)).get_json()
+    assert history["history"][0]["member_id"] == spin["winner"]
+    assert history["limits"]["spins_today"] == 1
+
+    # Подтвердить может только победитель: ставим Амира сходившим явно.
+    with domain.lock():
+        state = domain.load_state(obshak_api._path(), obshak_api._settings())
+        state["roulette"].append({"member_id": "amir", "ts": spin["stats"]["last"]["ts"]})
+        domain.save_state(obshak_api._path(), state)
+
+    confirmed = client.post("/api/obshak/roulette/confirm", headers=headers(AMIR)).get_json()
+    assert confirmed["confirmed"] is True
+    assert confirmed["total_confirmed"] == 1
+    again = client.post("/api/obshak/roulette/confirm", headers=headers(AMIR))
+    assert again.status_code == 400
+    assert again.get_json()["error"] == "already_confirmed"
+
+
+def test_roulette_confirm_rejects_other_members_spin(client):
+    from timur_bot.services import obshak as domain
+
+    link(client, AMIR, "amir")
+    with domain.lock():
+        state = domain.load_state(obshak_api._path(), obshak_api._settings())
+        state["roulette"].append({"member_id": "dilyara", "ts": "2026-09-13T12:00:00+03:00"})
+        domain.save_state(obshak_api._path(), state)
+    response = client.post("/api/obshak/roulette/confirm", headers=headers(AMIR))
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "not_your_spin"
+
+
+def test_roulette_preview_does_not_record(client):
+    link(client, AMIR, "amir")
+    preview = client.get("/api/obshak/roulette", headers=headers(AMIR)).get_json()
+    assert preview["stats"]["total"] == 0
+    assert preview["limits"]["can_spin"] is True
+    payload = client.get("/api/obshak/bootstrap", headers=headers(AMIR)).get_json()
+    assert payload["roulette"]["stats"]["total"] == 0
+
+
+def test_expense_queues_notification_when_chat_configured(client, tmp_path, monkeypatch):
+    link(client, AMIR, "amir")
+    # Адрес уведомлений задаём через chat_id в конфиге миниаппа.
+    settings = dict(obshak_api._settings())
+    settings["notify_chat_id"] = -100500
+    monkeypatch.setattr(obshak_api, "_settings", lambda: settings)
+    client.post(
+        "/api/obshak/expenses",
+        json={"amount": 140, "title": "майонез", "category": "food"},
+        headers=headers(AMIR),
+    )
+    from timur_bot.services import obshak as domain
+
+    path = obshak_api._path()
+    state = domain.load_state(path, settings)
+    queued = state.get("outbox") or []
+    assert queued and queued[0]["kind"] == "expense"
+    assert "майонез" in queued[0]["text"]
+    assert queued[0]["chat_id"] == -100500
+
+
+def test_bootstrap_includes_budget_and_stats(client):
+    link(client, AMIR, "amir")
+    client.post(
+        "/api/obshak/expenses",
+        json={"amount": 5000, "title": "закупка", "category": "food"},
+        headers=headers(AMIR),
+    )
+    payload = client.get("/api/obshak/bootstrap", headers=headers(AMIR)).get_json()
+    assert payload["budget"]["spent"] == 5000
+    assert payload["spending"]["count"] == 1
+    assert payload["spending"]["average"] == 5000
+    assert payload["spending"]["categories"][0]["name"] == "Еда"
+    assert payload["achievement_progress"]
+    assert payload["secret_hints"]

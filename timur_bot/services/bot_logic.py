@@ -348,6 +348,7 @@ _VIGVAMCEV_SERVICE: VigvamcevService | None = None
 _VIGVAMCEV_SERVICE_ERROR = ""
 _FUNNY_SCAN_TASK: asyncio.Task[Any] | None = None
 _ROLLING_MEMORY_TASK: asyncio.Task[Any] | None = None
+_OBSHAK_NOTIFY_TASK: asyncio.Task[Any] | None = None
 _FUNNY_SCAN_LOCK = asyncio.Lock()
 _FUNNY_SCAN_STATE_LOCK = asyncio.Lock()
 _ROLLING_MEMORY_LOCK = asyncio.Lock()
@@ -7684,6 +7685,89 @@ def obshak_deep_link(bot_username: str, start: str = "home") -> str:
     return f"https://t.me/{bot_username}?startapp={quote(start)}"
 
 
+_AMOUNT_RE = re.compile(r"^\d+(?:[.,]\d{1,2})?$")
+
+
+def _obshak_parse_amount(token: str) -> Optional[float]:
+    """«500», «500,50», «500р», «500₽» — всё это сумма."""
+    cleaned = token.strip().replace("\u00a0", "")
+    cleaned = cleaned.rstrip("р₽rРP").strip()
+    cleaned = cleaned.replace(" ", "")
+    if not _AMOUNT_RE.match(cleaned):
+        return None
+    try:
+        value = float(cleaned.replace(",", "."))
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
+def _obshak_match_category(token: str, config: Dict[str, Any]) -> Optional[str]:
+    needle = token.strip().strip("#").lower()
+    if not needle:
+        return None
+    for entry in config.get("categories") or []:
+        key = str(entry.get("key") or "")
+        name = str(entry.get("name") or "")
+        if needle in {key.lower(), name.lower()}:
+            return key
+    return None
+
+
+def obshak_guess_category(state: Dict[str, Any], config: Dict[str, Any], title: str) -> str:
+    """Категория как в прошлый раз для такого же названия — иначе «прочее»."""
+    key = obshak_service.title_key(title)
+    candidates = [
+        item
+        for item in (state.get("expenses") or [])
+        if obshak_service.title_key(item.get("title")) == key
+    ]
+    if candidates:
+        latest = max(candidates, key=lambda item: str(item.get("created_at") or ""))
+        category = str(latest.get("category") or "")
+        if category and any(str(entry.get("key")) == category for entry in config.get("categories") or []):
+            return category
+    return "other"
+
+
+def parse_quick_add(
+    text: str,
+    config: Dict[str, Any],
+    state: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Разбирает «/obshak 500 майонез [еда]» в сумму, название и категорию."""
+    raw = str(text or "").strip()
+    if not raw.startswith("/"):
+        return None
+    parts = raw.split()
+    if len(parts) < 3:
+        return None
+    args = parts[1:]
+    amount: Optional[float] = None
+    amount_index: Optional[int] = None
+    for index, token in enumerate(args):
+        parsed = _obshak_parse_amount(token)
+        if parsed is not None:
+            amount = parsed
+            amount_index = index
+            break
+    if amount is None or amount_index is None:
+        return None
+    words = [word for position, word in enumerate(args) if position != amount_index]
+    category: Optional[str] = None
+    if len(words) > 1:
+        guessed = _obshak_match_category(words[-1], config)
+        if guessed:
+            category = guessed
+            words = words[:-1]
+    title = " ".join(words).strip()
+    if not title:
+        return None
+    if category is None:
+        category = obshak_guess_category(state or {}, config, title)
+    return {"amount": amount, "title": title, "category": category}
+
+
 async def _obshak_bot_username(context: ContextTypes.DEFAULT_TYPE) -> str:
     username = getattr(context.bot, "username", "") or ""
     if username:
@@ -7813,11 +7897,108 @@ async def obshak_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             member_id = obshak_service.resolve_member_id(_obshak_store(), user.id)
         except Exception:  # noqa: BLE001 — привязан или нет, карточка всё равно нужна
             member_id = None
+    args = (message.text or "").split()[1:]
     # `/obshak pin` перезакрепляет карточку, если прежний pinned потерялся.
-    force_pin = "pin" in (message.text or "").split()[1:]
-    await _send_obshak_card(
-        context, int(message.chat_id), member_id=member_id, force_pin=force_pin
+    if "pin" in args:
+        await _send_obshak_card(context, int(message.chat_id), member_id=member_id, force_pin=True)
+        return
+    if args:
+        handled = await _obshak_quick_add(update, context, member_id=member_id)
+        if handled:
+            return
+    await _send_obshak_card(context, int(message.chat_id), member_id=member_id)
+
+
+async def _obshak_quick_add(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    member_id: Optional[str],
+) -> bool:
+    """Запись покупки прямо в чат: «/obshak 500 майонез». Вернёт True, если ответили."""
+    message = update.effective_message
+    if message is None:
+        return False
+    parsed = parse_quick_add(message.text or "", OBSHAK_DEFAULTS, _obshak_store())
+    if parsed is None:
+        # Похоже на попытку записать, но формат не сложился — подсказываем.
+        await message.reply_text(
+            "не разобрал сумму. пиши так: /obshak 500 майонез еда\n"
+            "или открой кухню: /obshak"
+        )
+        return True
+    if not member_id:
+        bot_username = await _obshak_bot_username(context)
+        hint = obshak_deep_link(bot_username, "home") if bot_username else "/obshak"
+        await message.reply_text(
+            "сначала выбери свой аватар в «Соседях» — потом запись из чата заработает.\n" + hint
+        )
+        return True
+    currency = str(OBSHAK_DEFAULTS.get("currency") or "₽")
+    category_name = next(
+        (
+            str(entry.get("name"))
+            for entry in OBSHAK_DEFAULTS.get("categories") or []
+            if str(entry.get("key")) == parsed["category"]
+        ),
+        parsed["category"],
     )
+    try:
+        with obshak_service.lock():
+            state = _obshak_store()
+            quest_before = obshak_flavor.week_quest(state, OBSHAK_DEFAULTS)
+            budget_before = obshak_service.month_budget(state, OBSHAK_DEFAULTS)
+            expense = obshak_service.add_expense(
+                state,
+                member_id=member_id,
+                amount=parsed["amount"],
+                title=parsed["title"],
+                category=parsed["category"],
+                added_by=message.from_user.id if message.from_user else None,
+                source="chat",
+                tz_name=str(OBSHAK_DEFAULTS.get("timezone") or "Europe/Moscow"),
+            )
+            who = obshak_service.member_mention(state, member_id)
+            obshak_service.enqueue_notification(
+                state,
+                OBSHAK_DEFAULTS,
+                kind="expense",
+                text=(
+                    f"🧾 {who} записал: {expense['title']} — "
+                    f"{obshak_flavor.format_money(expense['amount'])} {currency} ({category_name})"
+                ),
+            )
+            quest_after = obshak_flavor.week_quest(state, OBSHAK_DEFAULTS)
+            if quest_before and quest_after and quest_after.get("done") and not quest_before.get("done"):
+                obshak_service.enqueue_notification(
+                    state,
+                    OBSHAK_DEFAULTS,
+                    kind="quest_done",
+                    text=f"🏁 Квест недели закрыт: {quest_after.get('title')}",
+                )
+            budget_after = obshak_service.month_budget(state, OBSHAK_DEFAULTS)
+            if (
+                budget_after.get("alert")
+                and float(budget_after["alert"]) > float((budget_before or {}).get("alert") or 0)
+                and obshak_service.notification_cooldown_left(state, OBSHAK_DEFAULTS, "budget_alert") == 0
+            ):
+                percent = int(round(float(budget_after["progress"]) * 100))
+                obshak_service.enqueue_notification(
+                    state,
+                    OBSHAK_DEFAULTS,
+                    kind="budget_alert",
+                    text=f"⚠️ Бюджет месяца на {percent}%: {obshak_flavor.format_money(budget_after['spent'])} {currency}",
+                )
+                obshak_service.mark_notified(state, "budget_alert")
+            obshak_service.save_state(OBSHAK_PATH, state)
+    except obshak_service.ObshakError as exc:
+        await message.reply_text(f"не записал: {exc}. пример: /obshak 500 майонез еда")
+        return True
+    await message.reply_text(
+        f"записал: {expense['title']} — {obshak_flavor.format_money(expense['amount'])} "
+        f"{currency} ({category_name})"
+    )
+    return True
 
 
 async def obshak_group_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -7869,6 +8050,137 @@ OBSHAK_BOT_COMMANDS = [
     BotCommand("obshak", "Соседи: кухня, вклады и кто идёт в магазин"),
     BotCommand("start", "Познакомиться"),
 ]
+
+
+OBSHAK_NOTIFY_INTERVAL_SECONDS = 60
+
+
+def _obshak_digest_text(state: Dict[str, Any]) -> str:
+    """Понедельничный выпуск: что было на кухне за неделю."""
+    currency = str(OBSHAK_DEFAULTS.get("currency") or "₽")
+    tz_name = str(OBSHAK_DEFAULTS.get("timezone") or "Europe/Moscow")
+    week_start, week_end = obshak_service.week_anchor(tz_name)
+    rows = [row for row in obshak_service.leaderboard(state, since=week_start, until=week_end) if row["total"] > 0]
+    summary = obshak_service.totals(state, obshak_service.query_expenses(state, since=week_start, until=week_end))
+    lines = ["📰 ГАЗЕТА СОСЕДЕЙ: итоги недели"]
+    if summary["count"]:
+        lines.append(
+            f"за неделю: {obshak_flavor.format_money(summary['total'])} {currency} за {summary['count']} покупок"
+        )
+    else:
+        lines.append("за неделю на кухне было тихо")
+    medals = ["🥇", "🥈", "🥉"]
+    for index, row in enumerate(rows[:3]):
+        lines.append(
+            f"{medals[index]} {row['name']} — {obshak_flavor.format_money(row['total'])} {currency}"
+        )
+    quest = obshak_flavor.week_quest(state, OBSHAK_DEFAULTS)
+    if quest:
+        if quest.get("done"):
+            lines.append(f"🏁 квест недели закрыт: {quest['title']}")
+        else:
+            lines.append(f"🎯 квест недели: {quest['title']} — {quest['progress']}/{quest['target']}")
+    past = obshak_service.crowns_history(state, limit=1)
+    if past:
+        crown = past[0]
+        lines.append(f"👑 корона {crown['month']}: {crown['member_id']}")
+    for headline in obshak_flavor.news(state, OBSHAK_DEFAULTS)[:2]:
+        lines.append(f"• {headline['text']}")
+    return "\n".join(lines)
+
+
+async def _obshak_send_outbox(application: Any) -> None:
+    """Забирает очередь из хранилища и отправляет сообщения от имени бота."""
+    with obshak_service.lock():
+        state = _obshak_store()
+        batch = obshak_service.take_outbox(state, limit=10)
+        if batch:
+            obshak_service.save_state(OBSHAK_PATH, state)
+    for item in batch:
+        chat_id = item.get("chat_id")
+        if chat_id is None:
+            continue
+        try:
+            await application.bot.send_message(
+                int(chat_id),
+                str(item.get("text") or ""),
+                parse_mode="HTML",
+                disable_web_page_preview=True,
+            )
+        except TelegramError as exc:
+            logger.warning("общак: уведомление в %s не ушло: %s", chat_id, exc)
+
+
+async def _obshak_maybe_digest(application: Any) -> None:
+    """По понедельникам — газета в беседу. Раз в день, отметка в meta.digest."""
+    tz_name = str(OBSHAK_DEFAULTS.get("timezone") or "Europe/Moscow")
+    local_now = obshak_service.now_local(tz_name)
+    if local_now.weekday() != 0:
+        return
+    with obshak_service.lock():
+        state = _obshak_store()
+        meta = state.setdefault("meta", {})
+        digest = meta.setdefault("digest", {})
+        today = local_now.date().isoformat()
+        if digest.get("last_monday") == today:
+            return
+        # Корона месяца: в первые дни нового месяца фиксируем итог прошлого.
+        if local_now.day <= 3:
+            obshak_service.award_crown(
+                state, OBSHAK_DEFAULTS, now=local_now - timedelta(days=local_now.day)
+            )
+        if not state.get("expenses"):
+            digest["last_monday"] = today
+            obshak_service.save_state(OBSHAK_PATH, state)
+            return
+        chat_id = obshak_service.notify_target_chat(state, OBSHAK_DEFAULTS)
+        text = _obshak_digest_text(state)
+        digest["last_monday"] = today
+        obshak_service.save_state(OBSHAK_PATH, state)
+    if not chat_id:
+        return
+    try:
+        await application.bot.send_message(
+            int(chat_id), text, parse_mode="HTML", disable_web_page_preview=True
+        )
+    except TelegramError as exc:
+        logger.warning("общак: газета в %s не ушла: %s", chat_id, exc)
+
+
+async def _obshak_notify_loop(application: Any) -> None:
+    """Фоновой контур общака: очередь уведомлений и понедельничная газета."""
+    logger.info("Запускаю общак notify loop")
+    try:
+        while True:
+            try:
+                await _obshak_send_outbox(application)
+                await _obshak_maybe_digest(application)
+            except Exception as exc:  # noqa: BLE001 — фон не должен падать
+                logger.error("общак: ошибка notify loop: %s", exc)
+            await asyncio.sleep(OBSHAK_NOTIFY_INTERVAL_SECONDS)
+    except asyncio.CancelledError:
+        logger.info("Общак notify loop остановлен")
+        raise
+
+
+async def start_obshak_notify_loop(application: Any) -> None:
+    global _OBSHAK_NOTIFY_TASK
+    if _OBSHAK_NOTIFY_TASK and not _OBSHAK_NOTIFY_TASK.done():
+        return
+    _OBSHAK_NOTIFY_TASK = asyncio.create_task(_obshak_notify_loop(application))
+
+
+async def stop_obshak_notify_loop() -> None:
+    global _OBSHAK_NOTIFY_TASK
+    if not _OBSHAK_NOTIFY_TASK:
+        return
+    _OBSHAK_NOTIFY_TASK.cancel()
+    try:
+        await _OBSHAK_NOTIFY_TASK
+    except asyncio.CancelledError:
+        pass
+    finally:
+        _OBSHAK_NOTIFY_TASK = None
 
 
 async def setup_obshak_bot_ui(application: Application) -> None:

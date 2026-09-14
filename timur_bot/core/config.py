@@ -418,6 +418,24 @@ DEFAULT_OBSHAK_QUESTS: List[Dict[str, Any]] = [
     {"key": "amount", "title": "Собрать 3 000 ₽ за неделю", "target": 3000},
 ]
 
+DEFAULT_OBSHAK_ROULETTE: Dict[str, Any] = {
+    "cooldown_hours": 1,
+    "max_spins_per_day": 10,
+    "no_repeat_winner": True,
+}
+
+DEFAULT_OBSHAK_NOTIFICATIONS: Dict[str, Any] = {
+    "enabled": True,
+    "events": ["expense", "request_created", "request_paid", "quest_done", "budget_alert", "roulette"],
+    "cooldown_minutes": 5,
+}
+
+DEFAULT_OBSHAK_SECRET_ACHIEVEMENTS: Dict[str, Dict[str, Any]] = {
+    "ghost": {"title": "Призрак кухни", "icon": "ghost", "hint": "????"},
+    "marathon": {"title": "Марафонец", "icon": "flame", "hint": "????", "days_in_row": 7},
+    "sugar_daddy": {"title": "Кормилец", "icon": "crown", "hint": "????", "month_total": 10000},
+}
+
 DEFAULT_OBSHAK_ROASTS: Dict[str, List[str]] = {
     "zero": ["{name}, ноль покупок. ты вообще тут живёшь?"],
     "absent": ["{name}, {days} дней без вклада. общак начал забывать твоё имя"],
@@ -513,6 +531,7 @@ def _normalize_obshak_defaults(raw: Any) -> Dict[str, Any]:
     for mood, fallback_phrases in DEFAULT_OBSHAK_PET_PHRASES.items():
         given = _coerce_str_list(phrases_raw.get(mood))
         phrases[mood] = given or list(fallback_phrases)
+    xp_raw = pet_raw.get("xp_bonus") if isinstance(pet_raw.get("xp_bonus"), dict) else {}
 
     achievements_raw = data.get("achievements") if isinstance(data.get("achievements"), dict) else {}
     achievements = {
@@ -552,6 +571,33 @@ def _normalize_obshak_defaults(raw: Any) -> Dict[str, Any]:
 
     weather_raw = data.get("weather") if isinstance(data.get("weather"), dict) else {}
 
+    roulette_raw = data.get("roulette") if isinstance(data.get("roulette"), dict) else {}
+    roulette = {
+        "cooldown_hours": max(0, _as_int(roulette_raw.get("cooldown_hours"), DEFAULT_OBSHAK_ROULETTE["cooldown_hours"])),
+        "max_spins_per_day": max(1, _as_int(roulette_raw.get("max_spins_per_day"), DEFAULT_OBSHAK_ROULETTE["max_spins_per_day"])),
+        "no_repeat_winner": bool(roulette_raw.get("no_repeat_winner", DEFAULT_OBSHAK_ROULETTE["no_repeat_winner"])),
+    }
+
+    notifications_raw = data.get("notifications") if isinstance(data.get("notifications"), dict) else {}
+    notifications = {
+        "enabled": bool(notifications_raw.get("enabled", DEFAULT_OBSHAK_NOTIFICATIONS["enabled"])),
+        "events": _coerce_str_list(notifications_raw.get("events")) or list(DEFAULT_OBSHAK_NOTIFICATIONS["events"]),
+        "cooldown_minutes": max(0, _as_int(notifications_raw.get("cooldown_minutes"), DEFAULT_OBSHAK_NOTIFICATIONS["cooldown_minutes"])),
+    }
+    thresholds_raw = data.get("budget_alert_thresholds")
+    budget_alert_thresholds = (
+        sorted({float(x) for x in thresholds_raw if float(x) > 0})
+        if isinstance(thresholds_raw, list) and thresholds_raw
+        else [0.8, 1.0]
+    )
+    secrets_raw = data.get("secret_achievements") if isinstance(data.get("secret_achievements"), dict) else {}
+    secret_achievements: Dict[str, Dict[str, Any]] = {}
+    for key, fallback in DEFAULT_OBSHAK_SECRET_ACHIEVEMENTS.items():
+        entry = secrets_raw.get(key) if isinstance(secrets_raw.get(key), dict) else {}
+        merged = dict(fallback)
+        merged.update({k: v for k, v in entry.items() if k in {"title", "icon", "hint", "days_in_row", "month_total"}})
+        secret_achievements[key] = merged
+
     return {
         "currency": str(data.get("currency", "₽")).strip() or "₽",
         "currency_short": str(data.get("currency_short", "руб")).strip() or "руб",
@@ -568,8 +614,18 @@ def _normalize_obshak_defaults(raw: Any) -> Dict[str, Any]:
             "name": str(pet_raw.get("name", "Барсик")).strip() or "Барсик",
             "levels": _normalize_named_levels(pet_raw.get("levels"), DEFAULT_OBSHAK_PET_LEVELS),
             "phrases": phrases,
+            "xp_bonus": {
+                "streak_per_day": max(0, _as_int(xp_raw.get("streak_per_day"), 2)),
+                "quest_done": max(0, _as_int(xp_raw.get("quest_done"), 5)),
+            },
         },
         "achievements": achievements,
+        "secret_achievements": secret_achievements,
+        "roulette": roulette,
+        "notifications": notifications,
+        "notify_chat_id": _as_int(data.get("notify_chat_id"), 0),
+        "monthly_budget": max(0, _as_int(data.get("monthly_budget"), 0)),
+        "budget_alert_thresholds": budget_alert_thresholds,
         "poke_phrases": _coerce_str_list(data.get("poke_phrases"))
         or ["ну ты чё, мы же свои", "общак всё помнит", "скинь, не позорься"],
         "news": news,

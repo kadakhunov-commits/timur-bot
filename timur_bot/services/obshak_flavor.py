@@ -73,14 +73,22 @@ def pet_state(
     *,
     now: Optional[datetime] = None,
 ) -> Dict[str, Any]:
-    """Кот-тамагочи: уровень от числа покупок, настроение от активности."""
+    """Кот-тамагочи: уровень от опыта (покупки + серия + квест), настроение от активности."""
     pet_config = config.get("pet") or {}
     levels = _levels(config, "pet")
     expenses = state.get("expenses", [])
     count = len(expenses)
-    current, following, index = _level_for(float(count), levels)
     tz_name = str(config.get("timezone") or "Europe/Moscow")
     local_now = obshak.now_local(tz_name, now=now)
+    # Уровень считается от XP: вклад, серия дней и закрытый квест недели.
+    streak_state = obshak.streak(state, config, now=now)
+    quest = week_quest(state, config, now=now)
+    bonus = pet_config.get("xp_bonus") or {}
+    xp = count
+    xp += int(streak_state.get("current") or 0) * int(bonus.get("streak_per_day") or 0)
+    if quest and quest.get("done"):
+        xp += int(bonus.get("quest_done") or 0)
+    current, following, index = _level_for(float(xp), levels)
 
     last_ts = _last_expense_ts(state)
     days_since: Optional[int] = None
@@ -112,9 +120,13 @@ def pet_state(
     seed = count + local_now.timetuple().tm_yday
     phrase = str(phrases[seed % len(phrases)])
 
+    pats_map = state.get("pets_pats") if isinstance(state.get("pets_pats"), dict) else {}
+    pats_total = sum(len(value) for value in pats_map.values() if isinstance(value, list))
     return {
         "name": pet_config.get("name") or "Барсик",
         "count": count,
+        "xp": xp,
+        "pats": pats_total,
         "level": {"name": current.get("name"), "threshold": current.get("threshold"), "index": index},
         "next": (
             {"name": following.get("name"), "threshold": following.get("threshold")}
