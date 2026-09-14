@@ -228,6 +228,46 @@
       "..mmmm..",
       ".mmmmmm."
     ],
+    ghost: [
+      "..mmmm..",
+      ".mmmmmm.",
+      "mmwmmwmm",
+      "mmwmmwmm",
+      "mmmmmmmm",
+      "mmmmmmmm",
+      "mmmmmmmm",
+      "m.m..m.m"
+    ],
+    coin: [
+      "..mmmm..",
+      ".mwwwwm.",
+      "mwmmmmwm",
+      "mwmmmmwm",
+      "mwmmmmwm",
+      "mwmmmmwm",
+      ".mwwwwm.",
+      "..mmmm.."
+    ],
+    pie: [
+      "...mmm..",
+      ".mmwwmm.",
+      "mmwwwwmm",
+      "mwwmmmmm",
+      "mwwmmmmm",
+      "mwwmmmmm",
+      ".mmmmmm.",
+      "..mmmm.."
+    ],
+    chart: [
+      "........",
+      "....mm..",
+      "..m.mm..",
+      "..m.mm.m",
+      "m.m.mm.m",
+      "m.m.mm.m",
+      "mmmmmmm.",
+      "........"
+    ],
     heart: [
       ".mm..mm.",
       "mmmmmmmm",

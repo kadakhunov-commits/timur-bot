@@ -226,7 +226,7 @@
     return out.join("");
   }
 
-  function fridge(magnets) {
+  function fridge(magnets, notes) {
     var out = [
       rect(6, 66, 48, 92, "#d7dde8"),
       rect(6, 66, 48, 4, "#b9c2cf"),
@@ -241,6 +241,15 @@
       var y = 73 + Math.floor(i / 3) * 13;
       out.push(rect(x, y, 8, 8, colors[i % colors.length]));
       out.push(rect(x, y, 8, 2, "rgba(255,255,255,.45)"));
+    }
+    if (notes > 0) {
+      // Записки на дверце: их видно, даже если дверцу не открывать.
+      out.push('<g class="fridge-notes">');
+      for (var n = 0; n < Math.min(notes, 3); n += 1) {
+        var ny = 88 + n * 5;
+        out.push(rect(12, ny, 14, 4, n % 2 ? "#f4efe0" : "#ffd447", ' opacity="0.92"'));
+      }
+      out.push("</g>");
     }
     return out.join("");
   }
@@ -293,7 +302,7 @@
     return out;
   }
 
-  function character(member, total, maxTotal, index, isMe, animate) {
+  function character(member, total, maxTotal, index, isMe, animate, crown) {
     var art = window.ObshakArt;
     var cx = CENTERS[index % CENTERS.length];
     var ratio = maxTotal > 0 ? Math.max(0, Math.min(1, total / maxTotal)) : 0;
@@ -311,6 +320,11 @@
     if (leader) {
       out.push('<g transform="translate(' + (cx - 9) + "," + (avatarY - 13) + ')">' +
         '<g class="crown" transform="scale(2)">' + art.crownMarkup() + "</g></g>");
+    }
+    if (crown) {
+      // Корона месяца: золотая и выше обычной — видно, кто держит месяц.
+      out.push('<g transform="translate(' + (cx - 11) + "," + (avatarY - 25) + ')">' +
+        '<g class="crown crown-month" transform="scale(2.4)">' + art.crownMarkup(null, "#ffd447") + "</g></g>");
     }
     // Имя — прописными: у строчных «д» и «ы» в пиксельном шрифте кривые начертания.
     out.push(text(cx, 171, String(member.name).toUpperCase(), member.color, 8, "middle", 700));
@@ -343,7 +357,7 @@
     parts.push(trophyShelf());
     parts.push(corkboard((ctx.recentCount || 0)));
     parts.push(lightSwitch());
-    parts.push(fridge(ctx.wishlistCount || 0));
+    parts.push(fridge(ctx.wishlistCount || 0, (ctx.notes || []).length));
     parts.push(shoppingBag());
     parts.push(table());
     parts.push(jar((ctx.jar && ctx.jar.progress) || 0));
@@ -360,10 +374,11 @@
     parts.push(hotspot(10, 152, 34, 46, "roulette", "Кто идёт в магазин"));
     parts.push(hotspot(210, 60, 28, 34, "light", "Выключатель"));
 
+    var crownKey = (ctx.crown && ctx.crown.member_id) || null;
     members.forEach(function (member, index) {
       var row = byKey[member.key] || { total: 0, count: 0 };
       total += row.total || 0;
-      parts.push(character(member, row.total || 0, maxTotal, index, ctx.me === member.key, animate));
+      parts.push(character(member, row.total || 0, maxTotal, index, ctx.me === member.key, animate, crownKey === member.key));
     });
 
     return '<svg class="scene" viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="xMidYMid meet" aria-label="Кухня соседей">' +

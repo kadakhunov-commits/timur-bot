@@ -48,6 +48,11 @@
     me: null,
     startParam: "",
     historyFilter: null,
+    historyCategory: null,
+    historyQuery: "",
+    historyLimit: 20,
+    historyRows: null,
+    historyTotal: 0,
     listsTab: "wishlist",
     calendarMember: null,
     calc: null,
@@ -58,6 +63,14 @@
     weather: null,
     roulette: null,
     catTimer: null
+  };
+
+  var CATEGORY_ICONS = {
+    food: "jar",
+    household: "soap",
+    drinks: "bottle",
+    fun: "spark",
+    other: "box"
   };
 
   var WEATHER_LABEL = {
@@ -84,7 +97,8 @@
   function money(value) {
     var number = Number(value) || 0;
     var whole = Math.abs(number - Math.round(number)) < 0.005;
-    var text = whole ? String(Math.round(number)) : number.toFixed(2);
+    // Копейки пишем через запятую: «1 347,06», а не «1 347.06».
+    var text = whole ? String(Math.round(number)) : number.toFixed(2).replace(".", ",");
     return text.replace(/\B(?=(\d{3})+(?!\d))/g, "\u00a0");
   }
 
@@ -262,11 +276,23 @@
       renderChrome();
       renderScene();
       drawPanel();
+      syncLight();
       if (previousLevel !== null && payload.jar.level.index > previousLevel) {
         celebrate(payload.jar.level.name);
       }
       return payload;
     });
+  }
+
+  function syncLight() {
+    // Свет сервера общий: если сосед выключил — увидим все.
+    var light = state.data && state.data.light;
+    if (!light) { return; }
+    var next = light.on ? "on" : "off";
+    if (next === state.light) { return; }
+    state.light = next;
+    try { window.localStorage.setItem("obshak.light", next); } catch (error) { /* ignore */ }
+    applyLight();
   }
 
   // --- каркас -----------------------------------------------------------
@@ -278,6 +304,7 @@
     renderShelf();
     renderHomeBars();
     renderStrip();
+    renderBudget();
     Array.prototype.forEach.call(el.periodBar.querySelectorAll(".period"), function (button) {
       button.classList.toggle("is-active", button.dataset.period === state.period);
     });
@@ -285,12 +312,28 @@
     el.soundBtn.textContent = sfx.isEnabled() ? "♪" : "×";
   }
 
+  function renderBudget() {
+    if (!el.budgetBar) { return; }
+    var budget = (state.data && state.data.budget) || {};
+    if (!budget.enabled) { el.budgetBar.hidden = true; return; }
+    el.budgetBar.hidden = false;
+    var percent = Math.min(100, Math.round((budget.progress || 0) * 100));
+    var over = percent >= 100;
+    var warn = percent >= 80;
+    el.budgetFill.style.width = percent + "%";
+    el.budgetBar.classList.toggle("is-over", over);
+    el.budgetBar.classList.toggle("is-warn", warn && !over);
+    el.budgetLabel.textContent = over ? "бюджет месяца пробит" : "бюджет месяца";
+    el.budgetValue.textContent = money(budget.spent) + " / " + money(budget.limit) + "\u00a0" + currency();
+  }
+
   function renderShelf() {
     var items = [
       { act: "add-open", icon: "calc", label: "ЗАПИСАТЬ" },
       { act: "history-open", icon: "receipt", label: "ЧЕКИ" },
       { act: "lists-open", icon: "note", label: "СПИСКИ" },
-      { act: "achievements-open", icon: "trophy", label: "КУБКИ" }
+      { act: "achievements-open", icon: "trophy", label: "КУБКИ" },
+      { act: "stats-open", icon: "chart", label: "ЦИФРЫ" }
     ];
     el.shelf.innerHTML = items.map(function (item) {
       return '<button class="shelf-item" type="button" data-act="' + item.act + '">' +
@@ -339,7 +382,8 @@
   }
 
   function toggleLight() {
-    state.light = state.light === "off" ? "on" : "off";
+    var next = state.light === "off" ? "on" : "off";
+    state.light = next;
     try { window.localStorage.setItem("obshak.light", state.light); } catch (error) { /* ignore */ }
     applyLight();
     sfx.click();
@@ -349,6 +393,12 @@
       scene.hopCat(el.stage);
       haptic("light");
     }
+    // Свет общий: выключатель виден всем, кто откроет кухню.
+    api("/light", { method: "POST", body: { on: state.light === "on" } })
+      .then(function (payload) {
+        if (payload.light && state.data) { state.data.light = payload.light; }
+      })
+      .catch(function () { /* свет — не критично, остаёмся с локальным */ });
   }
 
   function loadWeather() {
@@ -371,6 +421,8 @@
       jar: data.jar,
       pet: data.pet,
       me: state.me,
+      crown: data.crown,
+      notes: data.notes || [],
       wishlistCount: data.wishlist_open.length,
       recentCount: data.recent.length
     });
@@ -516,14 +568,41 @@
     state.calc = {
       amount: prefill.amount ? String(prefill.amount) : "",
       title: prefill.title || "",
-      category: prefill.category || "other",
+      category: prefill.category || "",
       member: state.me,
+      categoryTouched: !!prefill.category,
       wishlistId: prefill.wishlistId || null
     };
+    if (!state.calc.category) {
+      // Категория по умолчанию — как в прошлый раз для такого же названия.
+      state.calc.category = guessCategory(state.calc.title) || "other";
+    }
     if (!prefill.title && last && last.member_id === state.me) {
       state.calc.last = { title: last.title, amount: last.amount, category: last.category };
     }
     return state.calc;
+  }
+
+  function guessCategory(title) {
+    var needle = String(title || "").trim().toLowerCase();
+    if (!needle) { return null; }
+    var rows = (state.data && state.data.recent) || [];
+    for (var i = 0; i < rows.length; i += 1) {
+      if (String(rows[i].title || "").trim().toLowerCase() === needle && rows[i].category) {
+        return rows[i].category;
+      }
+    }
+    return null;
+  }
+
+  function categoryIcon(key) {
+    var categories = (state.data && state.data.categories) || [];
+    for (var i = 0; i < categories.length; i += 1) {
+      if (categories[i].key === key) {
+        return CATEGORY_ICONS[categories[i].icon] || categories[i].icon || CATEGORY_ICONS[key] || "box";
+      }
+    }
+    return CATEGORY_ICONS[key] || "box";
   }
 
   function calcValue() {
@@ -542,8 +621,45 @@
         var ready = calcValue() > 0 && (calc.title || "").trim();
         return '<button class="btn primary block" type="button" data-act="add-save"' + (ready ? "" : " disabled") + ">ЗАПИСАТЬ</button>";
       },
-      onMount: function () { bindAddInput(); }
+      onMount: function () {
+        bindAddInput();
+        scrollActiveCategoryIntoView();
+      }
     });
+  }
+
+  function catChipsHtml(calc, categories) {
+    return categories.map(function (category) {
+      var active = calc.category === category.key;
+      return '<button class="cat-chip' + (active ? " is-active" : "") +
+        (calc.categoryTouched ? "" : " is-hint") + '" type="button" data-act="add-cat" data-cat="' + h(category.key) + '"' +
+        ' aria-pressed="' + (active ? "true" : "false") + '">' +
+        art.badge(categoryIcon(category.key), { size: 20, color: active ? "#20160a" : "#f0e2cd", contrast: active ? "#ffd447" : "#3a2b1e" }) +
+        '<span class="cat-chip-name">' + h(category.name) + "</span></button>";
+    }).join("");
+  }
+
+  function addCategoryRow(calc, categories) {
+    // Категорию видно сразу под суммой: раньше её прятал скролл под клавиатурой.
+    return '<div class="field cat-field"><span class="field-label">Категория' +
+      (calc.categoryTouched ? "" : ' <i class="cat-hint">— выбери или оставь «' + h(categoryName(calc.category)) + '»</i>') +
+      '</span><div class="cat-row" role="group" aria-label="Категория">' + catChipsHtml(calc, categories) + "</div></div>";
+  }
+
+  function scrollActiveCategoryIntoView() {
+    var active = el.panelRoot.querySelector(".cat-chip.is-active");
+    if (active && active.scrollIntoView) {
+      active.scrollIntoView({ block: "nearest", inline: "center" });
+    }
+  }
+
+  function refreshCategoryRow() {
+    var row = el.panelRoot.querySelector(".cat-row");
+    if (!row || !state.calc) { return; }
+    row.innerHTML = catChipsHtml(state.calc, (state.data && state.data.categories) || []);
+    var hint = el.panelRoot.querySelector(".cat-hint");
+    if (hint) { hint.innerHTML = "— выбери или оставь «" + h(categoryName(state.calc.category)) + "»"; }
+    scrollActiveCategoryIntoView();
   }
 
   function addBody() {
@@ -557,6 +673,7 @@
       : "";
     return "" +
       '<div class="calc-display"><span class="calc-amount">' + (calc.amount ? h(calc.amount) : "0") + '</span><span class="calc-cur">' + currency() + "</span></div>" +
+      addCategoryRow(calc, categories) +
       '<div class="calc-keys">' +
       keys.map(function (key) {
         var label = key === "back" ? "◀" : key;
@@ -568,10 +685,6 @@
       (quick.length ? '<div class="chips" style="margin-bottom:14px">' + quick.map(function (title) {
         return '<button class="chip' + (calc.title === title ? " is-active" : "") + '" type="button" data-act="add-title" data-title="' + h(title) + '">' + h(title) + "</button>";
       }).join("") + "</div>" : "") +
-      '<div class="field"><span class="field-label">Категория</span><div class="chips">' +
-      categories.map(function (category) {
-        return '<button class="chip' + (calc.category === category.key ? " is-active" : "") + '" type="button" data-act="add-cat" data-cat="' + h(category.key) + '">' + h(category.name) + "</button>";
-      }).join("") + "</div></div>" +
       (calc.wishlistId ? "" :
         '<div class="field"><span class="field-label">Кто платил</span><div class="chips">' +
         members.map(function (member) {
@@ -587,7 +700,10 @@
     var spec = state.panelSpec;
     var body = el.panelRoot.querySelector(".panel-body");
     if (body && spec && spec.body === addBody) {
+      // Сохраняем позицию скролла: иначе панель прыгает наверх на каждом нажатии.
+      var scrollTop = body.scrollTop;
       body.innerHTML = addBody();
+      body.scrollTop = scrollTop;
       bindAddInput();
     }
   }
@@ -599,6 +715,14 @@
       state.calc.title = input.value;
       var save = el.panelRoot.querySelector('[data-act="add-save"]');
       if (save) { save.disabled = !(calcValue() > 0 && state.calc.title.trim()); }
+      if (!state.calc.categoryTouched) {
+        // Пока категорию не выбирали руками — подставляем по истории названий.
+        var guessed = guessCategory(input.value);
+        if (guessed && guessed !== state.calc.category) {
+          state.calc.category = guessed;
+          refreshCategoryRow();
+        }
+      }
     });
     input.addEventListener("focus", function () {
       window.setTimeout(function () { input.scrollIntoView({ block: "center", behavior: "smooth" }); }, 250);
@@ -669,6 +793,7 @@
         return '<div class="stack-gap">' +
           '<button class="btn primary block" type="button" data-act="add-open">ЗАПИСАТЬ ЕЩЁ</button>' +
           '<button class="btn ghost block" type="button" data-act="share-receipt" data-id="' + h(expense.id) + '">ПОДЕЛИТЬСЯ ЧЕКОМ</button>' +
+          '<button class="btn ghost block" type="button" data-act="share-story" data-id="' + h(expense.id) + '">СТОРИС ВЕРТИКАЛЬНЫЙ</button>' +
           '<button class="btn ghost block" type="button" data-act="panel-close">ГОТОВО</button>' +
           "</div>";
       }
@@ -678,6 +803,8 @@
   // --- история ----------------------------------------------------------
 
   function openHistory() {
+    state.historyRows = null;
+    state.historyLimit = 20;
     setPanel({
       title: "ЧЕКИ",
       sub: money(state.data.totals_all.total) + "\u00a0" + currency(),
@@ -686,22 +813,51 @@
         return '<button class="btn ghost block" type="button" data-act="export">ВЫГРУЗИТЬ CSV</button>';
       }
     });
+    loadHistory();
   }
 
-  function historyBody() {
-    var rows = state.data.recent || [];
-    if (state.historyFilter) {
-      rows = rows.filter(function (row) { return row.member_id === state.historyFilter; });
-    }
-    var filters = '<div class="chips" style="margin-bottom:12px">' +
+  function loadHistory() {
+    var params = ["limit=" + state.historyLimit, "offset=0"];
+    if (state.historyFilter) { params.push("member=" + encodeURIComponent(state.historyFilter)); }
+    if (state.historyCategory) { params.push("category=" + encodeURIComponent(state.historyCategory)); }
+    if (state.historyQuery) { params.push("q=" + encodeURIComponent(state.historyQuery)); }
+    return api("/expenses?" + params.join("&")).then(function (payload) {
+      state.historyRows = payload.expenses || [];
+      state.historyTotal = payload.total || 0;
+      state.historyHasMore = !!payload.has_more;
+      drawPanel();
+      return payload;
+    }).catch(fail);
+  }
+
+  function historyFilters() {
+    var categories = state.data.categories || [];
+    var memberRow = '<div class="chips" style="margin-bottom:8px">' +
       '<button class="chip' + (!state.historyFilter ? " is-active" : "") + '" type="button" data-act="hist-filter" data-member="">Все</button>' +
       state.data.members.map(function (member) {
         return '<button class="chip' + (state.historyFilter === member.key ? " is-active" : "") + '" type="button" data-act="hist-filter" data-member="' + h(member.key) + '">' + h(member.name) + "</button>";
       }).join("") + "</div>";
-    if (!rows.length) {
-      return filters + '<div class="empty">Пока пусто. Купите майонез — и он появится здесь.</div>';
+    var categoryRow = '<div class="chips" style="margin-bottom:8px">' +
+      '<button class="chip' + (!state.historyCategory ? " is-active" : "") + '" type="button" data-act="hist-cat" data-cat="">Все категории</button>' +
+      categories.map(function (category) {
+        return '<button class="chip' + (state.historyCategory === category.key ? " is-active" : "") + '" type="button" data-act="hist-cat" data-cat="' + h(category.key) + '">' + h(category.name) + "</button>";
+      }).join("") + "</div>";
+    var searchRow = '<div class="row-between" style="gap:8px;margin-bottom:12px">' +
+      '<input class="input" id="histQuery" type="search" maxlength="40" placeholder="поиск: майонез" value="' + h(state.historyQuery) + '" autocomplete="off">' +
+      '<button class="btn primary" type="button" data-act="hist-search">🔍</button></div>';
+    return memberRow + categoryRow + searchRow;
+  }
+
+  function historyBody() {
+    var filters = historyFilters();
+    var rows = state.historyRows;
+    if (rows === null) {
+      return filters + '<div class="empty">считаю…</div>';
     }
-    return filters + '<div class="rows">' + rows.map(function (row) {
+    if (!rows.length) {
+      return filters + '<div class="empty">Ничего не нашлось. Попробуй другой фильтр.</div>';
+    }
+    var body = filters + '<div class="rows">' + rows.map(function (row) {
       var mine = row.member_id === state.me || state.data.is_owner;
       var reactions = REACTIONS.map(function (reaction) {
         var owners = Object.keys(row.reactions || {}).filter(function (owner) { return row.reactions[owner] === reaction.key; });
@@ -717,6 +873,11 @@
         (mine ? '<div class="row-actions"><button class="icon-mini" type="button" data-act="exp-del" data-id="' + h(row.id) + '" aria-label="Удалить">✕</button></div>' : "") +
         "</div>";
     }).join("") + "</div>";
+    body += '<p class="center muted" style="margin-top:12px">показано ' + rows.length + " из " + state.historyTotal + "</p>";
+    if (state.historyHasMore) {
+      body += '<button class="btn ghost block" type="button" data-act="hist-more" style="margin-top:8px">ПОКАЗАТЬ ЕЩЁ</button>';
+    }
+    return body;
   }
 
   // --- списки: вишлист и запросы ---------------------------------------
@@ -736,6 +897,7 @@
   function wishlistBody() {
     var open = state.data.wishlist_open || [];
     var done = (state.data.wishlist_done || []).slice(0, 6);
+    var notes = state.data.notes || [];
     var addForm = '<div class="row-between" style="gap:8px;margin-bottom:12px">' +
       '<input class="input" id="wishTitle" type="text" maxlength="60" placeholder="что надо купить" autocomplete="off">' +
       '<button class="btn primary" type="button" data-act="wish-add">+</button></div>';
@@ -754,7 +916,16 @@
       return '<div class="note-row is-done"><div class="row-main"><div class="row-title">' + h(item.title) + "</div>" +
         '<div class="row-sub">' + h(memberName(item.claimed_by)) + " • " + formatWhen(item.done_at) + "</div></div></div>";
     }).join("") + "</div>" : "";
-    return addForm + openHtml + doneHtml;
+    var notesHtml = '<div class="section-title">ЗАПИСКИ НА ХОЛОДИЛЬНИКЕ</div>' +
+      '<div class="row-between" style="gap:8px;margin-bottom:10px">' +
+      '<input class="input" id="noteText" type="text" maxlength="80" placeholder="кто съел моё?.." autocomplete="off">' +
+      '<button class="btn primary" type="button" data-act="note-add">+</button></div>' +
+      (notes.length ? '<div class="rows">' + notes.map(function (note) {
+        return '<div class="note-row"><div class="row-main"><div class="row-title">' + h(note.text) + "</div>" +
+          '<div class="row-sub">' + h(memberName(note.created_by)) + " • " + formatWhen(note.created_at) + "</div></div>" +
+          '<div class="row-actions"><button class="icon-mini" type="button" data-act="note-del" data-id="' + h(note.id) + '" aria-label="Снять">✕</button></div></div>';
+      }).join("") + "</div>" : '<div class="empty">Холодильник чистый.</div>');
+    return addForm + openHtml + doneHtml + notesHtml;
   }
 
   function requestsBody() {
@@ -802,23 +973,110 @@
 
   function achievementsBody() {
     var badges = state.data.achievements || [];
-    if (!badges.length) {
-      return '<div class="empty">Кубков пока нет. Первая покупка всё начнёт.</div>';
-    }
-    var byMember = {};
-    badges.forEach(function (badge) {
-      var key = badge.member_id || "all";
-      (byMember[key] = byMember[key] || []).push(badge);
+    var progress = state.data.achievement_progress || [];
+    var progressByMember = {};
+    progress.forEach(function (row) {
+      (progressByMember[row.member_id] = progressByMember[row.member_id] || []).push(row);
     });
-    return Object.keys(byMember).map(function (key) {
-      return '<div class="section-title">' + h(memberName(key)).toUpperCase() + "</div>" +
-        '<div class="badges">' + byMember[key].map(function (badge) {
-          return '<div class="badge">' + art.badge(badge.icon, { size: 26, color: memberColor(key) }) +
-            '<div class="badge-title">' + h(badge.title) + "</div>" +
-            (badge.detail ? '<div class="badge-detail">' + h(badge.detail) + "</div>" : "") +
-            "</div>";
-        }).join("") + "</div>";
+    var hints = state.data.secret_hints || [];
+    var members = state.data.members || [];
+    var anyProgress = progress.filter(function (row) { return !row.done; });
+    var sections = members.map(function (member) {
+      var mine = badges.filter(function (badge) { return badge.member_id === member.key; });
+      var pending = (progressByMember[member.key] || []).filter(function (row) { return !row.done; });
+      if (!mine.length && !pending.length) { return ""; }
+      var badgeHtml = mine.length ? '<div class="badges">' + mine.map(function (badge) {
+        return '<div class="badge' + (badge.secret ? " is-secret" : "") + '">' + art.badge(badge.icon, { size: 26, color: member.color }) +
+          '<div class="badge-title">' + h(badge.title) + "</div>" +
+          (badge.detail ? '<div class="badge-detail">' + h(badge.detail) + "</div>" : "") +
+          "</div>";
+      }).join("") + "</div>" : '<div class="empty">кубков пока нет</div>';
+      var progressHtml = pending.length ? '<div class="progress-list">' + pending.slice(0, 5).map(function (row) {
+        var label = progressLabel(row.id);
+        var percent = row.target > 0 ? Math.min(100, Math.round(100 * row.progress / row.target)) : 0;
+        var value = row.target >= 1000
+          ? money(row.progress) + " / " + money(row.target) + "\u00a0" + currency()
+          : row.progress + " / " + row.target;
+        return '<div class="progress-row"><div class="pie-head"><span>' + h(label) + "</span><span>" + h(value) + "</span></div>" +
+          '<div class="req-progress"><div style="width:' + percent + '%"></div></div></div>';
+      }).join("") + "</div>" : "";
+      return '<div class="section-title">' + h(memberName(member.key)).toUpperCase() + "</div>" + badgeHtml + progressHtml;
     }).join("");
+    var hintHtml = hints.length ? '<div class="section-title">СЕКРЕТНЫЕ КУБКИ</div><div class="secret-grid">' +
+      hints.map(function (hint) {
+        var unlocked = badges.some(function (badge) { return badge.id.indexOf("secret_") === 0; });
+        return '<div class="secret-card"><div class="secret-mark">?</div>' +
+          '<div class="badge-title">' + h(unlocked ? hint.title : "？？？") + "</div>" +
+          '<div class="badge-detail">' + h(unlocked ? hint.title : "условие скрыто") + "</div></div>";
+      }).join("") + "</div>" : "";
+    if (!badges.length && !anyProgress.length) {
+      return '<div class="empty">Кубков пока нет. Первая покупка всё начнёт.</div>' + hintHtml;
+    }
+    return sections + hintHtml;
+  }
+
+  function progressLabel(id) {
+    var labels = {
+      collector: "разных категорий",
+      repeat: "повторов одного товара",
+      patron: "покупок за месяц",
+      stability: "недель подряд",
+      veteran: "дней с первого вклада",
+      big_one: "крупнейшая покупка",
+      secret_marathon: "дней подряд",
+      secret_sugar_daddy: "вложено за месяц"
+    };
+    return labels[id] || id;
+  }
+
+  // --- цифры: бюджет, средний чек, пирог, прогноз -----------------------
+
+  function openStats() {
+    setPanel({ title: "ЦИФРЫ СОСЕДЕЙ", body: statsBody });
+  }
+
+  function statsBody() {
+    var data = state.data;
+    var budget = data.budget || {};
+    var forecast = data.forecast || {};
+    var spending = data.spending || {};
+    var categories = spending.categories || [];
+    var lines = [];
+    if (budget.enabled) {
+      var percent = Math.min(100, Math.round((budget.progress || 0) * 100));
+      var over = (budget.progress || 0) >= 1;
+      lines.push('<div class="stat-hero' + (over ? " is-over" : "") + '">' +
+        '<div class="row-sub">бюджет месяца</div>' +
+        '<div class="row-amount" style="font-size:18px">' + money(budget.spent) + " / " + money(budget.limit) + "\u00a0" + currency() + "</div>" +
+        '<div class="req-progress" style="margin-top:10px"><div style="width:' + percent + '%"></div></div>' +
+        '<div class="row-sub" style="margin-top:8px">' +
+        (over
+          ? "перебор на " + money(budget.over) + "\u00a0" + currency()
+          : "осталось " + money(budget.remaining) + "\u00a0" + currency() +
+            (budget.daily_allowance ? " • можно тратить ~" + money(budget.daily_allowance) + " в день" : "")) +
+        "</div></div>");
+      if (forecast.will_exceed) {
+        lines.push('<p class="muted center" style="margin:8px 0 0">темп ведёт к ' + money(forecast.projected) + "\u00a0" + currency() + " к концу месяца — это больше лимита</p>");
+      } else if (forecast.projected) {
+        lines.push('<p class="muted center" style="margin:8px 0 0">по темпу выйдет ~' + money(forecast.projected) + "\u00a0" + currency() + " за месяц</p>");
+      }
+    }
+    var rows = '<div class="rows" style="margin-top:12px">' +
+      '<div class="row"><div class="row-main"><div class="row-sub">Средний чек</div></div><div class="row-amount">' + money(spending.average) + "\u00a0" + currency() + "</div></div>" +
+      '<div class="row"><div class="row-main"><div class="row-sub">Покупок за период</div></div><div class="row-amount">' + (spending.count || 0) + "</div></div>" +
+      (spending.biggest ? '<div class="row"><div class="row-main"><div class="row-sub">Крупнейшая</div><div class="row-title">' + h(spending.biggest.title) + '</div></div><div class="row-amount">' + money(spending.biggest.amount) + "\u00a0" + currency() + "</div></div>" : "") +
+      "</div>";
+    var pie = categories.length ? '<div class="section-title">КУДА УХОДЯТ ДЕНЬГИ</div><div class="pie-list">' +
+      categories.map(function (row) {
+        var percent = Math.round((row.share || 0) * 100);
+        return '<div class="pie-row"><div class="pie-head"><span>' + h(row.name) + "</span><span>" + money(row.total) + "\u00a0" + currency() + " • " + percent + "%</span></div>" +
+          '<div class="req-progress"><div style="width:' + Math.max(2, percent) + '%"></div></div></div>';
+      }).join("") + "</div>" : "";
+    var footer = '<div class="stack-gap" style="margin-top:18px">' +
+      '<button class="btn ghost block" type="button" data-act="share-month">СПОНСОР МЕСЯЦА КАРТИНКОЙ</button>' +
+      '<button class="btn ghost block" type="button" data-act="calendar-open">КАЛЕНДАРЬ АКТИВНОСТИ</button>' +
+      "</div>";
+    return (lines.length ? lines.join("") : '<div class="empty">Бюджет не задан — поставь monthly_budget в config/obshak.yaml.</div>') + rows + pie + footer;
   }
 
   // --- карточка участника ----------------------------------------------
@@ -943,6 +1201,10 @@
 
   function petBody() {
     var pet = state.data.pet;
+    var xpToNext = pet.next ? Math.max(0, pet.next.threshold - (pet.xp || pet.count)) : 0;
+    var xpFrom = pet.level.threshold || 0;
+    var xpSpan = pet.next ? Math.max(1, pet.next.threshold - xpFrom) : 1;
+    var xpPercent = pet.next ? Math.min(100, Math.round(100 * ((pet.xp || pet.count) - xpFrom) / xpSpan)) : 100;
     return '<div class="center" style="padding-bottom:14px">' +
       '<div class="pet-speech">' + h(pet.phrase) + "</div>" +
       art.cat(pet.sleeping, { size: 96 }) +
@@ -950,11 +1212,14 @@
       '<div class="rows">' +
       '<div class="row"><div class="row-main"><div class="row-sub">Уровень</div><div class="row-title">' + h(pet.level.name) + "</div></div></div>" +
       '<div class="row"><div class="row-main"><div class="row-sub">Настроение</div><div class="row-title">' + h(moodLabel(pet.mood)) + "</div></div></div>" +
+      '<div class="row"><div class="row-main"><div class="row-sub">Опыт</div><div class="row-title">' + (pet.xp || pet.count) + " XP</div></div><div class=\"row-amount\">" + (pet.pats ? pet.pats + " мур" : "") + "</div></div>" +
       '<div class="row"><div class="row-main"><div class="row-sub">Съедено покупок</div></div><div class="row-amount">' + pet.count + "</div></div>" +
-      (pet.next ? '<div class="row"><div class="row-main"><div class="row-sub">До уровня «' + h(pet.next.name) + '»</div></div><div class="row-amount">' + Math.max(0, pet.next.threshold - pet.count) + " шт</div></div>" : "") +
+      (pet.next ? '<div class="row"><div class="row-main"><div class="row-sub">До уровня «' + h(pet.next.name) + '»</div></div><div class="row-amount">' + xpToNext + " XP</div></div>" : "") +
       (pet.days_since_last !== null && pet.days_since_last !== undefined ? '<div class="row"><div class="row-main"><div class="row-sub">Дней без покупок</div></div><div class="row-amount">' + pet.days_since_last + "</div></div>" : "") +
       "</div>" +
-      '<button class="btn ghost block" type="button" data-act="pet-pat" style="margin-top:14px">ПОГЛАДИТЬ</button>';
+      (pet.next ? '<div class="req-progress" style="margin-top:12px"><div style="width:' + xpPercent + '%"></div></div>' : "") +
+      '<p class="muted center" style="margin-top:10px">XP растёт от покупок, серии дней и закрытых квестов.</p>' +
+      '<button class="btn ghost block" type="button" data-act="pet-pat" style="margin-top:10px">ПОГЛАДИТЬ</button>';
   }
 
   function moodLabel(mood) {
@@ -1050,8 +1315,15 @@
       title: "КТО ИДЁТ В МАГАЗИН",
       body: rouletteBody,
       foot: function () {
-        return '<button class="btn primary block" type="button" data-act="roulette-spin"' +
-          (state.roulette && state.roulette.spinning ? " disabled" : "") + ">КРУТИТЬ</button>";
+        var limits = (state.data.roulette && state.data.roulette.limits) || {};
+        var spinning = state.roulette && state.roulette.spinning;
+        var canSpin = limits.can_spin !== false && !spinning;
+        var buttons = '<button class="btn primary block" type="button" data-act="roulette-spin"' +
+          (canSpin ? "" : " disabled") + ">КРУТИТЬ</button>";
+        if (state.roulette && state.roulette.winner && !spinning) {
+          buttons += '<button class="btn ghost block" type="button" data-act="roulette-confirm" style="margin-top:8px">Я СХОДИЛ ✓</button>';
+        }
+        return buttons;
       }
     });
   }
@@ -1066,6 +1338,7 @@
 
   function rouletteBody() {
     var data = state.data.roulette || { stats: { counts: {}, total: 0, last: null } };
+    var limits = data.limits || {};
     var counts = data.stats.counts || {};
     var members = state.data.members;
     var weights = members.map(function (member) { return 1 / (1 + (counts[member.key] || 0)); });
@@ -1089,31 +1362,56 @@
       ? '<p class="center muted" style="margin-top:10px">прошлый раз ходил ' + h(memberName(last.member_id)) + "</p>"
       : "";
 
+    var cooldown = limits.cooldown_left || 0;
+    var spinHint = "";
+    if (cooldown > 0) {
+      spinHint = '<p class="muted center" style="margin-top:8px">следующий бросок через ' + formatLeft(cooldown) + "</p>";
+    } else if (limits.spins_left === 0) {
+      spinHint = '<p class="muted center" style="margin-top:8px">на сегодня прокрутки кончились</p>';
+    }
+
+    var history = data.history || [];
+    var historyHtml = history.length ? '<div class="section-title">ПОХОДЫ</div><div class="rows">' + history.slice(0, 8).map(function (entry) {
+      return '<div class="row"><div class="row-avatar">' + art.avatar(entry.member_id, { size: 26 }) + "</div>" +
+        '<div class="row-main"><div class="row-title">' + h(entry.name) + "</div>" +
+        '<div class="row-sub">' + formatWhen(entry.ts) + (entry.confirmed_at ? " • сходил" : "") + "</div></div></div>";
+    }).join("") + "</div>" : "";
+
     return '<div class="slot">' +
       '<div class="slot-reel" id="slotReel">' + slotFaceHtml(winnerKey, !!spinning) + "</div>" +
       '<div class="slot-caption" id="slotCaption">' +
       (winner ? h(memberName(winner)) + " идёт в магазин" : "нажми «крутить» — рулетка выберет честно") +
       "</div></div>" +
+      spinHint +
       '<div class="section-title">ШАНСЫ</div><div class="rows">' + rows + "</div>" + lastLine +
       '<p class="muted" style="margin-top:14px;line-height:1.5">Рулетка подравнивает: кто ходил чаще, у того шанс ниже. ' +
-      "За две недели: " + (data.stats.total || 0) + " " + pluralTimes(data.stats.total || 0) + ".</p>";
+      "За две недели: " + (data.stats.total || 0) + " " + pluralTimes(data.stats.total || 0) + ".</p>" +
+      historyHtml +
+      '<div class="panel-inline-foot">' +
+      '<button class="btn ghost block" type="button" data-act="share-roulette">КАРТИНКОЙ В БЕСЕДУ</button>' +
+      "</div>";
+  }
+
+  function formatLeft(seconds) {
+    var value = Math.max(0, Math.round(seconds));
+    if (value < 60) { return value + " сек"; }
+    var minutes = Math.round(value / 60);
+    if (minutes < 60) { return minutes + " мин"; }
+    return Math.round(minutes / 60) + " ч";
   }
 
   function spinRoulette() {
     if (state.roulette && state.roulette.spinning) { return; }
     state.roulette = { spinning: true, winner: null };
     drawPanel();
-    var reel = document.getElementById("slotReel");
-    var caption = document.getElementById("slotCaption");
-    var members = state.data.members;
-    var started = Date.now();
     var timer = window.setInterval(function () {
       var node = document.getElementById("slotReel");
       if (!node) { return; }
-      var random = members[Math.floor(Math.random() * members.length)];
+      var random = state.data.members[Math.floor(Math.random() * state.data.members.length)];
       node.innerHTML = slotFaceHtml(random.key, true);
     }, 90);
     sfx.click();
+    var started = Date.now();
 
     api("/roulette", { method: "POST", body: {} }).then(function (payload) {
       var wait = Math.max(0, 1500 - (Date.now() - started));
@@ -1135,6 +1433,15 @@
       state.roulette = { spinning: false, winner: null };
       fail(error);
     });
+  }
+
+  function confirmRoulette() {
+    api("/roulette/confirm", { method: "POST" }).then(function (payload) {
+      sfx.coin();
+      haptic("success");
+      toast("Поход засчитан: всего " + payload.total_confirmed);
+      return refresh();
+    }).catch(fail);
   }
 
   // --- стрик и квест недели ---------------------------------------------
@@ -1171,6 +1478,7 @@
       "</div>" +
       '<div class="flame-row">' + cells + "</div>" +
       '<div class="section-title">КВЕСТ НЕДЕЛИ</div>' + questHtml +
+      '<button class="btn ghost block" type="button" data-act="share-streak" style="margin-top:14px">ОГОНЬ КАРТИНКОЙ</button>' +
       '<p class="muted" style="margin-top:14px;line-height:1.5">Стрик — дни подряд, когда соседи что-то покупали. ' +
       "Пропустили день — огонь гаснет. Квест общий и меняется каждый понедельник.</p>";
   }
@@ -1180,6 +1488,8 @@
   function showCatDialog() {
     var roast = state.data && state.data.roast;
     if (!roast || !roast.text || !el.catRoot) { return; }
+    // Не перекрываем панель, если человек уже что-то открыл.
+    if (state.panelSpec) { return; }
     closeCatDialog();
     var node = document.createElement("div");
     node.className = "cat-dialog";
@@ -1222,7 +1532,13 @@
 
       case "add-key": addKey(node.dataset.key); break;
       case "add-title": syncAdd(); state.calc.title = node.dataset.title; syncAdd(); sfx.click(); break;
-      case "add-cat": syncAdd(); state.calc.category = node.dataset.cat; syncAdd(); sfx.click(); break;
+      case "add-cat":
+        syncAdd();
+        state.calc.category = node.dataset.cat;
+        state.calc.categoryTouched = true;
+        syncAdd();
+        sfx.click();
+        break;
       case "add-payer": syncAdd(); state.calc.member = node.dataset.member; syncAdd(); sfx.click(); break;
       case "add-repeat":
         if (state.calc.last) {
@@ -1234,14 +1550,42 @@
         break;
       case "add-save": syncAdd(); saveExpense(); break;
 
-      case "hist-filter": state.historyFilter = node.dataset.member || null; sfx.click(); drawPanel(); break;
+      case "hist-filter":
+        state.historyFilter = node.dataset.member || null;
+        state.historyLimit = 20;
+        sfx.click();
+        loadHistory();
+        break;
+      case "hist-cat":
+        state.historyCategory = node.dataset.cat || null;
+        state.historyLimit = 20;
+        sfx.click();
+        loadHistory();
+        break;
+      case "hist-search": {
+        var queryNode = document.getElementById("histQuery");
+        state.historyQuery = queryNode ? queryNode.value.trim() : "";
+        state.historyLimit = 20;
+        sfx.click();
+        loadHistory();
+        break;
+      }
+      case "hist-more":
+        state.historyLimit += 20;
+        sfx.click();
+        loadHistory();
+        break;
       case "exp-del":
         api("/expenses/" + encodeURIComponent(node.dataset.id), { method: "DELETE" })
-          .then(function () { sfx.pop(); return refresh(); }).catch(fail);
+          .then(function () { sfx.pop(); return refresh(); })
+          .then(function () { return loadHistory(); })
+          .catch(fail);
         break;
       case "exp-react":
         api("/expenses/" + encodeURIComponent(node.dataset.id) + "/reaction", { method: "POST", body: { reaction: node.dataset.r } })
-          .then(function () { sfx.pop(); haptic("light"); return refresh(); }).catch(fail);
+          .then(function () { sfx.pop(); haptic("light"); return refresh(); })
+          .then(function () { return loadHistory(); })
+          .catch(fail);
         break;
 
       case "lists-tab": state.listsTab = node.dataset.tab; sfx.click(); drawPanel(); break;
@@ -1253,6 +1597,11 @@
       case "wish-done": wishDone(node.dataset.id); break;
       case "wish-del":
         api("/wishlist/" + encodeURIComponent(node.dataset.id), { method: "DELETE" })
+          .then(function () { sfx.pop(); return refresh(); }).catch(fail);
+        break;
+      case "note-add": noteAdd(); break;
+      case "note-del":
+        api("/notes/" + encodeURIComponent(node.dataset.id), { method: "DELETE" })
           .then(function () { sfx.pop(); return refresh(); }).catch(fail);
         break;
 
@@ -1277,9 +1626,17 @@
         break;
       case "req-poke": {
         var phrases = state.data.poke_phrases || ["скинь, не позорься"];
-        var phrase = phrases[Math.floor(Math.random() * phrases.length)];
-        sfx.hop();
-        toast(phrase);
+        api("/requests/" + encodeURIComponent(node.dataset.id) + "/poke", { method: "POST" })
+          .then(function (payload) {
+            sfx.hop();
+            haptic("success");
+            toast(payload.phrase || phrases[0]);
+            return refresh();
+          })
+          .catch(function (error) {
+            if (error.code === "poke_cooldown") { toast("Уже напоминали — дай им время"); return; }
+            fail(error);
+          });
         break;
       }
 
@@ -1290,24 +1647,52 @@
         break;
       case "cal-day": openCalendarDay(node.dataset.day); break;
 
-      case "pet-pat": sfx.hop(); haptic("light"); celebratePat(); break;
+      case "pet-pat": patPet(); break;
       case "pick": pick(node.dataset.member); break;
       case "roulette-open": sfx.click(); openRoulette(); break;
       case "roulette-spin": spinRoulette(); break;
+      case "roulette-confirm": confirmRoulette(); break;
       case "quests-open": sfx.click(); openQuests(); break;
+      case "stats-open": sfx.click(); openStats(); break;
       case "cat-dialog-close": closeCatDialog(); break;
 
       case "share-receipt": shareReceipt(node.dataset.id); break;
       case "share-cert": shareCertificate(node.dataset.member); break;
+      case "share-month": shareMonth(); break;
+      case "share-streak": shareStreak(); break;
+      case "share-roulette": shareRoulette(); break;
+      case "share-story": shareStory(node.dataset.id); break;
       case "export": exportCsv(); break;
       default: break;
     }
   }
 
-  function celebratePat() {
-    var pet = state.data.pet;
-    toast(pet.phrase);
-    scene.hopCat(el.stage);
+  function patPet() {
+    sfx.hop();
+    haptic("light");
+    api("/pet/pat", { method: "POST" }).then(function (payload) {
+      var pet = state.data.pet;
+      if (pet) { pet.pats = (pet.pats || 0) + 1; }
+      toast(pet && pet.phrase ? pet.phrase : "мур");
+      scene.hopCat(el.stage);
+      drawPanel();
+      if (payload.left !== null && payload.left !== undefined && payload.left === 0) {
+        toast("Кот устал мурчать, приходи завтра");
+      }
+    }).catch(function (error) {
+      if (error.code === "pet_tired") { toast("Кот устал мурчать, приходи завтра"); return; }
+      fail(error);
+    });
+  }
+
+  function noteAdd() {
+    var input = document.getElementById("noteText");
+    var text = input ? input.value.trim() : "";
+    if (!text) { toast("Напиши записку", { type: "error" }); return; }
+    api("/notes", { method: "POST", body: { text: text } }).then(function () {
+      sfx.pop();
+      return refresh();
+    }).catch(fail);
   }
 
   function addKey(key) {
@@ -1405,6 +1790,94 @@
     share.shareImage(canvas, "sosedi-gramota.png", memberName(memberKey) + " — " + money(row.total) + "\u00a0" + currency());
   }
 
+  function shareMonth() {
+    var data = state.data;
+    var spending = data.spending || {};
+    var crown = data.crown;
+    var leader = (data.crowns && data.crowns[0]) || null;
+    var key = crown ? crown.member_id : (leader ? leader.member_id : null);
+    if (!key) { toast("Пока некого короновать", { type: "error" }); return; }
+    var rows = (data.leaderboard || []).slice(0, 3).map(function (row) {
+      return { name: row.name, amountText: money(row.total) };
+    });
+    var monthLabel = new Date().toLocaleDateString("ru-RU", { month: "long", year: "numeric" });
+    var canvas = share.monthCanvas({
+      memberKey: key,
+      memberName: memberName(key),
+      amountText: money(crown ? crown.total : leader.total),
+      currency: currency(),
+      monthLabel: monthLabel,
+      rows: rows,
+      totalsLabel: "касса соседей: " + money(data.totals_all.total) + "\u00a0" + currency()
+    });
+    share.shareImage(canvas, "sosedi-sponsor.png", "Спонсор месяца: " + memberName(key));
+  }
+
+  function shareStreak() {
+    var data = state.data;
+    var streak = data.streak || { current: 0, best: 0, days: [] };
+    var quest = data.quest;
+    var canvas = share.streakCanvas({
+      days: streak.current,
+      daysLabel: pluralDays(streak.current) + " подряд",
+      best: streak.best,
+      hot: streak.current > 0,
+      cells: (streak.days || []).map(function (day) { return !!day.hit; }),
+      questTitle: quest ? quest.title : "квест недели",
+      questLine: quest ? (quest.done ? "выполнен" : "прогресс " + quest.progress + "/" + quest.target) : "",
+      questDone: !!(quest && quest.done),
+      totalsLabel: "касса: " + money(data.totals_all.total) + "\u00a0" + currency()
+    });
+    share.shareImage(canvas, "sosedi-ogon.png", "Огонь соседей: " + streak.current + " " + pluralDays(streak.current));
+  }
+
+  function shareRoulette() {
+    var data = state.data;
+    var roulette = data.roulette || { stats: { counts: {} } };
+    var winner = (state.roulette && state.roulette.winner) || (roulette.stats.last && roulette.stats.last.member_id);
+    if (!winner) { toast("Сначала крути рулетку", { type: "error" }); return; }
+    var counts = roulette.stats.counts || {};
+    var members = data.members || [];
+    var weights = members.map(function (member) { return 1 / (1 + (counts[member.key] || 0)); });
+    var total = weights.reduce(function (acc, value) { return acc + value; }, 0) || 1;
+    var rows = members.map(function (member, index) {
+      return { name: member.name, chanceText: Math.round(100 * weights[index] / total) + "%" };
+    });
+    var winnerRow = null;
+    rows.forEach(function (row, index) {
+      if (members[index].key === winner) { winnerRow = row; }
+    });
+    var canvas = share.rouletteCanvas({
+      memberKey: winner,
+      memberName: memberName(winner),
+      chanceText: winnerRow ? "шанс был " + winnerRow.chanceText : "",
+      rows: rows,
+      totalsLabel: "за две недели: " + (roulette.stats.total || 0) + " " + pluralTimes(roulette.stats.total || 0)
+    });
+    share.shareImage(canvas, "sosedi-ruletka.png", "В магазин идёт " + memberName(winner));
+  }
+
+  function shareStory(expenseId) {
+    var row = null;
+    (state.data.recent || []).forEach(function (item) { if (item.id === expenseId) { row = item; } });
+    if (!row) { toast("Не нашёл чек", { type: "error" }); return; }
+    var data = state.data;
+    var quest = data.quest;
+    var crown = data.crowns && data.crowns[0];
+    var canvas = share.storyCanvas({
+      memberKey: row.member_id,
+      memberName: memberName(row.member_id),
+      item: row.title,
+      amountText: money(row.amount),
+      currency: currency(),
+      questLine: quest ? "квест: " + quest.progress + "/" + quest.target : "",
+      crownLine: crown ? "корона месяца: " + memberName(crown.member_id) : "",
+      streakLine: (data.streak.current || 0) + " " + pluralDays(data.streak.current || 0) + " подряд",
+      totalsLabel: "касса: " + money(data.totals_all.total) + "\u00a0" + currency()
+    });
+    share.shareImage(canvas, "sosedi-story.png", row.title + " — " + money(row.amount) + "\u00a0" + currency());
+  }
+
   // --- события ----------------------------------------------------------
 
   function bind() {
@@ -1482,6 +1955,10 @@
     el.pickerRoot = document.getElementById("pickerRoot");
     el.toastRoot = document.getElementById("toastRoot");
     el.statusStrip = document.getElementById("statusStrip");
+    el.budgetBar = document.getElementById("budgetBar");
+    el.budgetLabel = document.getElementById("budgetLabel");
+    el.budgetFill = document.getElementById("budgetFill");
+    el.budgetValue = document.getElementById("budgetValue");
     el.catRoot = document.getElementById("catRoot");
     el.fxCanvas = document.getElementById("fxCanvas");
     el.boot = document.getElementById("boot");
@@ -1531,6 +2008,7 @@
       renderChrome();
       renderScene();
       loadWeather();
+      syncLight();
       window.setTimeout(showCatDialog, 1100);
       if (state.startParam === "add") { openAdd(); }
     }).catch(function (error) {

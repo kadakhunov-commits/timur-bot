@@ -157,6 +157,206 @@
     return made.canvas;
   }
 
+  function monthCanvas(data) {
+    var width = 640;
+    var height = 620;
+    var made = surface(width, height, "#14161f");
+    var ctx = made.ctx;
+    ctx.strokeStyle = "#ffd447";
+    ctx.lineWidth = 6;
+    ctx.strokeRect(18, 18, width - 36, height - 36);
+
+    ctx.textAlign = "center";
+    pixelFont(ctx, 15);
+    ctx.fillStyle = "#8b90a3";
+    ctx.fillText("СПОНСОР МЕСЯЦА • " + (data.monthLabel || ""), width / 2, 74);
+
+    pixelFont(ctx, 25);
+    ctx.fillStyle = "#ffd447";
+    ctx.fillText(String(data.memberName || "").toUpperCase(), width / 2, 122);
+
+    drawAvatar(ctx, data.memberKey, width / 2 - 80, 156, 10);
+
+    bodyFont(ctx, 20, 600);
+    ctx.fillStyle = "#8b90a3";
+    ctx.fillText("вложено за месяц", width / 2, 372);
+
+    pixelFont(ctx, 32);
+    ctx.fillStyle = "#eef1f7";
+    ctx.fillText(data.amountText + " " + data.currency, width / 2, 424);
+
+    dashed(ctx, 60, 462, width - 60, "#3a3f52");
+
+    bodyFont(ctx, 19, 600);
+    ctx.fillStyle = "#8b90a3";
+    ctx.textAlign = "left";
+    (data.rows || []).slice(0, 3).forEach(function (row, index) {
+      ctx.fillStyle = ["#ffd447", "#c9ccd6", "#c08457"][index] || "#8b90a3";
+      ctx.fillText((index + 1) + ". " + row.name, 80, 502 + index * 32);
+      ctx.textAlign = "right";
+      ctx.fillText(row.amountText + " " + data.currency, width - 80, 502 + index * 32);
+      ctx.textAlign = "left";
+    });
+
+    ctx.textAlign = "center";
+    bodyFont(ctx, 18, 600);
+    ctx.fillStyle = "#5c6172";
+    ctx.fillText(data.totalsLabel || "", width / 2, 578);
+    return made.canvas;
+  }
+
+  function streakCanvas(data) {
+    var width = 560;
+    var height = 660;
+    var made = surface(width, height, "#1a1c26");
+    var ctx = made.ctx;
+    ctx.strokeStyle = data.hot ? "#ffd447" : "#3a3f52";
+    ctx.lineWidth = 6;
+    ctx.strokeRect(16, 16, width - 32, height - 32);
+
+    ctx.textAlign = "center";
+    pixelFont(ctx, 14);
+    ctx.fillStyle = "#8b90a3";
+    ctx.fillText("ОГОНЬ СОСЕДЕЙ", width / 2, 70);
+
+    drawBadge(ctx, "flame", width / 2 - 40, 100, 10, data.hot ? "#ffd447" : "#4c5165");
+
+    pixelFont(ctx, 44);
+    ctx.fillStyle = data.hot ? "#ffd447" : "#6d7285";
+    ctx.fillText(String(data.days || 0), width / 2, 300);
+
+    bodyFont(ctx, 26, 700);
+    ctx.fillStyle = "#eef1f7";
+    ctx.fillText(data.daysLabel || "дней подряд", width / 2, 340);
+
+    bodyFont(ctx, 20, 600);
+    ctx.fillStyle = "#8b90a3";
+    ctx.fillText("рекорд: " + (data.best || 0), width / 2, 376);
+
+    var cells = data.cells || [];
+    var cell = Math.min(30, Math.floor((width - 120) / Math.max(1, cells.length)));
+    var startX = (width - cell * cells.length) / 2;
+    cells.forEach(function (hit, index) {
+      ctx.fillStyle = hit ? "#ffd447" : "#2c3140";
+      ctx.fillRect(startX + index * cell, 420, cell - 4, 26);
+    });
+
+    dashed(ctx, 50, 486, width - 50, "#3a3f52");
+
+    bodyFont(ctx, 22, 700);
+    ctx.fillStyle = "#eef1f7";
+    ctx.fillText(data.questTitle || "квест недели", width / 2, 530);
+    bodyFont(ctx, 20, 600);
+    ctx.fillStyle = data.questDone ? "#3ddc97" : "#8b90a3";
+    ctx.fillText(data.questLine || "", width / 2, 566);
+
+    bodyFont(ctx, 18, 600);
+    ctx.fillStyle = "#5c6172";
+    ctx.fillText(data.totalsLabel || "", width / 2, 614);
+    return made.canvas;
+  }
+
+  function rouletteCanvas(data) {
+    var width = 560;
+    var height = 620;
+    var made = surface(width, height, "#12141c");
+    var ctx = made.ctx;
+    ctx.strokeStyle = "#6bb8ff";
+    ctx.lineWidth = 6;
+    ctx.strokeRect(16, 16, width - 32, height - 32);
+
+    ctx.textAlign = "center";
+    pixelFont(ctx, 14);
+    ctx.fillStyle = "#8b90a3";
+    ctx.fillText("РУЛЕТКА СОСЕДЕЙ", width / 2, 70);
+
+    bodyFont(ctx, 22, 600);
+    ctx.fillStyle = "#8b90a3";
+    ctx.fillText("сегодня в магазин идёт", width / 2, 132);
+
+    drawAvatar(ctx, data.memberKey, width / 2 - 72, 168, 9);
+
+    pixelFont(ctx, 22);
+    ctx.fillStyle = "#6bb8ff";
+    ctx.fillText(String(data.memberName || "").toUpperCase(), width / 2, 356);
+
+    bodyFont(ctx, 26, 700);
+    ctx.fillStyle = "#eef1f7";
+    ctx.fillText(data.chanceText || "", width / 2, 400);
+
+    dashed(ctx, 50, 440, width - 50, "#2c3140");
+
+    bodyFont(ctx, 19, 600);
+    ctx.fillStyle = "#8b90a3";
+    ctx.textAlign = "left";
+    (data.rows || []).slice(0, 4).forEach(function (row, index) {
+      ctx.fillText(row.name, 70, 486 + index * 30);
+      ctx.textAlign = "right";
+      ctx.fillText(row.chanceText, width - 70, 486 + index * 30);
+      ctx.textAlign = "left";
+    });
+
+    ctx.textAlign = "center";
+    bodyFont(ctx, 18, 600);
+    ctx.fillStyle = "#5c6172";
+    ctx.fillText(data.totalsLabel || "", width / 2, 580);
+    return made.canvas;
+  }
+
+  function storyCanvas(data) {
+    var width = 560;
+    var height = 900;
+    var made = surface(width, height, "#0e0f16");
+    var ctx = made.ctx;
+    ctx.strokeStyle = "#ffd447";
+    ctx.lineWidth = 6;
+    ctx.strokeRect(16, 16, width - 32, height - 32);
+
+    ctx.textAlign = "center";
+    pixelFont(ctx, 16);
+    ctx.fillStyle = "#8b90a3";
+    ctx.fillText("СОСЕДИ", width / 2, 92);
+
+    dashed(ctx, 58, 130, width - 58, "#2c3140");
+
+    drawAvatar(ctx, data.memberKey, width / 2 - 56, 176, 7);
+
+    bodyFont(ctx, 30, 700);
+    ctx.fillStyle = "#eef1f7";
+    ctx.fillText(data.memberName || "", width / 2, 340);
+
+    bodyFont(ctx, 22, 600);
+    ctx.fillStyle = "#8b90a3";
+    ctx.fillText("записал на кухню", width / 2, 378);
+
+    bodyFont(ctx, 46, 700);
+    ctx.fillStyle = "#eef1f7";
+    ctx.fillText(String(data.item || "").slice(0, 18), width / 2, 476);
+
+    pixelFont(ctx, 40);
+    ctx.fillStyle = "#ffd447";
+    ctx.fillText(data.amountText + " " + data.currency, width / 2, 566);
+
+    dashed(ctx, 58, 620, width - 58, "#2c3140");
+
+    bodyFont(ctx, 24, 700);
+    ctx.fillStyle = "#eef1f7";
+    ctx.fillText(data.questLine || "", width / 2, 690);
+
+    bodyFont(ctx, 20, 600);
+    ctx.fillStyle = "#8b90a3";
+    ctx.fillText(data.crownLine || "", width / 2, 730);
+
+    bodyFont(ctx, 30, 700);
+    ctx.fillStyle = "#3ddc97";
+    ctx.fillText(data.streakLine || "", width / 2, 800);
+
+    bodyFont(ctx, 18, 600);
+    ctx.fillStyle = "#5c6172";
+    ctx.fillText(data.totalsLabel || "", width / 2, 852);
+    return made.canvas;
+  }
+
   function download(canvas, filename) {
     try {
       var url = canvas.toDataURL("image/png");
@@ -197,6 +397,10 @@
     ready: ready,
     receiptCanvas: receiptCanvas,
     certificateCanvas: certificateCanvas,
+    monthCanvas: monthCanvas,
+    streakCanvas: streakCanvas,
+    rouletteCanvas: rouletteCanvas,
+    storyCanvas: storyCanvas,
     shareImage: shareImage,
     download: download
   };

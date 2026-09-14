@@ -278,12 +278,28 @@ button { font-family: inherit; color: inherit; cursor: pointer; }
 .app[data-weather="thunder"] .weather-clouds,
 .app[data-weather="thunder"] .weather-rain,
 .app[data-weather="thunder"] .weather-flash { display: block; }
-.weather-rain { animation: rain-fall 900ms linear infinite; }
-@keyframes rain-fall { from { transform: translateY(0); } to { transform: translateY(12px); } }
-.weather-snow { animation: snow-fall 3.4s linear infinite; }
-@keyframes snow-fall { from { transform: translateY(0); } to { transform: translateY(24px); } }
-.weather-clouds { animation: cloud-drift 9s ease-in-out infinite alternate; }
-@keyframes cloud-drift { from { transform: translateX(-2px); } to { transform: translateX(3px); } }
+.weather-rain { animation: rain-fall 700ms linear infinite; }
+@keyframes rain-fall {
+  0% { transform: translateY(-4px); opacity: 0.55; }
+  70% { opacity: 1; }
+  100% { transform: translateY(14px); opacity: 0.35; }
+}
+.weather-snow { animation: snow-fall 4.2s linear infinite; }
+@keyframes snow-fall {
+  0% { transform: translate(-2px, -3px); }
+  50% { transform: translate(2px, 11px); }
+  100% { transform: translate(-1px, 25px); }
+}
+.weather-clouds { animation: cloud-drift 11s ease-in-out infinite alternate; }
+@keyframes cloud-drift {
+  from { transform: translateX(-3px); }
+  to { transform: translateX(4px); }
+}
+.weather-fog { animation: fog-breathe 5.5s ease-in-out infinite; }
+@keyframes fog-breathe {
+  0%, 100% { opacity: 0.55; transform: translateX(-2px); }
+  50% { opacity: 1; transform: translateX(2px); }
+}
 .weather-flash { animation: thunder-flash 4.5s steps(1) infinite; }
 @keyframes thunder-flash {
   0%, 86%, 100% { opacity: 0; }
@@ -291,6 +307,17 @@ button { font-family: inherit; color: inherit; cursor: pointer; }
   90% { opacity: 0.1; }
   92% { opacity: 0.4; }
   94% { opacity: 0; }
+}
+/* Ночью окно темнеет, луна чуть дышит, а солнце уходит. */
+.app[data-time="night"] .scene-moon { animation: moon-glow 6s ease-in-out infinite; }
+@keyframes moon-glow {
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 1; }
+}
+.app[data-weather="clear"][data-time="day"] .scene-sun { animation: sun-pulse 5s ease-in-out infinite; }
+@keyframes sun-pulse {
+  0%, 100% { opacity: 0.9; }
+  50% { opacity: 1; }
 }
 
 /* Стрик и квест недели под сценой. */
@@ -347,6 +374,91 @@ button { font-family: inherit; color: inherit; cursor: pointer; }
   color: #f0e2cd;
 }
 .shelf-item:active { background: rgba(255, 255, 255, 0.07); border-color: rgba(255, 255, 255, 0.12); }
+
+/* Бюджет месяца: тонкая полоска под периодами. */
+.budget-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 12px 6px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 2px solid rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+  font-size: 10px;
+}
+.budget-bar[hidden] { display: none; }
+.budget-label { text-transform: uppercase; letter-spacing: 0.06em; white-space: nowrap; }
+.budget-track { flex: 1; height: 8px; background: rgba(0, 0, 0, 0.4); overflow: hidden; }
+.budget-fill { display: block; height: 100%; width: 0; background: #3ddc97; transition: width 0.4s ease; }
+.budget-value { white-space: nowrap; color: #eef1f7; }
+.budget-bar.is-warn .budget-fill { background: #ffb347; }
+.budget-bar.is-warn .budget-label { color: #ffb347; }
+.budget-bar.is-over .budget-fill { background: #ff6b6b; }
+.budget-bar.is-over .budget-label { color: #ff6b6b; }
+
+/* Категории в калькуляторе: крупный ряд с иконками прямо под суммой. */
+.cat-field { margin-bottom: 12px; }
+.cat-hint { color: var(--muted); font-style: normal; text-transform: none; letter-spacing: 0; }
+.cat-row {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 2px 2px 8px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.cat-row::-webkit-scrollbar { display: none; }
+.cat-chip {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 13px;
+  background: var(--panel-2);
+  border: 2px solid rgba(255, 255, 255, 0.12);
+  color: #eef1f7;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.cat-chip.is-active {
+  background: #ffd447;
+  border-color: #ffd447;
+  color: #20160a;
+}
+.cat-chip.is-hint { border-color: rgba(255, 212, 71, 0.45); animation: cat-pulse 2.4s ease-in-out infinite; }
+.cat-chip.is-active.is-hint { animation: none; }
+.cat-chip-name { font-weight: 700; }
+@keyframes cat-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 212, 71, 0); }
+  50% { box-shadow: 0 0 0 3px rgba(255, 212, 71, 0.16); }
+}
+
+/* Прогресс до кубков и пирог по категориям. */
+.progress-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+.progress-row { display: flex; flex-direction: column; gap: 5px; }
+.progress-row .row-amount { font-size: 11px; }
+.pie-list { display: flex; flex-direction: column; gap: 12px; }
+.pie-row { display: flex; flex-direction: column; gap: 5px; }
+.pie-head { display: flex; justify-content: space-between; font-size: 12px; color: #eef1f7; }
+.stat-hero { padding: 12px; background: var(--panel-2); border: 2px solid rgba(255, 255, 255, 0.1); }
+.stat-hero.is-over { border-color: rgba(255, 107, 107, 0.6); }
+.badge.is-secret { border-color: rgba(195, 123, 255, 0.5); }
+.secret-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+.secret-card {
+  padding: 12px 8px;
+  text-align: center;
+  background: var(--panel-2);
+  border: 2px dashed rgba(195, 123, 255, 0.45);
+}
+.secret-mark { font-size: 22px; color: #c37bff; margin-bottom: 6px; }
+.panel-inline-foot { margin-top: 16px; }
+.fridge-notes { animation: notes-sway 3.6s ease-in-out infinite; transform-origin: 19px 88px; }
+@keyframes notes-sway {
+  0%, 100% { transform: rotate(-1.5deg); }
+  50% { transform: rotate(1.5deg); }
+}
+.crown-month { animation: crown-float 2.2s ease-in-out infinite; }
 .shelf-item svg { width: 22px; height: 22px; }
 .shelf-label {
   font-family: var(--f-pixel);

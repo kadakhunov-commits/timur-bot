@@ -30,6 +30,12 @@
       <button class="period is-active" data-period="all" role="tab" type="button">Всё</button>
     </div>
 
+    <button class="budget-bar" id="budgetBar" type="button" data-act="stats-open" aria-label="Бюджет месяца" hidden>
+      <span class="budget-label" id="budgetLabel"></span>
+      <span class="budget-track"><span class="budget-fill" id="budgetFill"></span></span>
+      <span class="budget-value" id="budgetValue"></span>
+    </button>
+
     <main class="stage" id="stage" aria-label="Кухня соседей"></main>
 
     <button class="status-strip" id="statusStrip" type="button" data-act="quests-open" aria-label="Стрик и квест недели"></button>
