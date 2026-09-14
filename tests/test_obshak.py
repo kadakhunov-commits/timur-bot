@@ -511,7 +511,7 @@ def test_roast_absent_when_idle():
     assert "9" in roast["text"]
 
 
-def test_roast_last_place_and_same_item_and_night():
+def test_roast_last_place_and_same_item():
     state = fresh_state()
     add(state, "kadyr", 9000, "пылесос")
     add(state, "rustem", 800, "хлеб")
@@ -531,11 +531,36 @@ def test_roast_last_place_and_same_item_and_night():
     assert same_item["key"] == "same_item"
     assert "майонез" in same_item["text"]
 
-    night_state = fresh_state()
-    add(night_state, "amir", 100, "чай", hour=22)
-    night = obshak_flavor.roast(night_state, CONFIG, "amir", now=NOW)
-    assert night["key"] == "night"
-    assert ":" in night["text"]
+def _night_state(hour_utc, day):
+    state = fresh_state()
+    obshak.add_expense(
+        state,
+        member_id="amir",
+        amount=100,
+        title="чай",
+        created_at=datetime(2026, 9, day, hour_utc, 0, tzinfo=timezone.utc),
+    )
+    return state
+
+
+def test_roast_night_fires_right_after_a_night_purchase():
+    # 01:00 МСК, сейчас 01:40 МСК — «спи» уместно.
+    state = _night_state(22, 12)
+    roast = obshak_flavor.roast(
+        state, CONFIG, "amir", now=datetime(2026, 9, 12, 22, 40, tzinfo=timezone.utc)
+    )
+    assert roast["key"] == "night"
+    assert "01:00" in roast["text"]
+
+
+def test_roast_night_expires_by_morning():
+    # Покупка в 00:18 МСК, а сейчас 10:23 МСК: кот не должен вспоминать ночь.
+    state = _night_state(21, 13)
+    roast = obshak_flavor.roast(
+        state, CONFIG, "amir", now=datetime(2026, 9, 14, 7, 23, tzinfo=timezone.utc)
+    )
+    assert roast["key"] == "default"
+    assert "00:18" not in roast["text"]
 
 
 def test_roast_big_spender():

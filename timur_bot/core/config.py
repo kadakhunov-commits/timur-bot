@@ -406,6 +406,7 @@ DEFAULT_OBSHAK_ACHIEVEMENTS: Dict[str, int] = {
     "veteran_days": 100,
     "night_from": 0,
     "night_to": 5,
+    "night_recent_hours": 6,
     "early_from": 6,
     "early_to": 8,
 }

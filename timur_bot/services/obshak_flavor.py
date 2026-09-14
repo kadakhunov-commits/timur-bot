@@ -353,8 +353,10 @@ def roast(
             title_counts[title_key] = (title, count + 1)
         popular = max(title_counts.values(), key=lambda pair: pair[1], default=None)
 
-        night_from = int((config.get("achievements") or {}).get("night_from", 0))
-        night_to = int((config.get("achievements") or {}).get("night_to", 5))
+        achievements = config.get("achievements") or {}
+        night_from = int(achievements.get("night_from", 0))
+        night_to = int(achievements.get("night_to", 5))
+        night_recent_hours = int(achievements.get("night_recent_hours", 6))
         last_hour = last_local.hour if last_local else 12
 
         if days_since >= 7:
@@ -381,7 +383,13 @@ def roast(
             and mine_total >= grand_total * 0.4
         ):
             key = "big_spender"
-        elif night_from <= last_hour < night_to and last_local is not None:
+        elif (
+            last_local is not None
+            and night_from <= last_hour < night_to
+            and (local_now - last_local) <= timedelta(hours=night_recent_hours)
+        ):
+            # «спи» уместно, только если человек правда только что сходил ночью:
+            # иначе в десять утра кот всё ещё вспоминал бы 00:18.
             key = "night"
             placeholders["time"] = last_local.strftime("%H:%M")
 

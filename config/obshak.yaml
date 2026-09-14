@@ -147,6 +147,7 @@ achievements:
   veteran_days: 100        # «Долгожитель»: дней с первой покупки
   night_from: 0            # «Ночной дозор»
   night_to: 5
+  night_recent_hours: 6    # ночной подкол уместен только N часов после покупки
   early_from: 6            # «Ранняя пташка»
   early_to: 8
 
