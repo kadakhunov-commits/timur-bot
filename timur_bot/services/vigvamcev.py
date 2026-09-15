@@ -13,7 +13,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Iterable, List, Mapping, Sequence
 
-import yaml
 from telegram import InputFile
 from telegram.error import BadRequest, Forbidden, NetworkError, TimedOut
 
@@ -68,16 +67,6 @@ def _normalise_story(value: Any) -> str:
 
 def _normalise_key(value: Any) -> str:
     return _as_text(value).casefold().replace("ё", "е")
-
-
-def _normalise_word(value: Any) -> str:
-    word = _as_text(value).casefold().replace("ё", "ё")
-    word = re.sub(r"[^а-яё]", "", word)
-    return word
-
-
-def clone_name_from_word(source_word: str, name_forms: Mapping[str, str]) -> str:
-    return name_forms.get(_normalise_word(source_word), "")
 
 
 def _token_set(text: str) -> set[str]:
@@ -163,17 +152,14 @@ class CanonCorpus:
     root: Path
     posts: list[CanonPost]
     lore_text: str
-    name_words: set[str]
     known_names: set[str]
     visual_references: list[Path]
     manifest: dict[str, Any] = field(default_factory=dict)
-    name_forms: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def load(cls, root: Path) -> "CanonCorpus":
         root = Path(root).resolve()
         manifest_path = root / "manifest.json"
-        lexicon_path = Path(__file__).resolve().parents[2] / "config" / "vigvamcev_names.yaml"
         if not manifest_path.exists():
             raise CorpusError(f"VIGVAMCEV manifest missing: {manifest_path}")
         try:
@@ -182,20 +168,6 @@ class CanonCorpus:
             raise CorpusError(f"cannot read VIGVAMCEV manifest: {manifest_path}") from exc
         if not isinstance(manifest, dict):
             raise CorpusError("VIGVAMCEV manifest must be an object")
-
-        try:
-            lexicon = yaml.safe_load(lexicon_path.read_text(encoding="utf-8")) or {}
-        except (OSError, yaml.YAMLError) as exc:
-            raise CorpusError(f"cannot read VIGVAMCEV name lexicon: {lexicon_path}") from exc
-        raw_words = lexicon.get("names", {}) if isinstance(lexicon, dict) else {}
-        if not isinstance(raw_words, dict):
-            raise CorpusError("VIGVAMCEV names must map source words to approved names")
-        name_forms = {_normalise_word(word): str(name).strip() for word, name in raw_words.items()}
-        if any(not word or not re.fullmatch(r"[А-ЯЁ][а-яё]+цев", name) for word, name in name_forms.items()):
-            raise CorpusError("VIGVAMCEV name lexicon contains an invalid pair")
-        name_words = set(name_forms)
-        if not name_words:
-            raise CorpusError("VIGVAMCEV name lexicon is empty")
 
         canon_dir = root / "canon"
         lore_path = canon_dir / "lore.txt"
@@ -237,7 +209,7 @@ class CanonCorpus:
             path = root / str(raw_path)
             if path.exists():
                 references.append(path)
-        return cls(root, posts, lore_text, name_words, known_names, references, manifest, name_forms)
+        return cls(root, posts, lore_text, known_names, references, manifest)
 
     @property
     def last_experiment(self) -> int:
@@ -425,15 +397,12 @@ class VigvamcevCandidate:
     story: str
 
     @classmethod
-    def from_payload(cls, payload: Mapping[str, Any], *, normalize_name: bool = True, name_forms: Mapping[str, str] | None = None) -> "VigvamcevCandidate":
+    def from_payload(cls, payload: Mapping[str, Any]) -> "VigvamcevCandidate":
         story = _normalise_story(payload.get("story") or payload.get("caption") or payload.get("public_story"))
         if payload.get("clone_story") and payload.get("sic_story"):
             story = f"Клон: {_as_text(payload['clone_story'])}\n\nSIC: {_as_text(payload['sic_story'])}"
         source_word = _as_text(payload.get("source_word"))
-        provided_name = _as_text(payload.get("clone_name"))
-        clone_name = clone_name_from_word(source_word, name_forms) if normalize_name and name_forms is not None else provided_name
-        if provided_name and clone_name and _normalise_key(provided_name) != _normalise_key(clone_name):
-            story = re.sub(re.escape(provided_name), clone_name, story, flags=re.IGNORECASE)
+        clone_name = _as_text(payload.get("clone_name"))
         return cls(
             post_no=int(payload.get("post_no", 0) or 0),
             experiment_no=int(payload.get("experiment_no", 0) or 0),
@@ -580,11 +549,9 @@ def build_story_prompt(
             f"имя {item.get('clone_name')}: {item.get('story', item.get('caption', ''))}"
         )
     recent_text = "\n".join(recent) or "- это первый новый выпуск после импортированного канона"
-    words = ", ".join(sorted(corpus.name_words))
     return f"""{settings.story_prompt}
 
 Текущая задача: пост №{post_no}, эксперимент {experiment_no}, сезон 2.
-Разрешённые исходные слова для имени: {words}
 Уже использованные имена: {used_names}
 Уже использованные способности: {used_abilities}
 
@@ -595,14 +562,13 @@ def build_story_prompt(
 {corpus.context()}
 
 История обязана состоять ровно из двух содержательных блоков: строка «Клон: …» — про нового клона, строка «SIC: …» — про продолжение общего сюжета Фонда SIC.
-Соответствия допустимых слов и имён: {', '.join(f'{word} → {name}' for word, name in sorted(corpus.name_forms.items()))}.
 
 Верни только JSON следующей формы:
 {{
   "post_no": {post_no},
   "experiment_no": {experiment_no},
   "clone_name": "Имя на -цев",
-  "source_word": "одно слово из разрешённого списка",
+  "source_word": "существующее русское слово, от которого придумано имя",
   "ability": "новая способность или дефект",
   "canon_anchors": ["конкретный подтверждённый факт"],
   "conflict": "причина конфликта",
@@ -656,14 +622,10 @@ def validate_candidate(
         errors.append(f"post_no должен быть {expected_post}")
     if candidate.experiment_no != expected_experiment:
         errors.append(f"experiment_no должен быть {expected_experiment}")
-    source_word = _normalise_word(candidate.source_word)
-    if source_word not in corpus.name_words:
-        errors.append("source_word отсутствует в разрешённом словаре")
-    elif len(source_word) < 5:
-        errors.append("source_word слишком короткий для звучного имени клона (минимум 5 букв)")
-    expected_name = clone_name_from_word(source_word, corpus.name_forms)
-    if _normalise_key(candidate.clone_name) != _normalise_key(expected_name):
-        errors.append("clone_name не соответствует утверждённой паре source_word → имя")
+    if not re.fullmatch(r"[а-яё]+(?:-[а-яё]+)*", candidate.source_word, re.IGNORECASE):
+        errors.append("source_word должен быть русским словом")
+    if not _CLONE_NAME_RE.fullmatch(candidate.clone_name):
+        errors.append("clone_name должен быть русским именем на -цев")
     used_names = {_normalise_key(value) for value in state.get("used_names", []) if _as_text(value)}
     if _normalise_key(candidate.clone_name) in used_names:
         errors.append("имя клона уже использовалось")
@@ -743,7 +705,7 @@ async def generate_candidate(
             retry_feedback = "ответ должен быть одним корректным JSON-объектом"
             continue
         try:
-            candidate = VigvamcevCandidate.from_payload(payload, name_forms=corpus.name_forms)
+            candidate = VigvamcevCandidate.from_payload(payload)
         except (TypeError, ValueError) as exc:
             failures.append(f"попытка {attempt + 1}: некорректные поля JSON: {exc}")
             retry_feedback = "некорректные поля JSON: " + str(exc)[:300]
@@ -939,7 +901,7 @@ class VigvamcevService:
         if not isinstance(draft, dict) or not isinstance(draft.get("candidate"), dict):
             return None
         try:
-            return VigvamcevCandidate.from_payload(draft["candidate"], normalize_name=False)
+            return VigvamcevCandidate.from_payload(draft["candidate"])
         except (TypeError, ValueError):
             return None
 

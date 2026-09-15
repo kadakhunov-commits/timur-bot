@@ -22,7 +22,6 @@ from timur_bot.services.vigvamcev import (
     VigvamcevCandidate,
     VigvamcevSettings,
     build_full_poster_prompt,
-    clone_name_from_word,
     default_vigvamcev_state,
     format_caption,
     generate_candidate,
@@ -106,13 +105,11 @@ def test_name_and_candidate_validation_follow_series_rules() -> None:
     state = default_vigvamcev_state(corpus, settings)
     candidate = _candidate()
 
-    assert clone_name_from_word("фотон", corpus.name_forms) == "Фотонцев"
-    assert clone_name_from_word("антенна", corpus.name_forms) == "Антенцев"
-    assert clone_name_from_word("бездна", corpus.name_forms) == ""
-    assert clone_name_from_word("параллелограмм", corpus.name_forms) == "Параллелограммцев"
-    assert clone_name_from_word("свистопляс", corpus.name_forms) == "Свистоплясцев"
-    assert "source_word отсутствует в разрешённом словаре" in validate_candidate(
-        replace(candidate, source_word="бездна", clone_name="Безднцев"), state=state, corpus=corpus, settings=settings,
+    assert validate_candidate(
+        replace(candidate, source_word="балалайка", clone_name="Балалайцев"), state=state, corpus=corpus, settings=settings,
+    ) == []
+    assert "clone_name должен быть русским именем на -цев" in validate_candidate(
+        replace(candidate, clone_name="Балалайка"), state=state, corpus=corpus, settings=settings,
     )
     assert len(format_caption(candidate, hashtags=settings.story_hashtags)) in range(600, 901)
     assert validate_candidate(candidate, state=state, corpus=corpus, settings=settings) == []
@@ -163,17 +160,16 @@ def test_story_requires_clone_and_sic_blocks() -> None:
     assert "в истории нет блока «SIC: …»" in sic_missing
 
 
-def test_candidate_payload_derives_clone_name_and_updates_story() -> None:
+def test_candidate_payload_preserves_generated_clone_name_and_story() -> None:
     payload = _candidate().to_dict()
     payload["clone_name"] = "Фотоновцев"
     payload["story"] = str(payload["story"]).replace("Фотонцев", "Фотоновцев")
 
-    candidate = VigvamcevCandidate.from_payload(payload, name_forms=CanonCorpus.load(CORPUS_ROOT).name_forms)
+    candidate = VigvamcevCandidate.from_payload(payload)
 
-    assert candidate.clone_name == "Фотонцев"
-    assert "Фотоновцев" not in candidate.story
-    assert "Фотонцева" in candidate.story
-    saved = VigvamcevCandidate.from_payload(payload, normalize_name=False)
+    assert candidate.clone_name == "Фотоновцев"
+    assert candidate.story == payload["story"]
+    saved = VigvamcevCandidate.from_payload(candidate.to_dict())
     assert saved.clone_name == "Фотоновцев"
     payload["clone_story"] = "Новый клон появился после сбоя."
     payload["sic_story"] = "Фонд продолжает расследование."
@@ -453,7 +449,7 @@ def test_retry_replaces_invalid_saved_candidate_before_marking_draft_ready(tmp_p
     invalid = replace(
         _candidate(),
         clone_name="Несуществословцев",
-        source_word="несуществослов",
+        source_word="123",
     )
     memory = {
         "config": {
