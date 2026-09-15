@@ -107,6 +107,9 @@ def test_name_and_candidate_validation_follow_series_rules() -> None:
     candidate = _candidate()
 
     assert clone_name_from_word("фотон") == "Фотонцев"
+    assert clone_name_from_word("антенна") == "Антенцев"
+    assert clone_name_from_word("гравитация") == "Гравитацев"
+    assert clone_name_from_word("параллелограмм") == "Параллелограммцев"
     assert len(format_caption(candidate, hashtags=settings.story_hashtags)) in range(600, 901)
     assert validate_candidate(candidate, state=state, corpus=corpus, settings=settings) == []
 
@@ -166,6 +169,8 @@ def test_candidate_payload_derives_clone_name_and_updates_story() -> None:
     assert candidate.clone_name == "Фотонцев"
     assert "Фотоновцев" not in candidate.story
     assert "Фотонцева" in candidate.story
+    saved = VigvamcevCandidate.from_payload(payload, normalize_name=False)
+    assert saved.clone_name == "Фотоновцев"
     payload["clone_story"] = "Новый клон появился после сбоя."
     payload["sic_story"] = "Фонд продолжает расследование."
     candidate = VigvamcevCandidate.from_payload(payload)
@@ -425,7 +430,7 @@ def _service(
 
 def test_service_reuses_ready_draft_without_regenerating_image(tmp_path: Path) -> None:
     image_client = _FakeImageClient()
-    service, state, _ = _service(tmp_path, image_client=image_client)
+    service, state, _ = _service(tmp_path, image_client=image_client, settings_overrides={"identity_crop": [1268, 435, 1430, 672]})
 
     first = asyncio.run(service.prepare_draft())
     second = asyncio.run(service.prepare_draft())
@@ -435,7 +440,9 @@ def test_service_reuses_ready_draft_without_regenerating_image(tmp_path: Path) -
     assert state["config"]["vigvamcev"]["draft"]["status"] == "ready"
     assert state["config"]["vigvamcev"]["draft"]["canon_status"] == "draft"
     assert state["config"]["vigvamcev"]["history"] == []
-    assert CORPUS_ROOT / "references" / "clones.jpg" in image_client.reference_paths
+    assert image_client.reference_paths == [tmp_path / "vigvamcev_artifacts" / "identity-face.jpg"]
+    with Image.open(image_client.reference_paths[0]) as reference:
+        assert reference.size == (162, 237)
 
 
 def test_retry_replaces_invalid_saved_candidate_before_marking_draft_ready(tmp_path: Path) -> None:
@@ -487,7 +494,8 @@ class _OwnerPreviewMessage:
         self.replies.append(text)
 
 
-def test_regenerate_command_replaces_preview_and_publish_uses_latest_draft(tmp_path: Path) -> None:
+@pytest.mark.parametrize("action", ["regenerate", "retry"])
+def test_regenerate_command_replaces_preview_and_publish_uses_latest_draft(tmp_path: Path, action: str) -> None:
     first = _candidate()
     second = replace(
         first,
@@ -511,7 +519,7 @@ def test_regenerate_command_replaces_preview_and_publish_uses_latest_draft(tmp_p
     service, state, bot = _service(tmp_path, image_client=image_client, text_request_fn=text_request)
     asyncio.run(service.prepare_draft())
 
-    message = _OwnerPreviewMessage("/vigvamcev regenerate")
+    message = _OwnerPreviewMessage(f"/vigvamcev {action}")
     asyncio.run(service.handle_owner_command(SimpleNamespace(effective_message=message), SimpleNamespace(application=None)))
 
     draft = state["config"]["vigvamcev"]["draft"]

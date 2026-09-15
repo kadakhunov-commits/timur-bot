@@ -4,9 +4,19 @@ publish_time: "13:00"
 channel_id: -1002011983899
 asset_dir: assets/vigvamcev
 identity_reference: references/clones.jpg
+identity_crop: [1268, 435, 1430, 672]
 identity_layer: ""
 style_references: []
-style_reference_count: 3
+style_reference_count: 0
+full_identity_prompt: >-
+  The attached face crop is a facial-family reference only, NOT a photo to paste.
+  Invent ONE new fictional adult clone with a family resemblance to the original hero.
+  Generate a completely new photograph: different facial proportions, hairstyle,
+  expression, camera angle, lighting, clothing and body silhouette. The clone can
+  be bizarre or transformed by his ability. Do not paste, trace, recreate or reuse
+  any face photograph, body, pose, outfit or cutout from the reference.
+  No repeated crowd of the same man and no reference portrait as a decorative logo.
+  Make the newly photographed clone the main subject; supporting people look unrelated.
 image_model: openai/gpt-5.4-image-2
 image_api_base_url: https://polza.ai/api/v1
 image_aspect_ratio: "4:3"
@@ -18,8 +28,8 @@ poster_mode: full
 variation_pool:
   - "put one giant surreal object in the foreground and the characters small in the background"
   - "zoom far out so the whole scene floats tiny in the middle of a huge yellow-orange void"
-  - "stack several cutout figures on top of each other like a totem"
-  - "place a huge close-up portrait of the clone on the left side, cutout-style"
+  - "one newly photographed clone crouches on a bizarre prop, seen from above, wearing bulky improvised equipment"
+  - "show one transformed clone in profile with an unusual silhouette and a completely new costume"
   - "overlap many cutout body parts and strange props into a dense collage"
   - "show empty lab corridors receding into the distance with a single figure at the far end"
   - "make everything weightless: the clone and props float unanchored in the space"

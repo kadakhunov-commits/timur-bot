@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import random
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -79,6 +80,8 @@ def clone_name_from_word(source_word: str) -> str:
     word = _normalise_word(source_word)
     if not word:
         return ""
+    word = re.sub(r"(?:ция|ия|а|я|ь)$", "", word)
+    word = re.sub(r"нн$", "н", word)
     return word[:1].upper() + word[1:] + "цев"
 
 
@@ -265,6 +268,7 @@ class VigvamcevSettings:
     channel_id: int
     asset_dir: Path
     identity_reference: Path | None
+    identity_crop: tuple[int, ...]
     identity_layer: Path | None
     style_references: tuple[Path, ...]
     style_reference_count: int
@@ -371,6 +375,7 @@ class VigvamcevSettings:
             channel_id=int(channel_id),
             asset_dir=asset_path,
             identity_reference=identity_path,
+            identity_crop=tuple(int(value) for value in raw.get("identity_crop", [])),
             identity_layer=layer_path,
             style_references=tuple(style_reference_paths),
             style_reference_count=style_reference_count,
@@ -419,13 +424,13 @@ class VigvamcevCandidate:
     story: str
 
     @classmethod
-    def from_payload(cls, payload: Mapping[str, Any]) -> "VigvamcevCandidate":
+    def from_payload(cls, payload: Mapping[str, Any], *, normalize_name: bool = True) -> "VigvamcevCandidate":
         story = _normalise_story(payload.get("story") or payload.get("caption") or payload.get("public_story"))
         if payload.get("clone_story") and payload.get("sic_story"):
             story = f"Клон: {_as_text(payload['clone_story'])}\n\nSIC: {_as_text(payload['sic_story'])}"
         source_word = _as_text(payload.get("source_word"))
         provided_name = _as_text(payload.get("clone_name"))
-        clone_name = clone_name_from_word(source_word) or provided_name
+        clone_name = (clone_name_from_word(source_word) or provided_name) if normalize_name else provided_name
         if provided_name and clone_name and _normalise_key(provided_name) != _normalise_key(clone_name):
             story = re.sub(re.escape(provided_name), clone_name, story, flags=re.IGNORECASE)
         return cls(
@@ -589,7 +594,7 @@ def build_story_prompt(
 {corpus.context()}
 
 История обязана состоять ровно из двух содержательных блоков: строка «Клон: …» — про нового клона, строка «SIC: …» — про продолжение общего сюжета Фонда SIC.
-Имя образуй механически без склонения исходного слова: source_word «параллелограмм» → clone_name «Параллелограммцев».
+Соответствия допустимых слов и имён: {', '.join(f'{word} → {clone_name_from_word(word)}' for word in sorted(corpus.name_words))}.
 
 Верни только JSON следующей формы:
 {{
@@ -657,7 +662,7 @@ def validate_candidate(
         errors.append("source_word слишком короткий для звучного имени клона (минимум 5 букв)")
     expected_name = clone_name_from_word(source_word)
     if _normalise_key(candidate.clone_name) != _normalise_key(expected_name):
-        errors.append("clone_name не соответствует source_word + 'цев'")
+        errors.append("clone_name не соответствует основе source_word + 'цев'")
     used_names = {_normalise_key(value) for value in state.get("used_names", []) if _as_text(value)}
     if _normalise_key(candidate.clone_name) in used_names:
         errors.append("имя клона уже использовалось")
@@ -776,11 +781,11 @@ def build_visual_prompt(candidate: VigvamcevCandidate, settings: VigvamcevSettin
     return build_scene_prompt(candidate, settings, variation="")
 
 
-def _pick_variation(settings: VigvamcevSettings, post_no: int) -> str:
+def _pick_variation(settings: VigvamcevSettings) -> str:
     pool = list(settings.variation_pool)
     if not pool:
         return ""
-    return pool[post_no % len(pool)]
+    return random.choice(pool)
 
 
 def _variation_line(variation: str) -> str:
@@ -800,6 +805,8 @@ def build_scene_prompt(
 ) -> str:
     variation_text = _variation_line(variation)
     return f"""{settings.style_prompt}
+
+{settings.full_identity_prompt}
 
 Сюжетная сцена для клона {candidate.clone_name} (эксперимент {candidate.experiment_no}):
 {candidate.visual_brief}
@@ -911,12 +918,18 @@ class VigvamcevService:
 
     def _reference_paths(self) -> list[Path]:
         identity = self.settings.identity_reference
-        if self.settings.style_references:
-            pool = [path for path in self.settings.style_references if path.exists()]
-        else:
-            pool = [path for path in self.corpus.visual_references]
+        pool = [path for path in self.settings.style_references if path.exists()]
         references = list(pool[: self.settings.style_reference_count])
         if identity and identity.exists() and identity not in references:
+            if self.settings.identity_crop:
+                from PIL import Image
+
+                with Image.open(identity) as source:
+                    box = self.settings.identity_crop
+                    if len(box) != 4 or not (0 <= box[0] < box[2] <= source.width and 0 <= box[1] < box[3] <= source.height):
+                        raise DraftError("identity_crop выходит за границы референса")
+                    identity = self._artifact_dir() / "identity-face.jpg"
+                    source.crop(box).convert("RGB").save(identity, quality=95)
             references.insert(0, identity)
         return references
 
@@ -925,7 +938,7 @@ class VigvamcevService:
         if not isinstance(draft, dict) or not isinstance(draft.get("candidate"), dict):
             return None
         try:
-            return VigvamcevCandidate.from_payload(draft["candidate"])
+            return VigvamcevCandidate.from_payload(draft["candidate"], normalize_name=False)
         except (TypeError, ValueError):
             return None
 
@@ -1025,7 +1038,7 @@ class VigvamcevService:
         candidate = await self._candidate(memory, state, force_new=force_new)
         if not getattr(self.image_client, "configured", True):
             raise DraftError("Polza image API не настроен: задайте POLZA_AI_API_KEY")
-        variation = _pick_variation(self.settings, candidate.post_no)
+        variation = _pick_variation(self.settings)
         if self.settings.poster_mode == "full":
             try:
                 return await self._prepare_full_poster(candidate, state, memory, variation=variation)
@@ -1324,21 +1337,16 @@ class VigvamcevService:
         try:
             if action == "status":
                 await message.reply_text(self.status_text())
-            elif action == "preview":
-                prepared = await self.prepare_draft()
+            elif action in {"preview", "retry", "regenerate", "new"}:
+                force_new = action in {"regenerate", "new"}
+                if action == "retry":
+                    state = self._state(self.load_memory())
+                    force_new = state.get("draft", {}).get("status") == "ready"
+                prepared = await self.prepare_draft(force_new=force_new)
                 await message.reply_photo(
                     photo=InputFile(prepared.image_path.read_bytes(), filename=prepared.image_path.name),
                     caption=format_caption(prepared.candidate, hashtags=self.settings.story_hashtags),
                 )
-            elif action in {"regenerate", "new"}:
-                prepared = await self.prepare_draft(force_new=True)
-                await message.reply_photo(
-                    photo=InputFile(prepared.image_path.read_bytes(), filename=prepared.image_path.name),
-                    caption=format_caption(prepared.candidate, hashtags=self.settings.story_hashtags),
-                )
-            elif action == "retry":
-                prepared = await self.prepare_draft()
-                await message.reply_text(f"draft готов: пост №{prepared.candidate.post_no}, эксперимент {prepared.candidate.experiment_no}")
             elif action == "unlock":
                 memory_unlock = self.load_memory()
                 state_unlock = self._state(memory_unlock)
