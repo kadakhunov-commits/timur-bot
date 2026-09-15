@@ -270,6 +270,7 @@ class VigvamcevSettings:
     image_prompt_suffix: str
     story_prompt: str
     review_prompt: str
+    caption_repair_prompt: str
 
     @classmethod
     def from_mapping(
@@ -377,6 +378,7 @@ class VigvamcevSettings:
             image_prompt_suffix=str(raw.get("image_prompt_suffix", "")).strip(),
             story_prompt=str(raw.get("story_prompt", "")).strip(),
             review_prompt=str(raw.get("review_prompt", "")).strip(),
+            caption_repair_prompt=str(raw.get("caption_repair_prompt", "")).strip(),
         )
 
 
@@ -684,6 +686,7 @@ async def generate_candidate(
     failures: list[str] = []
     retry_feedback = ""
     previous_candidate = ""
+    repair_candidate: VigvamcevCandidate | None = None
     for attempt in range(settings.max_stage_attempts):
         prompt = base_prompt
         if retry_feedback:
@@ -692,6 +695,16 @@ async def generate_candidate(
                 + retry_feedback
                 + "\nВерни полностью исправленный JSON, сохранив требуемые два блока и диапазон длины."
                 + "\nКандидат для исправления:\n" + previous_candidate
+            )
+        if repair_candidate is not None:
+            overhead = len(format_caption(repair_candidate, hashtags=settings.story_hashtags)) - len(repair_candidate.story)
+            prompt = (
+                settings.caption_repair_prompt
+                + f"\nДлина двух блоков с заголовками сейчас: {len(repair_candidate.story)}. "
+                + f"Нужна длина {settings.caption_min_chars - overhead}–{settings.caption_max_chars - overhead}; "
+                + f"цель {(settings.caption_min_chars + settings.caption_max_chars) // 2 - overhead}."
+                + "\nВерни только JSON с двумя строками: clone_story и sic_story, без заголовков."
+                + "\nТекст для редактирования:\n" + repair_candidate.story
             )
         try:
             raw = await text_request(prompt, settings.story_max_tokens)
@@ -704,6 +717,16 @@ async def generate_candidate(
             failures.append(f"попытка {attempt + 1}: модель не вернула JSON")
             retry_feedback = "ответ должен быть одним корректным JSON-объектом"
             continue
+        if repair_candidate is not None:
+            if not all(isinstance(payload.get(key), str) and payload[key].strip() for key in ("clone_story", "sic_story")):
+                failures.append(f"попытка {attempt + 1}: редактор не вернул clone_story и sic_story")
+                continue
+            payload = {
+                **repair_candidate.to_dict(),
+                "clone_story": payload["clone_story"],
+                "sic_story": payload["sic_story"],
+            }
+            repair_candidate = None
         try:
             candidate = VigvamcevCandidate.from_payload(payload)
         except (TypeError, ValueError) as exc:
@@ -713,6 +736,8 @@ async def generate_candidate(
         errors = validate_candidate(candidate, state=state, corpus=corpus, settings=settings)
         previous_candidate = json.dumps(payload, ensure_ascii=False)
         if errors:
+            if len(errors) == 1 and errors[0].startswith("caption имеет длину"):
+                repair_candidate = candidate
             failures.append(f"попытка {attempt + 1}: " + "; ".join(errors[:4]))
             retry_feedback = "; ".join(errors[:6])
             overhead = len(format_caption(candidate, hashtags=settings.story_hashtags)) - len(candidate.story)
@@ -1304,12 +1329,32 @@ class VigvamcevService:
                 force_new = action in {"regenerate", "new"}
                 if action == "retry":
                     state = self._state(self.load_memory())
-                    force_new = state.get("draft", {}).get("status") == "ready"
+                    draft = state.get("draft", {})
+                    force_new = draft.get("status") == "ready" and not draft.get("preview_pending")
                 prepared = await self.prepare_draft(force_new=force_new)
-                await message.reply_photo(
-                    photo=InputFile(prepared.image_path.read_bytes(), filename=prepared.image_path.name),
-                    caption=format_caption(prepared.candidate, hashtags=self.settings.story_hashtags),
-                )
+                memory = self.load_memory()
+                draft = self._state(memory).get("draft", {})
+                if draft.get("image_sha256") != prepared.image_sha256:
+                    raise DraftError("draft изменился; запроси /vigvamcev preview")
+                draft["preview_pending"] = True
+                self._save(memory)
+                try:
+                    await message.reply_photo(
+                        photo=InputFile(prepared.image_path.read_bytes(), filename=prepared.image_path.name),
+                        caption=format_caption(prepared.candidate, hashtags=self.settings.story_hashtags),
+                        connect_timeout=30, read_timeout=120, write_timeout=120, pool_timeout=30,
+                    )
+                except NetworkError:
+                    await message.reply_text(
+                        "Пост готов и сохранён, но отправка фото в Telegram не подтверждена. "
+                        "/vigvamcev preview или /vigvamcev retry повторит отправку этого поста."
+                    )
+                    return
+                memory = self.load_memory()
+                draft = self._state(memory).get("draft", {})
+                if draft.get("image_sha256") == prepared.image_sha256:
+                    draft["preview_pending"] = False
+                    self._save(memory)
             elif action == "unlock":
                 memory_unlock = self.load_memory()
                 state_unlock = self._state(memory_unlock)

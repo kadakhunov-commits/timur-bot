@@ -8,6 +8,7 @@ from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -214,13 +215,15 @@ def test_text_stage_retries_with_local_validation_feedback() -> None:
     settings = _settings(max_stage_attempts=2, text_retry_backoff_seconds=0)
     state = default_vigvamcev_state(corpus, settings)
     valid = _candidate()
-    invalid = replace(valid, story=valid.story.split("SIC:")[0].strip())
+    invalid = replace(valid, story=valid.story + " Сотрудники снова перепроверили все записи." * 15)
     prompts: list[str] = []
 
     async def text_request(prompt: str, _max_tokens: int) -> str:
         prompts.append(prompt)
-        candidate = invalid if len(prompts) == 1 else valid
-        return json.dumps(candidate.to_dict(hashtags=settings.story_hashtags), ensure_ascii=False)
+        if len(prompts) == 1:
+            return json.dumps(invalid.to_dict(hashtags=settings.story_hashtags), ensure_ascii=False)
+        clone, sic = valid.story.split("\n\nSIC: ")
+        return json.dumps({"clone_story": clone.removeprefix("Клон: "), "sic_story": sic, "clone_name": "Неиспользоватьцев"}, ensure_ascii=False)
 
     async def reviewer(_prompt: str, _max_tokens: int) -> str:
         return '{"ok": true}'
@@ -239,10 +242,11 @@ def test_text_stage_retries_with_local_validation_feedback() -> None:
 
     assert result.clone_name == "Фотонцев"
     assert len(prompts) == 2
-    assert "в истории нет блока «SIC: …»" in prompts[1]
-    assert "caption имеет длину" in prompts[1]
-    assert json.dumps(invalid.to_dict(hashtags=settings.story_hashtags), ensure_ascii=False) in prompts[1]
-    assert f"длина поля story сейчас {len(invalid.story)}" in prompts[1]
+    assert invalid.story in prompts[1]
+    assert f"Длина двух блоков с заголовками сейчас: {len(invalid.story)}" in prompts[1]
+    assert "Сжатый корпус канона" not in prompts[1]
+    assert result.story == valid.story
+    assert result.ability == valid.ability
 
 
 def test_reviewer_stage_retries_transient_provider_timeout() -> None:
@@ -529,6 +533,16 @@ def test_regenerate_command_replaces_preview_and_publish_uses_latest_draft(tmp_p
     assert state["config"]["vigvamcev"]["post_no"] == 22
     assert state["config"]["vigvamcev"]["experiment_no"] == 44
     assert state["config"]["vigvamcev"]["history"] == []
+    assert image_client.calls == 2
+
+    failed_preview = _OwnerPreviewMessage("/vigvamcev preview")
+    failed_preview.reply_photo = AsyncMock(side_effect=TimedOut("connection timed out"))
+    asyncio.run(service.handle_owner_command(SimpleNamespace(effective_message=failed_preview), SimpleNamespace(application=None)))
+    assert state["config"]["vigvamcev"]["draft"]["preview_pending"] is True
+    resend = _OwnerPreviewMessage("/vigvamcev retry")
+    asyncio.run(service.handle_owner_command(SimpleNamespace(effective_message=resend), SimpleNamespace(application=None)))
+    assert len(resend.photo_calls) == 1
+    assert state["config"]["vigvamcev"]["draft"]["preview_pending"] is False
     assert image_client.calls == 2
 
     published = asyncio.run(service.publish(SimpleNamespace(bot=bot), force=True, now=datetime(2026, 8, 22, 13, 0)))
