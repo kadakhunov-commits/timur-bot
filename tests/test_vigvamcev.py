@@ -106,10 +106,14 @@ def test_name_and_candidate_validation_follow_series_rules() -> None:
     state = default_vigvamcev_state(corpus, settings)
     candidate = _candidate()
 
-    assert clone_name_from_word("фотон") == "Фотонцев"
-    assert clone_name_from_word("антенна") == "Антенцев"
-    assert clone_name_from_word("гравитация") == "Гравитацев"
-    assert clone_name_from_word("параллелограмм") == "Параллелограммцев"
+    assert clone_name_from_word("фотон", corpus.name_forms) == "Фотонцев"
+    assert clone_name_from_word("антенна", corpus.name_forms) == "Антенцев"
+    assert clone_name_from_word("бездна", corpus.name_forms) == ""
+    assert clone_name_from_word("параллелограмм", corpus.name_forms) == "Параллелограммцев"
+    assert clone_name_from_word("свистопляс", corpus.name_forms) == "Свистоплясцев"
+    assert "source_word отсутствует в разрешённом словаре" in validate_candidate(
+        replace(candidate, source_word="бездна", clone_name="Безднцев"), state=state, corpus=corpus, settings=settings,
+    )
     assert len(format_caption(candidate, hashtags=settings.story_hashtags)) in range(600, 901)
     assert validate_candidate(candidate, state=state, corpus=corpus, settings=settings) == []
 
@@ -164,7 +168,7 @@ def test_candidate_payload_derives_clone_name_and_updates_story() -> None:
     payload["clone_name"] = "Фотоновцев"
     payload["story"] = str(payload["story"]).replace("Фотонцев", "Фотоновцев")
 
-    candidate = VigvamcevCandidate.from_payload(payload)
+    candidate = VigvamcevCandidate.from_payload(payload, name_forms=CanonCorpus.load(CORPUS_ROOT).name_forms)
 
     assert candidate.clone_name == "Фотонцев"
     assert "Фотоновцев" not in candidate.story
