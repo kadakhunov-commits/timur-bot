@@ -166,6 +166,10 @@ def test_candidate_payload_derives_clone_name_and_updates_story() -> None:
     assert candidate.clone_name == "Фотонцев"
     assert "Фотоновцев" not in candidate.story
     assert "Фотонцева" in candidate.story
+    payload["clone_story"] = "Новый клон появился после сбоя."
+    payload["sic_story"] = "Фонд продолжает расследование."
+    candidate = VigvamcevCandidate.from_payload(payload)
+    assert candidate.story == "Клон: Новый клон появился после сбоя.\n\nSIC: Фонд продолжает расследование."
 
 
 def test_text_stage_retries_transient_provider_timeout() -> None:
@@ -232,6 +236,8 @@ def test_text_stage_retries_with_local_validation_feedback() -> None:
     assert len(prompts) == 2
     assert "в истории нет блока «SIC: …»" in prompts[1]
     assert "caption имеет длину" in prompts[1]
+    assert json.dumps(invalid.to_dict(hashtags=settings.story_hashtags), ensure_ascii=False) in prompts[1]
+    assert f"длина поля story сейчас {len(invalid.story)}" in prompts[1]
 
 
 def test_reviewer_stage_retries_transient_provider_timeout() -> None:
@@ -337,6 +343,9 @@ def test_polza_media_client_uploads_refs_and_polls_result(tmp_path: Path) -> Non
         ("GET", "/media/gen_123"),
         ("GET", "/media/gen_123"),
     ]
+    # A later attempt must not reuse a URL for an expired TEMP_UPLOAD file.
+    asyncio.run(client.generate_scene(prompt="повтор", reference_paths=[reference]))
+    assert sum(path == "/storage/upload" for _, path, _ in calls) == 2
 
 
 class _FakeImageClient:
@@ -588,6 +597,26 @@ def test_schedule_is_due_only_after_configured_time(tmp_path: Path) -> None:
     assert service.is_due(datetime(2026, 8, 20, 13, 0), current_state) is True
     current_state["last_published"] = {"published_date": "2026-08-20"}
     assert service.is_due(datetime(2026, 8, 20, 13, 1), current_state) is False
+
+    current_state["last_published"] = {}
+    current_state["retry_state"] = {
+        "date": "2026-08-20", "attempts": 1, "next_retry_at": "2026-08-20T13:05:00",
+    }
+    notices = []
+
+    async def notify(_application, text):
+        notices.append(text)
+
+    service._notify_owner = notify
+    asyncio.run(service.maybe_publish(None, now=datetime(2026, 8, 20, 13, 1)))
+    assert notices == []
+    state["config"]["vigvamcev"]["retry_state"]["attempts"] = service.settings.max_stage_attempts
+    asyncio.run(service.maybe_publish(None, now=datetime(2026, 8, 20, 13, 6)))
+    assert len(notices) == 1
+    restarted, _, _ = _service(tmp_path, memory=state)
+    restarted._notify_owner = notify
+    asyncio.run(restarted.maybe_publish(None, now=datetime(2026, 8, 20, 13, 7)))
+    assert len(notices) == 1
 
 
 def test_prepare_full_mode_uses_model_poster_without_compose(tmp_path: Path) -> None:

@@ -421,6 +421,8 @@ class VigvamcevCandidate:
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> "VigvamcevCandidate":
         story = _normalise_story(payload.get("story") or payload.get("caption") or payload.get("public_story"))
+        if payload.get("clone_story") and payload.get("sic_story"):
+            story = f"Клон: {_as_text(payload['clone_story'])}\n\nSIC: {_as_text(payload['sic_story'])}"
         source_word = _as_text(payload.get("source_word"))
         provided_name = _as_text(payload.get("clone_name"))
         clone_name = clone_name_from_word(source_word) or provided_name
@@ -569,7 +571,7 @@ def build_story_prompt(
     for item in _safe_recent_history(state):
         recent.append(
             f"- пост {item.get('post_no')}, эксперимент {item.get('experiment_no')}, "
-            f"имя {item.get('clone_name')}: {_compact_text(str(item.get('story', item.get('caption', ''))), 650)}"
+            f"имя {item.get('clone_name')}: {item.get('story', item.get('caption', ''))}"
         )
     recent_text = "\n".join(recent) or "- это первый новый выпуск после импортированного канона"
     words = ", ".join(sorted(corpus.name_words))
@@ -603,7 +605,8 @@ def build_story_prompt(
   "next_hook": "крючок следующего выпуска",
   "visual_brief": "описание сцены без текста на изображении",
   "novelty_tags": ["уникальный мотив", "уникальный визуальный приём"],
-  "story": "два блока «Клон: …» и «SIC: …», суммарно 560–800 знаков"
+  "clone_story": "текст о клоне без заголовка, около 300 знаков",
+  "sic_story": "продолжение общего сюжета SIC без заголовка, около 300 знаков"
 }}
 """.strip()
 
@@ -611,7 +614,7 @@ def build_story_prompt(
 def build_review_prompt(candidate: VigvamcevCandidate, state: Mapping[str, Any], settings: VigvamcevSettings) -> str:
     recent = _safe_recent_history(state, limit=5)
     recent_text = "\n".join(
-        f"- {item.get('clone_name')}: {_compact_text(str(item.get('story', item.get('caption', ''))), 500)}"
+        f"- {item.get('clone_name')}: {item.get('story', item.get('caption', ''))}"
         for item in recent
     ) or "нет предыдущих новых выпусков"
     return f"""{settings.review_prompt}
@@ -622,7 +625,8 @@ def build_review_prompt(candidate: VigvamcevCandidate, state: Mapping[str, Any],
 Последние выпуски:
 {recent_text}
 
-Диапазон полной подписи: {settings.caption_min_chars}–{settings.caption_max_chars} знаков.
+Точная длина полной подписи по Python: {len(format_caption(candidate, hashtags=settings.story_hashtags))} знаков.
+Допустимый диапазон: {settings.caption_min_chars}–{settings.caption_max_chars} знаков.
 Ответь строго так: {{"ok": true, "reason": "краткая причина"}} или {{"ok": false, "reason": "что исправить"}}.
 """.strip()
 
@@ -711,6 +715,7 @@ async def generate_candidate(
     base_prompt = build_story_prompt(corpus, state, settings, post_no=post_no, experiment_no=experiment_no)
     failures: list[str] = []
     retry_feedback = ""
+    previous_candidate = ""
     for attempt in range(settings.max_stage_attempts):
         prompt = base_prompt
         if retry_feedback:
@@ -718,6 +723,7 @@ async def generate_candidate(
                 "\n\nПредыдущая попытка отклонена локальной проверкой. Исправь перечисленные нарушения: "
                 + retry_feedback
                 + "\nВерни полностью исправленный JSON, сохранив требуемые два блока и диапазон длины."
+                + "\nКандидат для исправления:\n" + previous_candidate
             )
         try:
             raw = await text_request(prompt, settings.story_max_tokens)
@@ -737,9 +743,15 @@ async def generate_candidate(
             retry_feedback = "некорректные поля JSON: " + str(exc)[:300]
             continue
         errors = validate_candidate(candidate, state=state, corpus=corpus, settings=settings)
+        previous_candidate = json.dumps(payload, ensure_ascii=False)
         if errors:
             failures.append(f"попытка {attempt + 1}: " + "; ".join(errors[:4]))
             retry_feedback = "; ".join(errors[:6])
+            overhead = len(format_caption(candidate, hashtags=settings.story_hashtags)) - len(candidate.story)
+            retry_feedback += (
+                f"; длина поля story сейчас {len(candidate.story)}; допустимо "
+                f"{settings.caption_min_chars - overhead}–{settings.caption_max_chars - overhead} знаков"
+            )
             continue
         if reviewer is not None:
             try:
@@ -884,7 +896,6 @@ class VigvamcevService:
         self.compose = compose
         self._lock = asyncio.Lock()
         self._task: asyncio.Task | None = None
-        self._notified_retry_dates: set[str] = set()
 
     def _state(self, memory: dict[str, Any]) -> dict[str, Any]:
         return ensure_vigvamcev_state(memory.setdefault("config", {}), self.corpus, self.settings)
@@ -1370,9 +1381,16 @@ class VigvamcevService:
             return
         if not self._retry_allowed(state, current):
             date_key = current.date().isoformat()
-            if date_key not in self._notified_retry_dates:
-                self._notified_retry_dates.add(date_key)
-                await self._notify_owner(application, "VIGVAMЦЕВ: дневной лимит автоматических попыток исчерпан; используй /vigvamcev retry или /vigvamcev publish.")
+            retry = state["retry_state"]
+            if int(retry.get("attempts", 0)) >= self.settings.max_stage_attempts and retry.get("notified_date") != date_key:
+                retry["notified_date"] = date_key
+                self._save(memory)
+                await self._notify_owner(
+                    application,
+                    "VIGVAMЦЕВ: дневной лимит автоматических попыток исчерпан. "
+                    "Последняя ошибка: " + str(state.get("last_error") or "неизвестна")[:500]
+                    + "\nПовторить: /vigvamcev retry; посмотреть: /vigvamcev preview.",
+                )
             self._save(memory)
             return
         self._save(memory)

@@ -50,7 +50,6 @@ class PolzaImageClient:
         self._request_json_impl = request_json or self._request_json
         self._download_url_impl = download_url or self._download_url
         self._sleep = sleep or asyncio.sleep
-        self._reference_cache: Dict[tuple[str, int, int], str] = {}
 
     @property
     def configured(self) -> bool:
@@ -97,11 +96,7 @@ class PolzaImageClient:
         path = Path(path)
         if not path.exists() or not path.is_file():
             raise PolzaImageError(f"не найден visual reference: {path}")
-        stat = path.stat()
-        cache_key = (str(path.resolve()), int(stat.st_mtime_ns), int(stat.st_size))
-        cached = self._reference_cache.get(cache_key)
-        if cached:
-            return cached
+        # TEMP_UPLOAD URLs expire: upload afresh for every generation attempt.
         content = await asyncio.to_thread(path.read_bytes)
         mime_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         payload = {
@@ -113,7 +108,6 @@ class PolzaImageClient:
         url = response.get("url")
         if not isinstance(url, str) or not url.startswith("http"):
             raise PolzaImageError("Polza Storage API не вернул URL референса")
-        self._reference_cache[cache_key] = url
         return url
 
     @staticmethod
