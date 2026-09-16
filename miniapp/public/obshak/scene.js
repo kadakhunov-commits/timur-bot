@@ -8,6 +8,12 @@
   var FLOOR = 160;
   var CENTERS = [62, 100, 138, 176];
 
+  // Временно отсутствующие: персонаж рисуется «не открытым», как в видеоиграх —
+  // затемнённый силуэт с лейблом причины. Убрать строку — и сосед снова дома.
+  var AWAY = {
+    rustem: "В КАЗАНИ"
+  };
+
   function esc(value) {
     return String(value == null ? "" : value)
       .replace(/&/g, "&amp;")
@@ -310,13 +316,22 @@
     var topY = FLOOR - stackHeight;
     var avatarY = topY - 30;
     var leader = maxTotal > 0 && total >= maxTotal && total > 0;
-    var out = ['<g class="character' + (isMe ? " is-me" : "") + (animate ? " walk" : "") +
+    var awayLabel = AWAY[member.key] || "";
+    var out = ['<g class="character' + (isMe ? " is-me" : "") + (awayLabel ? " is-away" : "") + (animate ? " walk" : "") +
       '" style="--walk-delay:' + (index * 140 + 120) + 'ms" data-action="member" data-member="' + esc(member.key) +
-      '" role="button" tabindex="0" aria-label="' + esc(member.name) + ': ' + money(total) + '">'];
+      '" role="button" tabindex="0" aria-label="' + esc(member.name) + ": " + money(total) +
+      (awayLabel ? ", " + esc(awayLabel) : "") + '">'];
     out.push(rect(cx - 13, 156, 26, 5, "rgba(0,0,0,.25)"));
     out.push('<g class="stack">' + pedestal(cx, stackHeight, member.color) + "</g>");
     out.push('<g transform="translate(' + (cx - 16) + "," + avatarY + ') scale(2)"><g class="avatar-art">' +
       art.avatarRects(member.key) + "</g></g>");
+    if (awayLabel) {
+      // «Не открытый» персонаж: табличка с причиной. Сам спрайт приглушает CSS
+      // (.character.is-away), вуаль сверху не нужна — сквозь него видно фон.
+      // Табличка шире персонажа и может чуть налезать на соседа — так читается.
+      out.push(rect(cx - 28, avatarY + 9, 56, 13, "#12141c", ' class="away-plate" stroke="#3a3f52" stroke-width="1"'));
+      out.push(text(cx, avatarY + 19, awayLabel.toUpperCase(), "#eef1f7", 7.5, "middle", 700));
+    }
     if (leader) {
       out.push('<g transform="translate(' + (cx - 9) + "," + (avatarY - 13) + ')">' +
         '<g class="crown" transform="scale(2)">' + art.crownMarkup() + "</g></g>");
@@ -435,6 +450,7 @@
     animateCoin: animateCoin,
     hopMember: hopMember,
     hopCat: hopCat,
-    money: money
+    money: money,
+    awayLabels: AWAY
   };
 })();

@@ -1487,9 +1487,10 @@
 
   function showCatDialog() {
     var roast = state.data && state.data.roast;
-    if (!roast || !roast.text || !el.catRoot) { return; }
+    if (!roast || !roast.text) { return; }
     // Не перекрываем панель, если человек уже что-то открыл.
     if (state.panelSpec) { return; }
+    if (shouldNeighborSpeak() && showNeighborDialog(roast.text)) { return; }
     closeCatDialog();
     var node = document.createElement("div");
     node.className = "cat-dialog";
@@ -1507,9 +1508,63 @@
     state.catTimer = window.setTimeout(closeCatDialog, 9000);
   }
 
+  function shouldNeighborSpeak() {
+    // Примерно каждый второй вход реплику доставляет сосед, а не кот.
+    return neighborSpeaker() !== null && Math.random() < 0.5;
+  }
+
+  function neighborSpeaker() {
+    var members = (state.data && state.data.members) || [];
+    var away = scene.awayLabels || {};
+    var candidates = members.filter(function (member) {
+      return member.key !== state.me && !away[member.key];
+    });
+    if (!candidates.length) { return null; }
+    return candidates[Math.floor(Math.random() * candidates.length)];
+  }
+
+  function showNeighborDialog(text) {
+    var speaker = neighborSpeaker();
+    if (!speaker || !el.stage) { return false; }
+    var portrait = el.stage.querySelector('.character[data-member="' + speaker.key + '"]');
+    if (!portrait) { return false; }
+    var stageRect = el.stage.getBoundingClientRect();
+    var headRect = portrait.getBoundingClientRect();
+    if (!stageRect.width || !headRect.width) { return false; }
+    closeCatDialog();
+    var bubble = document.createElement("button");
+    bubble.type = "button";
+    bubble.className = "scene-bubble";
+    bubble.dataset.act = "cat-dialog-close";
+    bubble.textContent = text;
+    el.stage.appendChild(bubble);
+    // Центр по голове персонажа; если сверху не влезает — разворачиваем вниз.
+    var centerX = headRect.left - stageRect.left + headRect.width / 2;
+    var headTop = headRect.top - stageRect.top;
+    var bubbleRect = bubble.getBoundingClientRect();
+    var above = headTop - bubbleRect.height - 12;
+    if (above >= 0) {
+      bubble.style.left = centerX + "px";
+      bubble.style.top = headTop - 10 + "px";
+      bubble.style.transform = "translate(-50%, -100%)";
+    } else {
+      bubble.classList.add("is-below");
+      bubble.style.left = centerX + "px";
+      bubble.style.top = headRect.bottom - stageRect.top + 8 + "px";
+      bubble.style.transform = "translate(-50%, 0)";
+    }
+    sfx.hop();
+    scene.hopMember(el.stage, speaker.key);
+    haptic("light");
+    state.catTimer = window.setTimeout(closeCatDialog, 8000);
+    return true;
+  }
+
   function closeCatDialog() {
     if (state.catTimer) { window.clearTimeout(state.catTimer); state.catTimer = null; }
     if (el.catRoot) { el.catRoot.innerHTML = ""; }
+    var bubbles = el.stage ? el.stage.querySelectorAll(".scene-bubble") : [];
+    Array.prototype.forEach.call(bubbles, function (node) { node.remove(); });
   }
 
   // --- делегирование событий -------------------------------------------
